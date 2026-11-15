@@ -23,12 +23,12 @@ class HappyPath(Base):
         self.assertEqual(sh("git", "-C", str(self.main), "branch", "--show-current"), "main")
         self.assertEqual((self.run_dir / "queue.txt").read_text().split(), [])
         starts = self.calls("worker-start")
-        impl = [c for c in starts if "antigravity" in c]
+        impl = [c for c in starts if "ag-agent" in c]
         self.assertEqual(len(impl), 2)
         self.assertTrue(all("--keep-open" in c and "g-high" in c for c in impl))
-        reviews = [c for c in starts if "claude" in c]
+        reviews = [c for c in starts if "cl-agent" in c]
         self.assertEqual(len(reviews), 4)
-        self.assertTrue(all("--keep-open" not in c and "sonnet" in c for c in reviews))
+        self.assertTrue(all("--keep-open" not in c and "small" in c for c in reviews))
         self.assertEqual(self.st("WAITING_ON"), None)
 
     def test_wait_is_idempotent_while_worker_runs(self):
@@ -92,7 +92,7 @@ class GateAndFixes(Base):
         for _ in range(6):
             self.expect(10, "WAIT")
         last, _ = self.expect(20, "ESCALATE")
-        self.assertIn("task 01, tier standard, attempt 1, next rung antigravity:g-xhigh, replan allowed", last)
+        self.assertIn("task 01, tier standard, attempt 1, next rung ag:g@xhigh, replan allowed", last)
         hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
         self.assertIn(f"task=01 base={self.base}", hist)
         self.assertEqual(hist.count("VERDICT: FIX"), 3)
@@ -101,7 +101,7 @@ class GateAndFixes(Base):
         note.write_text("steps 1-2 done\n")
         self.behave("commit", "pass", "pass")
         last, _ = self.expect(10, "WAIT", "--architect-result",
-                              self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g-xhigh"))
+                              self.result_file(f"RESULT: ESCALATE {self.base} {note} ag:g@xhigh"))
         self.assertIn("g-xhigh", self.calls("worker-start")[-1])
         spec = Path(self.st("IMPLEMENT_SPEC_01")).read_text()
         self.assertIn("steps 1-2 done", spec)
@@ -143,7 +143,7 @@ class GateAndFixes(Base):
         self.assertIn(" review2", self.expect(10, "WAIT")[0])
         self.assertTrue(list((self.run_dir / "gates").glob("01-2.log")))
         self.expect(0, "QUEUE_EMPTY")
-        self.assertEqual(len([c for c in self.calls("worker-start") if "claude" in c]), 3)
+        self.assertEqual(len([c for c in self.calls("worker-start") if "cl-agent" in c]), 3)
 
 
 class TreeAndWorkers(Base):
@@ -226,7 +226,7 @@ class Prompts(Base):
         self.behave("fail")
         self.expect(10, "WAIT")
         self.expect(20, "ESCALATE")
-        bad = self.result_file(f"RESULT: ESCALATE {self.base} /dev/null claude:sonnet")
+        bad = self.result_file(f"RESULT: ESCALATE {self.base} /dev/null cl:big@high")
         self.expect(20, "ESCALATE", "--architect-result", bad)
         last, _ = self.expect(30, "PROMPT", "--architect-result", bad)
         self.assertIn("rejected twice", Path(last.split()[1]).read_text())
@@ -239,7 +239,7 @@ class Prompts(Base):
         note = self.tmp / "note.md"
         note.write_text("n\n")
         self.expect(20, "ESCALATE", "--architect-result",
-                    self.result_file(f"RESULT: ESCALATE {self.older} {note} antigravity:g-xhigh"))
+                    self.result_file(f"RESULT: ESCALATE {self.older} {note} ag:g@xhigh"))
         hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
         self.assertIn("not between the task's base", hist)
         self.assertEqual(self.impl_head(), self.st("WORKER_HEAD_01"))  # nothing was reset
@@ -268,7 +268,7 @@ class Prompts(Base):
         note = self.tmp / "note.md"
         note.write_text("n\n")
         self.expect(20, "ESCALATE", "--architect-result",
-                    self.result_file(f"RESULT: ESCALATE {side} {note} antigravity:g-xhigh"))
+                    self.result_file(f"RESULT: ESCALATE {side} {note} ag:g@xhigh"))
         self.assertIn("not between the task's base", (self.run_dir / "verdicts" / "01-history.md").read_text())
         self.assertEqual(self.impl_head(), head)
 
@@ -298,7 +298,7 @@ class Prompts(Base):
         note.write_text("n\n")
         self.behave("commit", "pass", "pass")
         self.expect(10, "WAIT", "--architect-result",
-                    self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g-xhigh"))
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} ag:g@xhigh"))
         for k in ("STAGE_FIX_ROUNDS_01_S1", "STAGE_FIX_ROUNDS_01_S2", "GATE_FIX_ROUNDS_01", "TOTAL_FIX_ROUNDS_01"):
             self.assertEqual(self.st(k), "0", k)
 
@@ -324,6 +324,72 @@ class Prompts(Base):
         sh("git", "-C", str(self.main), "switch", "-q", "main")
         _, lines = self.expect(0, "QUEUE_EMPTY", "--reply", "continue")
         self.assertTrue(lines[0].startswith("MERGED 01"))
+
+
+class PicksAndLadder(Base):
+    def use_up_ladder(self):
+        """Fail the first attempt and both rungs; stop at the third escalation."""
+        self.behave("fail", "fail", "fail")
+        self.expect(10, "WAIT")
+        note = self.tmp / "note.md"
+        note.write_text("n\n")
+        last, _ = self.expect(20, "ESCALATE")
+        self.assertIn("next rung ag:g@xhigh", last)
+        self.expect(10, "WAIT", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} ag:g@xhigh"))
+        last, _ = self.expect(20, "ESCALATE")
+        self.assertIn("attempt 2, next rung cl:big@high", last)
+        self.expect(10, "WAIT", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} cl:big@high"))
+        last, _ = self.expect(20, "ESCALATE")
+        self.assertIn("attempt 3, ladder used up, replan allowed", last)
+        return note
+
+    def test_old_format_state_refused(self):
+        s = self.st()
+        del s["ROLE_ARCHITECT"]
+        self.state.write_text(json.dumps(s))
+        rc, last, _ = self.adv()
+        self.assertEqual((rc, last.split()[:2]), (2, ["ERROR", "OLD_FORMAT_RUN"]))
+
+    def test_ladder_from_picks(self):
+        self.use_up_ladder()
+        self.assertEqual(self.st("PAIR_01"), "cl:big@high")
+
+    def test_past_ladder_pair_is_probed_first(self):
+        note = self.use_up_ladder()
+        self.behave("ok", "pending")
+        last, _ = self.expect(10, "WAIT", "--architect-result",
+                              self.result_file(f"RESULT: ESCALATE {self.base} {note} cl:small@low"))
+        self.assertTrue(last.endswith(" probe"), last)
+        self.assertEqual(self.st("LOOP_01"), "probe:3")
+        self.assertEqual(self.st("PAIR_01"), "cl:big@high")
+        last, _ = self.expect(10, "WAIT")
+        self.assertTrue(last.endswith(" impl"), last)
+        self.assertEqual(self.st("PAIR_01"), "cl:small@low")
+        self.assertEqual(self.st("LAUNCH_STYLE_cl_small_low"), "flag")
+        self.assertIn("--effort", self.calls("worker-start")[-1])
+
+    def test_failed_probe_rejects_the_answer(self):
+        note = self.use_up_ladder()
+        self.behave("fail")
+        self.expect(10, "WAIT", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} cl:small@low"))
+        last, _ = self.expect(20, "ESCALATE")
+        hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
+        self.assertIn("launch test for cl:small@low failed; see", hist)
+        self.assertIn("probe-cl_small_low.md", hist)
+        self.assertEqual(self.st("LOOP_01"), "escalating")
+        self.assertEqual(self.st("PAIR_01"), "cl:big@high")
+
+    def test_launch_uses_recorded_style(self):
+        s = self.st()
+        s["LAUNCH_STYLE_ag_g_high"] = "flag"
+        self.state.write_text(json.dumps(s))
+        self.behave("pending")
+        self.expect(10, "WAIT")
+        call = self.calls("worker-start")[0]
+        self.assertEqual(call[call.index("--model"):call.index("--model") + 4], ["--model", "g", "--effort", "high"])
 
 
 class Replan(Base):

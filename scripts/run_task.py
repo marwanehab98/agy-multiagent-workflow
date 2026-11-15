@@ -14,12 +14,17 @@ Usage:
 The last line of stdout is the status; earlier lines are events (MERGED ...).
 Exit 0   QUEUE_EMPTY                       every queued task is merged
 Exit 10  WAIT <dispatch> <kind>            end your turn; call advance again when woken
-Exit 20  ESCALATE <input>                  send architect job escalate with INPUT=<input>
+Exit 20  ESCALATE <input>                  send architect job escalate with INPUT=<input>, which reads
+                                           task <id>, tier <tier>, attempt <a>, next rung <pair>|ladder used up,
+                                           replan allowed|not allowed, history <file>
 Exit 21  FIX_META <validate output file>   send architect job fix-meta with INPUT=<file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
 Exit 40  STOP <reason>                     dispatch nothing more; coordinator Step 8 item 7
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
+
+An escalation answer past the ladder (ESCALATE said "ladder used up") is test-launched first
+(phase probe:<attempt>, via probe.Prober); a failed test counts as a rejected answer.
 """
 import argparse
 import sys
@@ -28,6 +33,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR, VERDICTS, Done, Orca, Run,  # noqa: E402
                     build, git, last_line, next_free, poll, run, save_body, tool, verdict_line)
+from pairs import ladder, pair_key, parse_pair  # noqa: E402
+from probe import Prober  # noqa: E402
 
 
 def read_meta(path):
@@ -44,6 +51,7 @@ def read_meta(path):
 class Loop:
     def __init__(self, state_path):
         self.r = Run(state_path)
+        self.r.require_new_format()
         self.o = Orca(self.r)
         self.events = []
 
@@ -294,8 +302,8 @@ class Loop:
         self.o.release(r.get(f"IMPL_DISPATCH_{t}"))
         a = r.incr(f"ATTEMPT_{t}")
         meta = self.meta(t)
-        ladder = meta.get("LADDER", "").split()
-        nxt = f"next rung {ladder[a - 1]}" if a <= len(ladder) else "ladder used up"
+        rungs = self.rungs(t)
+        nxt = f"next rung {rungs[a - 1]}" if a <= len(rungs) else "ladder used up"
         replan = "not allowed" if meta.get("REPLANNED_FROM") else "allowed"
         hist = r.run_dir / "verdicts" / f"{t}-history.md"
         parts = [f"task={t} base={r.need(f'BASE_SHA_{t}')} head={git(r.impl, 'rev-parse', 'HEAD')}\n"]
@@ -309,8 +317,16 @@ class Loop:
         r.log(f"{t} escalation attempt {a}: {nxt}")
         raise Done(ESCALATE, f"ESCALATE {line}")
 
+    def rungs(self, t):
+        """The escalation ladder for task t, computed from the role picks and the task's first implementer."""
+        r = self.r
+        return ladder(parse_pair(r.need("ROLE_BASE")), r.need("BASE_TOP"), parse_pair(r.need("ROLE_ARCHITECT")),
+                      parse_pair(self.meta(t)["IMPLEMENTER"]))
+
     def reject(self, t, why):
         r = self.r
+        r.set(**{f"ESC_PENDING_{t}": None})
+        self.set_phase(t, "escalating", WAITING_ON="architect")
         hist = r.run_dir / "verdicts" / f"{t}-history.md"
         with hist.open("a", encoding="utf-8") as f:
             f.write(f"\n=== Rejected architect answer\n{why}\n")
@@ -349,35 +365,19 @@ class Loop:
         a = int(r.need(f"ATTEMPT_{t}"))
         if kind == "ESCALATE" and len(words) == 5:
             sha, note, pair = words[2:5]
-            rc, out = tool("validate_meta.py", "tasks", "--tasks-dir", str(self.r.docs / "tasks"),
-                           "--gemini-model", r.need("GEMINI_MODEL"), "--ids", t)
+            state = ("--state", str(r.path))
+            rc, out = tool("validate_meta.py", "tasks", *state, "--tasks-dir", str(r.docs / "tasks"), "--ids", t)
             if rc != 0:
                 return self.reject(t, out)
-            meta = self.meta(t)
-            ladder = meta.get("LADDER", "").split()
-            used_up = a > len(ladder)
-            if not used_up and pair != ladder[a - 1]:
-                return self.reject(t, f"pair {pair} is not rung {a} of LADDER ({' '.join(ladder)})")
-            allow = "yes" if used_up or pair == ladder[a - 1] else "no"
-            rc, out = tool("validate_meta.py", "pair", "--pair", pair, "--tier", meta["TIER"],
-                           "--gemini-model", r.need("GEMINI_MODEL"), "--allow-opus", allow)
+            past = a > len(self.rungs(t))
+            rc, out = tool("validate_meta.py", "pair", *state, "--task-meta", str(r.task_file(t, ".meta")),
+                           "--pair", pair, "--attempt", str(a), "--past-ladder", "yes" if past else "no")
             if rc != 0:
                 return self.reject(t, out)
-            if not self.in_range(t, sha):
-                return self.reject(t, self.range_msg(t, sha))
-            rc, out = tool("discard-changes.sh", r.impl, sha)
-            if rc != 0:
-                raise Done(ERROR, f"ERROR RESET {out}")
-            spec = build("escalate.txt", r.run_dir / "specs" / f"{t}-attempt{a}.txt",
-                              {"TASK_TITLE": meta["TITLE"], "RESET_SHA": sha},
-                              {"NOTE": note, "DECISIONS": r.task_file(t, "-decisions.md"),
-                               "IMPLEMENT_SPEC": r.run_dir / "specs" / f"{t}-implement.txt"})
-            r.set(**{f"IMPLEMENT_SPEC_{t}": spec, f"PAIR_{t}": pair,
-                     f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
-                     f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
-                     f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0})
-            r.log(f"{t} escalation attempt {a} on {pair} from {sha}")
-            return self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
+            if past:
+                r.set(**{f"ESC_PENDING_{t}": f"{sha} {note} {pair}"})
+                return self.set_phase(t, f"probe:{a}")
+            return self.start_attempt(t, sha, note, pair)
         if kind == "REPLAN" and len(words) >= 4:
             if meta.get("REPLANNED_FROM"):
                 return self.reject(t, "Replan is not allowed for this task")
@@ -387,12 +387,47 @@ class Loop:
             return self.apply_replan(t, " ".join(words[2:]))
         return self.reject(t, f"unrecognised answer: {' '.join(words)[:300]}")
 
+    def start_attempt(self, t, sha, note, pair):
+        """Reset to the architect's sha and start the escalation attempt on `pair`."""
+        r = self.r
+        a = int(r.need(f"ATTEMPT_{t}"))
+        meta = self.meta(t)
+        if not self.in_range(t, sha):
+            return self.reject(t, self.range_msg(t, sha))
+        rc, out = tool("discard-changes.sh", r.impl, sha)
+        if rc != 0:
+            raise Done(ERROR, f"ERROR RESET {out}")
+        spec = build("escalate.txt", r.run_dir / "specs" / f"{t}-attempt{a}.txt",
+                          {"TASK_TITLE": meta["TITLE"], "RESET_SHA": sha},
+                          {"NOTE": note, "DECISIONS": r.task_file(t, "-decisions.md"),
+                           "IMPLEMENT_SPEC": r.run_dir / "specs" / f"{t}-implement.txt"})
+        r.set(**{f"IMPLEMENT_SPEC_{t}": spec, f"PAIR_{t}": pair, f"ESC_PENDING_{t}": None,
+                 f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
+                 f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
+                 f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0})
+        r.log(f"{t} escalation attempt {a} on {pair} from {sha}")
+        return self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
+
+    def do_probe(self, t):
+        """Test-launch the pair the architect chose past the ladder, then start the attempt."""
+        r = self.r
+        sha, note, pair = r.need(f"ESC_PENDING_{t}").split()
+        try:
+            Prober(r, self.o).advance([pair])
+        except Done as d:
+            if d.code == WAIT:
+                r.set(WAITING_ON=r.get(f"PROBE_DISPATCH_{pair_key(parse_pair(pair))}") or "probe")
+            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
+                return self.reject(t, f"launch test for {pair} failed; see {d.line.split()[-1]}")
+            raise
+        self.start_attempt(t, sha, note, pair)
+
     def apply_replan(self, t, pending):
         r = self.r
         sha, *ids = pending.split()
         out_file = next_free(r.run_dir, "validate-{n}.txt")
-        rc, out = tool("validate_meta.py", "tasks", "--tasks-dir", str(r.docs / "tasks"), "--gemini-model",
-                       r.need("GEMINI_MODEL"), "--ids", " ".join(ids), "--replanned-from", t)
+        rc, out = tool("validate_meta.py", "tasks", "--state", str(r.path), "--tasks-dir", str(r.docs / "tasks"),
+                       "--ids", " ".join(ids), "--replanned-from", t)
         out_file.write_text(out + "\n", encoding="utf-8")
         if rc != 0:
             if r.incr("META_FAILS") >= 3:
@@ -519,6 +554,8 @@ class Loop:
                 self.do_check(t)
             elif phase == "merge":
                 self.do_merge(t)
+            elif phase.startswith("probe:"):
+                self.do_probe(t)
             elif phase == "escalating":
                 raise Done(ESCALATE, f"ESCALATE {self.r.need(f'ESC_INPUT_{t}')}")
             elif phase == "fixmeta":
@@ -539,13 +576,14 @@ def main():
     adv.add_argument("--architect-result")
     adv.add_argument("--reply")
     a = p.parse_args()
-    loop = Loop(a.state)
+    loop = None
     try:
+        loop = Loop(a.state)
         loop.advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line
-    for e in loop.events:
+    for e in loop.events if loop else []:
         print(e)
     print(line)
     return code

@@ -16,22 +16,9 @@ Rules enforced by the --state modes (design 2.1):
 - IMPLEMENTER is ROLE_BASE or its model at BASE_TOP, and never the exact ROLE_ARCHITECT pair.
 - Reviewers are in the architect's harness, with a detected model and effort.
 - complex: REVIEW_2 has the architect's harness and model (any effort); complex judgment: REVIEW_1 too.
-- ACS, --design coverage and --replanned-from work as below.
-
-LEGACY (to be removed in Task 7, while run_task.py still calls them): `tasks --gemini-model G ...` and
-`pair --pair --tier --gemini-model --allow-opus`, exactly as before:
-  python3 -I validate_meta.py tasks --tasks-dir <DOCS_DIR>/tasks --gemini-model <GEMINI_MODEL> --ids "01 02 03" [--design <DESIGN_FILE>] [--replanned-from <id>]
-  python3 -I validate_meta.py pair --pair <agent:model> --tier <standard|complex> --gemini-model <GEMINI_MODEL> --allow-opus <yes|no>
-Legacy rules:
-- Required keys: TITLE, TIER, SPEC_TYPE, ACS, IMPLEMENTER, REVIEW_1, REVIEW_2, LADDER (LADDER may be empty).
 - ACS lists the acceptance criteria the task delivers (e.g. "AC-1 AC-3"), or "none".
 - With --design, every AC-<n> in the design must be in some checked task's ACS, and every
   ACS entry must exist in the design. Pass it only when checking the whole queue.
-- Implementer pairs: antigravity:<gemini>-high, antigravity:<gemini>-xhigh, claude:sonnet, claude:opus.
-- claude:opus never as IMPLEMENTER; in LADDER only as the last rung and only for TIER=complex.
-- Reviewer pairs: claude:sonnet or claude:opus.
-- Review floors: complex needs REVIEW_2=claude:opus; complex + judgment also needs REVIEW_1=claude:opus.
-- LADDER has at most 3 rungs.
 - With --replanned-from <id>, every checked task needs REPLANNED_FROM=<id>, and together
   they must cover every AC in the replaced task's ACS.
 """
@@ -42,17 +29,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from pairs import ladder, parse_pair  # noqa: E402
+from pairs import Pair, ladder, parse_pair  # noqa: E402
 from roles import unknown_why  # noqa: E402
 
-REQUIRED = ["TITLE", "TIER", "SPEC_TYPE", "ACS", "IMPLEMENTER", "REVIEW_1", "REVIEW_2", "LADDER"]
+REQUIRED = ["TITLE", "TIER", "SPEC_TYPE", "ACS", "IMPLEMENTER", "REVIEW_1", "REVIEW_2"]
 AC = re.compile(r"\bAC-\d+\b")
-REVIEWERS = {"claude:sonnet", "claude:opus"}
-OPUS = "claude:opus"
-
-
-def implementers(gemini):
-    return {f"antigravity:{gemini}-high", f"antigravity:{gemini}-xhigh", "claude:sonnet", OPUS}
 
 
 def read_meta(path):
@@ -65,48 +46,6 @@ def read_meta(path):
         k, v = line.split("=", 1)
         values[k.strip()] = v.strip()
     return values
-
-
-def check_task(tid, meta, gemini):
-    p = []
-    for k in REQUIRED:
-        if k not in meta:
-            p.append(f"{tid}: missing {k}")
-    if p:
-        return p
-    tier, spec = meta["TIER"], meta["SPEC_TYPE"]
-    if tier not in ("standard", "complex"):
-        p.append(f"{tid}: TIER must be standard or complex, got {tier!r}")
-    if spec not in ("checklist", "judgment"):
-        p.append(f"{tid}: SPEC_TYPE must be checklist or judgment, got {spec!r}")
-    allowed = implementers(gemini)
-    impl = meta["IMPLEMENTER"]
-    if impl not in allowed:
-        p.append(f"{tid}: IMPLEMENTER {impl!r} not allowed; use one of {sorted(allowed - {OPUS})}")
-    elif impl == OPUS:
-        p.append(f"{tid}: IMPLEMENTER may not be {OPUS}; Opus implements only as the last LADDER rung")
-    for k in ("REVIEW_1", "REVIEW_2"):
-        if meta[k] not in REVIEWERS:
-            p.append(f"{tid}: {k} {meta[k]!r} not allowed; use claude:sonnet or claude:opus")
-    if tier == "complex" and meta["REVIEW_2"] != OPUS:
-        p.append(f"{tid}: complex tasks need REVIEW_2={OPUS}")
-    if tier == "complex" and spec == "judgment" and meta["REVIEW_1"] != OPUS:
-        p.append(f"{tid}: complex judgment tasks need REVIEW_1={OPUS}")
-    acs = meta["ACS"].split()
-    if acs != ["none"] and (not acs or any(not AC.fullmatch(x) for x in acs)):
-        p.append(f"{tid}: ACS must be AC-<n> ids separated by spaces, or none; got {meta['ACS']!r}")
-    ladder = meta["LADDER"].split()
-    if len(ladder) > 3:
-        p.append(f"{tid}: LADDER has {len(ladder)} rungs; at most 3")
-    for i, rung in enumerate(ladder):
-        if rung not in allowed:
-            p.append(f"{tid}: LADDER rung {i + 1} {rung!r} not allowed")
-        elif rung == OPUS and (i != len(ladder) - 1 or tier != "complex"):
-            p.append(f"{tid}: {OPUS} may only be the last LADDER rung of a complex task")
-    return p
-
-
-REQUIRED_NEW = REQUIRED[:-1]
 
 
 class Picks:
@@ -135,8 +74,8 @@ def own_harness_problem(picks, label, text):
     return f"{label} {text!r}: {why}" if why else None
 
 
-def check_task_new(tid, meta, picks):
-    p = [f"{tid}: missing {k}" for k in REQUIRED_NEW if k not in meta]
+def check_task(tid, meta, picks):
+    p = [f"{tid}: missing {k}" for k in REQUIRED if k not in meta]
     if "LADDER" in meta:
         p.append(f"{tid}: LADDER is no longer used; delete it")
     if p and any("missing" in x for x in p):
@@ -148,7 +87,7 @@ def check_task_new(tid, meta, picks):
         p.append(f"{tid}: SPEC_TYPE must be checklist or judgment, got {spec!r}")
     arch, base = picks.architect, picks.base
     impl = meta["IMPLEMENTER"]
-    top = type(base)(base.harness, base.model, picks.base_top)
+    top = Pair(base.harness, base.model, picks.base_top)
     try:
         ipair = parse_pair(impl)
     except ValueError as e:
@@ -186,21 +125,17 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="mode", required=True)
     t = sub.add_parser("tasks")
+    t.add_argument("--state", required=True)
     t.add_argument("--tasks-dir", required=True)
-    t.add_argument("--gemini-model")
-    t.add_argument("--state")
     t.add_argument("--ids", required=True)
     t.add_argument("--replanned-from")
     t.add_argument("--design")
     q = sub.add_parser("pair")
+    q.add_argument("--state", required=True)
+    q.add_argument("--task-meta", required=True)
     q.add_argument("--pair", required=True)
-    q.add_argument("--tier", choices=["standard", "complex"])
-    q.add_argument("--gemini-model")
-    q.add_argument("--allow-opus", choices=["yes", "no"])
-    q.add_argument("--state")
-    q.add_argument("--task-meta")
-    q.add_argument("--attempt", type=int)
-    q.add_argument("--past-ladder", choices=["yes", "no"])
+    q.add_argument("--attempt", type=int, required=True)
+    q.add_argument("--past-ladder", choices=["yes", "no"], required=True)
     h = sub.add_parser("harness-pair")
     h.add_argument("--state", required=True)
     h.add_argument("--pair", required=True)
@@ -208,24 +143,11 @@ def main():
         a = ap.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
-
-    legacy = getattr(a, "gemini_model", None) is not None
-    if a.mode == "tasks" and legacy == (a.state is not None):
-        print("tasks needs exactly one of --state or --gemini-model", file=sys.stderr)
-        return 64
-    if a.mode == "pair":
-        need = ("tier", "allow_opus") if legacy else ("state", "task_meta", "attempt", "past_ladder")
-        if a.state is not None and legacy or any(getattr(a, k) is None for k in need):
-            print("pair needs --state --task-meta --attempt --past-ladder, or the legacy "
-                  "--gemini-model --tier --allow-opus", file=sys.stderr)
-            return 64
-    picks = None
-    if getattr(a, "state", None):
-        try:
-            picks = Picks(a.state)
-        except (ValueError, OSError) as e:
-            print(f"PROBLEM state: {e}")
-            return 1
+    try:
+        picks = Picks(a.state)
+    except (ValueError, OSError) as e:
+        print(f"PROBLEM state: {e}")
+        return 1
 
     problems = []
     if a.mode == "tasks":
@@ -240,7 +162,7 @@ def main():
                     problems.append(f"{tid}: {other} not found")
             try:
                 meta = read_meta(path)
-                problems += check_task_new(tid, meta, picks) if picks else check_task(tid, meta, a.gemini_model)
+                problems += check_task(tid, meta, picks)
                 covered |= {x for x in meta.get("ACS", "").split() if AC.fullmatch(x)}
                 if a.replanned_from and meta.get("REPLANNED_FROM") != a.replanned_from:
                     problems.append(f"{tid}: needs REPLANNED_FROM={a.replanned_from}")
@@ -268,7 +190,7 @@ def main():
             problems.append(msg)
         else:
             print(f"OK {a.pair}")
-    elif picks:
+    else:
         try:
             pair = parse_pair(a.pair)
             first = parse_pair(read_meta(Path(a.task_meta))["IMPLEMENTER"])
@@ -286,14 +208,6 @@ def main():
                                     "only a user-approved pair may follow (--past-ladder yes)")
                 elif pair != rungs[a.attempt - 1]:
                     problems.append(f"pair {a.pair} is not rung {a.attempt} of the ladder ({' '.join(map(str, rungs))})")
-        if not problems:
-            print(f"OK {a.pair}")
-    else:
-        allowed = implementers(a.gemini_model)
-        if a.pair not in allowed:
-            problems.append(f"pair {a.pair!r} not allowed; use one of {sorted(allowed)}")
-        elif a.pair == OPUS and a.allow_opus != "yes":
-            problems.append(f"{OPUS} is only allowed as a complex task's last LADDER rung, or after the user approved it")
         if not problems:
             print(f"OK {a.pair}")
 

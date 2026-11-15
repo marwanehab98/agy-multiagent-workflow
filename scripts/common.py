@@ -8,9 +8,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR = 0, 10, 20, 21, 30, 40, 2
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))  # -I drops the script dir from sys.path
+from harnesses import launch_args, pick_style  # noqa: E402
+from pairs import parse_pair  # noqa: E402
 
+QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR = 0, 10, 20, 21, 30, 40, 2
 
 VERDICTS = ("VERDICT: PASS", "VERDICT: FIX")
 
@@ -117,11 +120,6 @@ def next_free(folder, pattern):
     return folder / pattern.format(n=n)
 
 
-def split_pair(pair):
-    agent, model = pair.split(":", 1)
-    return agent, model
-
-
 # ---------------------------------------------------------------- orca
 
 class Orca:
@@ -140,17 +138,18 @@ class Orca:
         return data
 
     def start(self, spec, title, pair, worktree, keep_open=False, terminal=None):
+        if not terminal:
+            return self.start_args(spec, title, self.launch(pair), worktree, keep_open)
         task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
-        args = ["worker-start", "--task", task, "--worktree", f"path:{worktree}"]
-        if terminal:
-            args += ["--terminal", terminal]
-        else:
-            agent, model = split_pair(pair)
-            args += ["--agent", agent, "--model", model]
-            if keep_open:
-                args.append("--keep-open")
-        res = self.call(*args)["result"]
+        res = self.call("worker-start", "--task", task, "--worktree", f"path:{worktree}",
+                        "--terminal", terminal)["result"]
         return res["dispatchId"], res.get("terminal", "")
+
+    def launch(self, pair):
+        """Agent arguments for a pair, in the launch style recorded for it (or the fallback style)."""
+        catalog = json.loads(Path(self.r.need("CATALOG")).read_text(encoding="utf-8"))
+        parsed = parse_pair(pair)
+        return launch_args(catalog, parsed, pick_style(catalog, self.r.s, parsed))
 
     def start_args(self, spec, title, args, worktree, keep_open=False):
         """Create a task and start a worker with the given agent args (e.g. from launch_args)."""

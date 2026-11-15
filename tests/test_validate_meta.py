@@ -142,6 +142,11 @@ class ValidateMetaTests(unittest.TestCase):
                                "--pair", "cl:big@high", "--attempt", "1", "--past-ladder", "no")
         self.assertEqual(rc, 0, out)
 
+    def test_first_rung_is_base_top_unless_architect_shares_it(self):
+        self.state(ROLE_ARCHITECT="ag:g@xhigh", ROLE_BASE="ag:g@high")
+        self.assertPair("ag:g@xhigh", attempt=1, ok=True)
+        self.assertPair("ag:g@high", attempt=1, ok=False)
+
     def test_harness_pair(self):
         def hp(pair):
             return self.run_cli("harness-pair", "--state", str(self.state_path), "--pair", pair)
@@ -189,17 +194,6 @@ class ValidateMetaTests(unittest.TestCase):
     def test_empty_acs_rejected(self):
         self.meta("03", "")
         self.assertProblem("ACS must be", ids="03")
-
-    def test_legacy_gemini_model_mode_still_works(self):
-        (self.tasks / "05.meta").write_text(
-            "TITLE=t\nTIER=standard\nSPEC_TYPE=checklist\nACS=AC-1\nIMPLEMENTER=antigravity:g-high\n"
-            "REVIEW_1=claude:sonnet\nREVIEW_2=claude:sonnet\nLADDER=antigravity:g-xhigh claude:sonnet\n")
-        for s in (".md", "-summary.md", "-decisions.md"):
-            (self.tasks / f"05{s}").write_text("x\n")
-        rc, out = self.run_cli("tasks", "--tasks-dir", str(self.tasks), "--gemini-model", "g", "--ids", "05")
-        self.assertEqual((rc, out.strip()), (0, "OK 05"))
-        rc, out = self.run_cli("pair", "--pair", "claude:opus", "--tier", "complex", "--gemini-model", "g", "--allow-opus", "no")
-        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

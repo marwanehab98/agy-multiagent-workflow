@@ -10,15 +10,15 @@ from pathlib import Path
 SKILL = Path(__file__).resolve().parent.parent
 RUN_TASK = SKILL / "scripts" / "run_task.py"
 FAKE = SKILL / "tests" / "fake_orca.py"
+CATALOG = SKILL / "tests" / "fixtures" / "catalog.json"
 
 META = """TITLE={title}
 TIER=standard
 SPEC_TYPE=checklist
 ACS={acs}
-IMPLEMENTER=antigravity:g-high
-REVIEW_1=claude:sonnet
-REVIEW_2=claude:sonnet
-LADDER=antigravity:g-xhigh claude:sonnet
+IMPLEMENTER=ag:g@high
+REVIEW_1=cl:small@high
+REVIEW_2=cl:small@high
 {extra}"""
 
 
@@ -64,11 +64,15 @@ class Base(unittest.TestCase):
         self.world = t / "world.json"
         self.world.write_text(json.dumps({"seq": 0, "messages": [], "tasks": {}, "dispatches": {},
                                           "behaviors": [], "calls": []}))
+        self.docs_wt = t / "docs-wt"
+        g("worktree", "add", "-q", "--detach", str(self.docs_wt), "feature")
         self.state = self.run_dir / "state.json"
         self.state.write_text(json.dumps({
             "ORCA": str(orca), "RUN_ID": "run_fake", "RUN_DIR": str(self.run_dir), "DOCS_DIR": str(self.docs),
             "IMPL_WORKTREE": str(self.impl), "MAIN_CHECKOUT": str(self.main), "FEATURE_BRANCH": "feature",
-            "LAST_MERGED": self.base, "GEMINI_MODEL": "g", "RUN_VALUES": str(rv),
+            "LAST_MERGED": self.base, "RUN_VALUES": str(rv),
+            "ROLE_COORDINATOR": "cl:small@high", "ROLE_ARCHITECT": "cl:big@high", "ROLE_EGM": "ag:g@high",
+            "ROLE_BASE": "ag:g@high", "BASE_TOP": "xhigh", "CATALOG": str(CATALOG), "DOCS_WORKTREE": str(self.docs_wt),
             "CONVENTION_PATHS": "CONTRIBUTING.md"}))
 
     def task(self, tid, acs, extra=""):
