@@ -269,6 +269,16 @@ class Fixes(Finish):
         last, _ = self.result("RESULT: PLAN_APPROVED", 2, "ERROR")
         self.assertIn("UNEXPECTED_ARCHITECT_RESULT", last)
 
+    def test_result_line_punctuation_and_prose_are_ignored(self):
+        self.to_job("fix")
+        self.result("RESULT: STOP. The user chose to stop after the review.", 40, "STOP")
+
+    def test_final_reviewer_gets_every_ac_id_from_the_design(self):
+        self.design.write_text("## Acceptance criteria\n- AC-1: adds\n- AC-2: errors\n- AC-10: tests\nAC-2 again\n")
+        self.first_review("pass")
+        spec = next(iter(json.loads(self.world.read_text())["tasks"].values()))["spec"]
+        self.assertIn("exactly these ids, in this order: AC-1 AC-2 AC-10", spec)
+
     def test_result_with_no_job_open_is_an_error(self):
         self.first_review("pass")
         self.result("RESULT: FINAL_CLEAN", 2, "ERROR")

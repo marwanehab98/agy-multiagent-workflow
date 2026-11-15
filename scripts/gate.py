@@ -3,10 +3,13 @@ back exactly at <head>, so build or test output never voids a later review.
 
 Usage:
   python3 -I gate.py --run-values <DOCS_DIR>/run-values.txt --worktree <path> --head <sha>
-      --log <file> [--prefix GATE|VERIFY]
+      --log <file> [--prefix GATE|VERIFY] [--skip "<name> <name>..."]
 
 --prefix GATE (the default) runs GATE_1, GATE_2, ... and falls back to VERIFY_1, ...
 when run-values has no GATE_ lines. --prefix VERIFY runs only VERIFY_ lines.
+--log may contain {n}: it becomes the first number with no existing file, so a rerun never
+overwrites an earlier log. --skip names checks (e.g. "VERIFY_1 VERIFY_2", from run-values'
+BASELINE_SKIP) that are logged as skipped and not run; a name the chosen checks lack is bad usage.
 Each command runs with the shell, from the worktree root. All commands run even after
 one fails, so the log shows every failure at once.
 Exit 0: every command passed and the worktree is clean at <head>.
@@ -43,11 +46,17 @@ def main():
     p.add_argument("--head", required=True)
     p.add_argument("--log", required=True)
     p.add_argument("--prefix", choices=["GATE", "VERIFY"], default="GATE")
+    p.add_argument("--skip", default="")
     a = p.parse_args()
 
     cmds = commands(a.run_values, a.prefix)
     if not cmds:
         print(f"NO_COMMANDS no {a.prefix}_n or VERIFY_n lines in {a.run_values}")
+        return 64
+    skip = a.skip.split()
+    unknown = [s for s in skip if s not in {name for _, name, _ in cmds}]
+    if unknown:
+        print(f"UNKNOWN_SKIP {' '.join(unknown)} (checks: {' '.join(name for _, name, _ in cmds)})")
         return 64
     head = git(a.worktree, "rev-parse", "HEAD").stdout.strip()
     want = git(a.worktree, "rev-parse", f"{a.head}^{{commit}}").stdout.strip()
@@ -57,10 +66,19 @@ def main():
 
     log = Path(a.log)
     log.parent.mkdir(parents=True, exist_ok=True)
+    if "{n}" in log.name:
+        n = 1
+        while (log.parent / log.name.format(n=n)).exists():
+            n += 1
+        log = log.parent / log.name.format(n=n)
     failed = []
     with log.open("w", encoding="utf-8") as f:
         f.write(f"worktree={a.worktree} head={want}\n")
         for _, name, cmd in cmds:
+            if name in skip:
+                f.write(f"\n=== {name} skipped (BASELINE_SKIP): {cmd}\n")
+                print(f"{name} skipped")
+                continue
             r = subprocess.run(cmd, shell=True, cwd=a.worktree, capture_output=True, text=True)
             f.write(f"\n=== {name}: {cmd}\n{r.stdout}{r.stderr}\n=== {name} exit={r.returncode}\n")
             print(f"{name} exit={r.returncode}")

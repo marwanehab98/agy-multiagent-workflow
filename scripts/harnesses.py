@@ -32,6 +32,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script 
 from pairs import EFFORTS, parse_pair, pair_key  # noqa: E402
 
 EXTRA_MODELS = ["haiku"]  # Claude Code has no command that lists models; the test launch proves each one
+# Models Orca launches with no --effort: its claude agent lists no effort option for them and refuses
+# `--effort` with invalid_argument, although `claude` itself accepts one (live test 2026-11-15).
+# They get the single effort `default`, which launches without --effort.
+NO_EFFORT_MODELS = {"haiku"}
 
 
 def real_runner(cmd):
@@ -140,7 +144,8 @@ class ClaudeAdapter(Adapter):
         names = list(dict.fromkeys(aliases + EXTRA_MODELS)) if aliases else []
         m = re.search(r"\(([^)]*)\)", self._option_text("--effort"))
         efforts = [e.strip() for e in m.group(1).split(",") if e.strip() in EFFORTS] if m else []
-        return [{"model": n, "label": n, "efforts": efforts or ["default"]} for n in names]
+        return [{"model": n, "label": n, "efforts": efforts if efforts and n not in NO_EFFORT_MODELS else ["default"]}
+                for n in names]
 
     def plugins(self):
         names, cur = [], None

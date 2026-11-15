@@ -20,6 +20,9 @@ Behaviors ({"do": ...}):
                          resolved in the worktree), settle succeeded. {"edit": true} also edits a tracked file
   write-empty            same, but the file is empty
 
+  commit-and-junk        commit work.txt, leave an untracked __pycache__/ file, settle succeeded
+World key "reject_rules" (optional): {"agent", "model", "effort"} entries that worker-start refuses with
+invalid_argument before any worker exists, as Orca does for an effort a model lacks.
 World key "launch_rules" (optional): a list of {"agent", "model", "effort"} (effort may be null = no --effort).
 When present, a worker-start matching no rule consumes no behavior and fails like a model the account lacks.
 """
@@ -102,6 +105,13 @@ def act(w, d, wt, b):
         git(wt, "rm", "-q", "BROKEN")
         git(wt, "commit", "-qm", "unbreak")
         done("succeeded", "removed BROKEN")
+    elif do == "commit-and-junk":
+        Path(wt, "work.txt").write_text("x\n")
+        git(wt, "add", "work.txt")
+        git(wt, "commit", "-qm", "add work.txt")
+        Path(wt, "__pycache__").mkdir(exist_ok=True)
+        Path(wt, "__pycache__", "work.cpython-313.pyc").write_text("bytecode\n")
+        done("succeeded", "committed work.txt; ran the tests")
     elif do == "dirty":
         Path(wt, "uncommitted.txt").write_text("x\n")
         done("succeeded", "left a file uncommitted")
@@ -188,6 +198,10 @@ def main(argv):
             d["worktree"] = wt
             w["dispatches"][did] = d
             d["effort"] = opt(args, "--effort")
+            if any((r["agent"], r["model"], r.get("effort")) == (agent, model, d["effort"])
+                   for r in w.get("reject_rules", [])):
+                del w["dispatches"][did]
+                return fail("invalid_argument", f"Agent {agent} model {model} does not support effort {d['effort']}.")
             rules = w.get("launch_rules")
             if rules is not None and not any((r["agent"], r["model"], r.get("effort")) == (agent, model, d["effort"])
                                             for r in rules):

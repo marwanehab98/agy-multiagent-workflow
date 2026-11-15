@@ -35,6 +35,8 @@ first moves PROBE_HEAD to the docs worktree's current HEAD, so an architect's co
 survive; the coordinator passes it after handling the RESULT of an architect job that ran during a wait.
 
 Rules the loop enforces (moved here from coordinator Step 4):
+- Uncommitted files after an implementer settles get one commit worker per implement or fix round
+  (COMMIT_ROUNDS_<id>); whatever it leaves uncommitted is removed with discard-changes.sh and logged.
 - One task at a time. A fresh implementer per task, kept open and reused for that task's fix rounds,
   released at merge or escalation.
 - The gate (gate.py) runs before every review; a failing gate goes straight to a fix round with the log.
@@ -56,7 +58,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR, Done, Orca, Run,  # noqa: E402
-                    build, git, next_free, pick_verdict, poll, run, save_body, tool, verdict_line)
+                    build, first_words, git, next_free, pick_verdict, poll, run, save_body, tool, verdict_line)
 from pairs import ladder, pair_key, parse_pair  # noqa: E402
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 
@@ -181,6 +183,8 @@ class Loop:
             r.log(f"{t} {kind} settled failed")
             return self.escalate(t)
         r.log(f"{t} {kind} settled succeeded")
+        if kind != "commit":
+            r.set(**{f"COMMIT_ROUNDS_{t}": 0})  # each implement or fix round gets one commit round
         self.set_phase(t, "check")
 
     def do_check(self, t):
@@ -188,7 +192,16 @@ class Loop:
         head = git(r.impl, "rev-parse", "HEAD")
         r.set(**{f"WORKER_HEAD_{t}": head})
         rc, out = tool("check-tree.sh", r.impl, head)
+        if rc == 2 and int(r.get(f"COMMIT_ROUNDS_{t}", "0")) >= 1:
+            # The commit worker left these on purpose: build output or caches (live test 2026-11-15: an
+            # untracked __pycache__ started commit workers forever). Remove them, as gate.py would.
+            rc, out = tool("discard-changes.sh", r.impl, head)
+            r.log(f"{t} removed what the commit worker left uncommitted: {' '.join(out.split())}")
+            if rc != 0:
+                raise Done(ERROR, f"ERROR RESET {out}")
+            rc, out = tool("check-tree.sh", r.impl, head)
         if rc == 2:
+            r.incr(f"COMMIT_ROUNDS_{t}")
             meta = self.meta(t)
             spec = build("commit-uncommitted.txt", next_free(r.run_dir / "specs", f"{t}-commit-{{n}}.txt"),
                               {"TASK_TITLE": meta["TITLE"]}, {"TASK": r.task_file(t, ".md")})
@@ -366,8 +379,7 @@ class Loop:
 
     def architect_result(self, t, path):
         r = self.r
-        text = Path(path).read_text(encoding="utf-8") if Path(path).is_file() else ""
-        words = next((l.split() for l in text.splitlines() if l.strip()), [])
+        words = first_words(path)
         phase = self.phase(t)
         if words[:2] == ["RESULT:", "STOP"] and phase in ("escalating", "fixmeta"):
             r.log(f"{t} architect chose STOP")

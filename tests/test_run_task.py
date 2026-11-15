@@ -112,6 +112,16 @@ class GateAndFixes(Base):
         self.expect(0, "QUEUE_EMPTY")
         self.assertEqual(self.st("LOOP_01"), "merged")
 
+    def test_result_line_with_trailing_prose_is_accepted(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.until(20, "ESCALATE")
+        note = self.tmp / "note.md"
+        note.write_text("steps 1-2 done\n")
+        self.behave("commit", "pass", "pass")
+        self.expect(10, "WAIT", "--architect-result", self.result_file(
+            f"`RESULT: ESCALATE {self.base} {note} ag:g@xhigh.` The next rung should manage; see the note.\nMore."))
+        self.assertIn("g-xhigh", self.calls("worker-start")[-1])
+
     def test_verdict_falls_back_to_the_settle_message(self):
         self.behave("commit", "pass-body-only", "pass")
         self.expect(10, "WAIT")
@@ -195,6 +205,26 @@ class TreeAndWorkers(Base):
         self.expect(10, "WAIT")
         self.expect(10, "WAIT")
         self.expect(0, "QUEUE_EMPTY")
+
+    def test_leftovers_after_one_commit_round_are_removed_not_looped(self):
+        # Live test 2026-11-15: an untracked __pycache__ started commit workers forever.
+        self.behave("commit-and-junk", "nocommit", "pass", "pass")
+        self.expect(10, "WAIT")
+        self.assertIn(" commit", self.expect(10, "WAIT")[0])
+        last, _ = self.expect(10, "WAIT")
+        self.assertIn("review1", last)
+        self.until(0, "QUEUE_EMPTY")
+        kinds = [c for c in self.calls("task-create")]
+        self.assertEqual(sum("Commit:" in " ".join(c) for c in kinds), 1)
+        log = (self.run_dir / "run-log.md").read_text()
+        self.assertIn("removed what the commit worker left uncommitted", log)
+        self.assertIn("__pycache__/work.cpython-313.pyc", log)
+
+    def test_a_new_round_gets_its_own_commit_round(self):
+        self.behave("dirty", "commit-all", "fix", "commit-and-junk", "nocommit", "pass", "pass")
+        self.until(0, "QUEUE_EMPTY")
+        kinds = [c for c in self.calls("task-create")]
+        self.assertEqual(sum("Commit:" in " ".join(c) for c in kinds), 2)
 
     def test_no_commits_escalates(self):
         self.behave("nocommit")

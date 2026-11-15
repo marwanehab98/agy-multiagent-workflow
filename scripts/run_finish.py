@@ -43,11 +43,12 @@ State keys: FIN_PHASE, FIN_DISPATCH, FIN_OUT, FIN_HEAD, FIN_JOB, FIN_LINE, FIN_F
 FIN_VERIFY_LOG, FINAL_N, VERIFY_K, VOIDS_FINAL, NO_VERDICT_FINAL, FIN_PROMPT_FILE, FIN_PROMPT_ACCEPT.
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (WAIT, ESCALATE, PROMPT, STOP, ERROR, Done, Orca, Run, build, next_free,  # noqa: E402
+from common import (WAIT, ESCALATE, PROMPT, STOP, ERROR, Done, Orca, Run, build, first_words, next_free,  # noqa: E402
                     pick_verdict, poll, save_body, tool, verdict_line)
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 
@@ -55,6 +56,18 @@ VERIFIED, RUN_QUEUE = 0, 21
 NUDGE = ("You ended your turn without settling this task. If a command you started is still running, "
          "wait for it in the foreground until it finishes. Then finish the task and settle worker_done, "
          "with outcome succeeded or failed.")
+
+
+def ac_ids(*files):
+    """Every AC-<n> id in the design and decisions log, in first-seen order, for the final reviewer's
+    one-line-per-criterion list (a reviewer skipped AC-7 when left to find them; live test 2026-11-15)."""
+    seen = []
+    for f in files:
+        p = Path(f)
+        for m in re.findall(r"\bAC-\d+\b", p.read_text(encoding="utf-8") if p.is_file() else ""):
+            if m not in seen:
+                seen.append(m)
+    return " ".join(seen) or "none (the design names no AC ids; check its acceptance criteria as written)"
 
 
 class Finish:
@@ -100,7 +113,8 @@ class Finish:
         out = r.run_dir / "verdicts" / f"final-{n}.md"
         spec = build("final-review.txt", next_free(r.run_dir / "specs", "final-review-{n}.txt"),
                      {"BASE_SHA": r.need("INITIAL_BASE_SHA"), "WORKER_HEAD": head,
-                      "CONVENTION_PATHS": r.need("CONVENTION_PATHS"), "OUTPUT_FILE": out},
+                      "CONVENTION_PATHS": r.need("CONVENTION_PATHS"), "OUTPUT_FILE": out,
+                      "AC_IDS": ac_ids(r.need("DESIGN_FILE"), r.need("DECISIONS_LOG"))},
                      {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG")})
         pair = r.need("ROLE_ARCHITECT")
         dispatch, _ = self.o.start(spec, f"Final review: {r.need('TOPIC')}", pair, r.impl)
@@ -193,8 +207,7 @@ class Finish:
     # -- the architect's answers
     def take_result(self, path):
         r = self.r
-        text = Path(path).read_text(encoding="utf-8") if Path(path).is_file() else ""
-        words = next((l.split() for l in text.splitlines() if l.strip()), [])
+        words = first_words(path)
         phase, job = self.phase(), r.get("FIN_JOB")
         if phase != "job" or words[:1] != ["RESULT:"] or len(words) < 2:
             raise Done(ERROR, f"ERROR UNEXPECTED_ARCHITECT_RESULT phase={phase}: {' '.join(words)[:300]}")

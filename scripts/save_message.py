@@ -6,11 +6,13 @@ Usage:
       (--dispatch <dispatch_id> --type <worker_done|question|escalation> | --id <message_id>)
       [--header <first line>] [--append]
 
+--out may contain {n}: it becomes the first number with no existing file. Without --append, an
+existing --out is never overwritten: it prints EXISTS <path> and exits 3, so an earlier settle survives.
 --dispatch picks the newest message of --type sent by that dispatch (matched on the
 payload's dispatchId). --header writes one line before the body. --append adds to the
 file instead of replacing it.
 Exit 0: saved; prints `SAVED <out> id=<message id> outcome=<outcome or ->`.
-Exit 1: no such message (prints NOT_FOUND).  Exit 2: the orca command failed.
+Exit 1: no such message (prints NOT_FOUND).  Exit 2: the orca command failed.  Exit 3: EXISTS.
 """
 import argparse
 import json
@@ -59,6 +61,16 @@ def main():
         print("give --id, or --dispatch with --type", file=sys.stderr)
         return 64
 
+    out = Path(a.out)
+    if "{n}" in out.name:
+        n = 1
+        while (out.parent / out.name.format(n=n)).exists():
+            n += 1
+        out = out.parent / out.name.format(n=n)
+    if out.exists() and not a.append:
+        print(f"EXISTS {out}")
+        return 3
+
     messages = sorted(inbox(a.orca, a.run), key=lambda m: m.get("sequence", 0), reverse=True)
     if a.id:
         found = next((m for m in messages if m["id"] == a.id), None)
@@ -70,7 +82,6 @@ def main():
         return 1
 
     text = (a.header + "\n" if a.header else "") + found["body"].rstrip("\n") + "\n"
-    out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("a" if a.append else "w", encoding="utf-8") as f:
         f.write(text)

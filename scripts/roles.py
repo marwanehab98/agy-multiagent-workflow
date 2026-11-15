@@ -115,6 +115,10 @@ def parse_pair_or_none(text):
         return None
 
 
+class MenuError(Exception):
+    """A --harness or --model the catalog doesn't list; the message is the line to print."""
+
+
 def menu(catalog, harness, model):
     rows = []
     if harness is None:
@@ -123,12 +127,16 @@ def menu(catalog, harness, model):
                 rows.append((name, f"{name} {h['version']}".strip()))
         broken = [f"BROKEN {n}: {h['broken']}" for n, h in catalog["harnesses"].items() if h.get("broken")]
     else:
-        h = catalog["harnesses"][harness]
+        h = catalog["harnesses"].get(harness)
+        if h is None:
+            raise MenuError(f"UNKNOWN harness {harness} (known: {', '.join(catalog['harnesses'])})")
         broken = []
         if model is None:
             rows = [(m["model"], m["label"]) for m in h["models"]]
         else:
-            m = next(m for m in h["models"] if m["model"] == model)
+            m = next((m for m in h["models"] if m["model"] == model), None)
+            if m is None:
+                raise MenuError(f"UNKNOWN model {model} for {harness} (known: {', '.join(x['model'] for x in h['models'])})")
             rows = [(e, e) for e in m["efforts"]]
     return [f"{i}\t{v}\t{label}" for i, (v, label) in enumerate(rows, 1)] + broken
 
@@ -172,7 +180,11 @@ def main(argv=None):
         return 64
     try:
         if a.cmd == "menu":
-            print("\n".join(menu(load_catalog(a.catalog), a.harness, a.model)))
+            try:
+                print("\n".join(menu(load_catalog(a.catalog), a.harness, a.model)))
+            except MenuError as e:
+                print(e)
+                return 1
         elif a.cmd == "check":
             lines, bad = check(load_catalog(a.catalog), a.jira == "yes", {x: getattr(a, x) for x in ROLES})
             print("\n".join(lines))

@@ -39,6 +39,7 @@ After each worker the docs worktree is put back to DOCS_HEAD, its HEAD when the 
 that reset never undoes an architect's commits; uncommitted worker changes are still discarded. The
 coordinator passes it on the first call after it handles the RESULT of an architect job that ran while
 this script waited, and never calls this script while such a job is in flight.
+A NEED egm also sets EGM_REQUESTED=yes, so the state shows the user chose EGM in a relay.
 State keys: DESIGN_PHASE, DESIGN_NEED, DESIGN_LINE, DESIGN_DISPATCH, DESIGN_OUT, DOCS_HEAD, EGM_SKILLS,
 LENS_FIRST, PLAN_REVIEW_LAST. Needs TOPIC, DOCS_WORKTREE, ROLE_EGM and CATALOG.
 """
@@ -48,7 +49,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import WAIT, ESCALATE, STOP, ERROR, Done, Orca, Run, build, git, next_free, poll, save_body, tool  # noqa: E402
+from common import WAIT, ESCALATE, STOP, ERROR, Done, Orca, Run, build, first_words, git, next_free, poll, save_body, tool  # noqa: E402
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
 
@@ -90,16 +91,17 @@ class Design:
 
     # -- results from the architect
     def take_result(self, path):
-        text = Path(path).read_text(encoding="utf-8") if Path(path).is_file() else ""
-        line = next((l.strip() for l in text.splitlines() if l.strip()), "")
-        words = line.split()
-        if line == "RESULT: COMMITTED" and self.phase() == "commit-docs":
+        words = first_words(path)
+        line = " ".join(words)
+        if words == ["RESULT:", "COMMITTED"] and self.phase() == "commit-docs":
             self.set_phase("start")
         elif words[:2] == ["RESULT:", "NEED"] and len(words) >= 3 and words[2] in NEED_ARGS:
             kind, args = words[2], words[3:]
             if len(args) != NEED_ARGS[kind]:
                 raise Done(ERROR, f"ERROR BAD_NEED {line[:300]}")
             self.r.set(DESIGN_NEED=" ".join(words[2:]), **{f"RETRY_{kind}": 0})
+            if kind == "egm":
+                self.r.set(EGM_REQUESTED="yes")  # the user chose EGM in a relay; state shows what ran
             self.count_run(kind)
             self.set_phase("start")
         else:

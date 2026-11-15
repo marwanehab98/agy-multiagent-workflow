@@ -64,6 +64,37 @@ class ProbeTest(Base):
         self.assertIn("slug", text)
         self.assertIn("flag", text)
 
+    def test_orca_refusing_a_launch_counts_as_that_style_failing(self):
+        # Live test 2026-11-15: worker-start answered invalid_argument; that must name the pair, not ERROR.
+        w = json.loads(self.world.read_text())
+        w["reject_rules"] = [RULE("cl-agent", "big", "high")]
+        self.world.write_text(json.dumps(w))
+        self.behave("ok", "ok", "ok")
+        last, _ = self.until(40, "PROBE_FAILED", "--set", "step1")
+        self.assertTrue(last.startswith("PROBE_FAILED cl:big@high "), last)
+        self.assertIn("does not support effort high", Path(last.split()[-1]).read_text())
+
+    def test_step3_failure_of_an_architect_chosen_pair_goes_to_fix_meta(self):
+        w = json.loads(self.world.read_text())
+        w["reject_rules"] = [RULE("cl-agent", "small", "high")]
+        self.world.write_text(json.dumps(w))
+        s = self.st()
+        s["CLERICAL_PAIR"] = "cl:small@high"
+        self.state.write_text(json.dumps(s))
+        last, _ = self.until(21, "FIX_META", "--set", "step3")
+        text = Path(last.split()[1]).read_text()
+        self.assertIn("PROBLEM 01: REVIEW_1 cl:small@high failed its test launch; see ", text)
+        self.assertIn("PROBLEM pair 'cl:small@high': CLERICAL_PAIR failed its test launch; see ", text)
+        # After fix-meta changes the pairs, the next call probes the new ones.
+        for t in ("01", "02"):
+            m = self.docs / "tasks" / f"{t}.meta"
+            m.write_text(m.read_text().replace("cl:small@high", "cl:big@high"))
+        s = self.st()
+        s["CLERICAL_PAIR"] = "cl:big@high"
+        self.state.write_text(json.dumps(s))
+        self.behave("ok")
+        self.until(0, "PROBED", "--set", "step3")
+
     def test_advance_is_idempotent_while_waiting(self):
         self.behave("pending", "ok", "ok")
         first = self.expect_probe(10, "WAIT", "--set", "step1")

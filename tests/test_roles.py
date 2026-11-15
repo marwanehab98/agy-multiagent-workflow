@@ -154,6 +154,12 @@ class RolesTests(unittest.TestCase):
         rc, out = self.roles("menu", "--harness", "cl", "--model", "big")
         self.assertEqual([l.split("\t")[1] for l in out.splitlines()], ["low", "medium", "high", "xhigh", "max"])
 
+    def test_menu_unknown_harness_or_model_names_the_known_ones(self):
+        rc, out = self.roles("menu", "--harness", "agy")
+        self.assertEqual((rc, out), (1, "UNKNOWN harness agy (known: ag, cl)"))
+        rc, out = self.roles("menu", "--harness", "cl", "--model", "nope")
+        self.assertEqual((rc, out), (1, "UNKNOWN model nope for cl (known: big, small)"))
+
     def test_to_state_sets_roles_and_base_top(self):
         self.save()
         state = self.d / "state.json"

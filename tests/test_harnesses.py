@@ -62,6 +62,12 @@ class DetectTests(unittest.TestCase):
         self.assertIn("haiku", names)
         self.assertEqual(h["models"][0]["efforts"], ["low", "medium", "high", "xhigh", "max"])
 
+    def test_claude_models_orca_gives_no_effort_are_default_only(self):
+        # Orca's claude agent offers haiku no effort option and rejects --effort for it (live test 2026-11-15).
+        m = {x["model"]: x["efforts"] for x in detect_fixture()["harnesses"]["claude"]["models"]}
+        self.assertEqual(m["haiku"], ["default"])
+        self.assertEqual(m["opus"], ["low", "medium", "high", "xhigh", "max"])
+
     def test_signed_out_harness_is_broken_not_empty(self):
         h = detect_fixture(agy_models="agy_models_signed_out.txt")["harnesses"]["antigravity"]
         self.assertIn("Fetching available models", h["broken"])

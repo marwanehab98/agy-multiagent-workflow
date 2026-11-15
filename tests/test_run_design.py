@@ -55,6 +55,17 @@ class Happy(Design):
         # asking again repeats the same job
         self.assertEqual(self.adv()[1], last)
 
+    def test_result_line_with_trailing_period_and_prose(self):
+        self.behave("write-output")
+        last, _ = self.expect(10, "WAIT", "--result", self.result_file(
+            "RESULT: NEED builder-check design.md cl:small@high. A cheap reader is enough here."))
+        self.assertIn("builder-check", last)
+
+    def test_need_egm_records_that_egm_was_requested(self):
+        self.behave("write-output")
+        self.need(f"NEED egm design.md {FINDINGS}")
+        self.assertEqual(self.st("EGM_REQUESTED"), "yes")
+
     def test_wait_is_idempotent_while_worker_runs(self):
         self.behave("pending")
         first, _ = self.builder()

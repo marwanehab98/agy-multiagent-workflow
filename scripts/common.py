@@ -40,6 +40,28 @@ def pick_verdict(review, settle):
     return review
 
 
+def result_words(text):
+    """The words of an architect's RESULT line, without what it may add around the line itself.
+
+    Architects sometimes wrap the line in backticks or bold, end it with a period, or carry on with
+    prose on the same line ("RESULT: RUN_VALUES_FIXED. The baseline failed because ..."; live test
+    2026-11-15). Take the first non-empty line from "RESULT:", cut it at the first sentence break
+    (". ", "; ", " - ", a backtick), and drop trailing punctuation from each argument.
+    """
+    line = next((l for l in text.splitlines() if l.strip()), "")
+    m = re.search(r"RESULT:.*", line)
+    line = (m.group(0) if m else line.strip()).replace("*", "")
+    line = re.split(r"[.;]\s|\s[-\u2013\u2014]+\s|`", line, maxsplit=1)[0]
+    words = line.split()
+    return words[:1] + [w.rstrip(".,;:") for w in words[1:]]
+
+
+def first_words(path):
+    """result_words of a file, or [] when it is missing."""
+    p = Path(path)
+    return result_words(p.read_text(encoding="utf-8")) if p.is_file() else []
+
+
 class Done(Exception):
     def __init__(self, code, line):
         super().__init__(line)

@@ -27,6 +27,9 @@ The last line of stdout is the status.
 Exit 0   PROBED                            every pair in the set has a working launch style
 Exit 10  WAIT <dispatch> probe             end your turn; call advance again when woken
 Exit 40  PROBE_FAILED <pair> <file>        every style failed; <file> holds each style's failure text
+Exit 21  FIX_META <file>                   step3 only: an architect-chosen pair failed; <file> holds
+                                           validate_meta.py-style PROBLEM lines for the fix-meta job
+A worker-start that Orca refuses outright (invalid_argument) counts as that style failing.
 Exit 2   ERROR <what>                      bad state or Orca failure (OLD_FORMAT_RUN for an old state file)
 Exit 64  bad usage
 
@@ -47,7 +50,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import WAIT, STOP, ERROR, Done, Orca, Run, build, git, poll, save_body, tool  # noqa: E402
+from common import FIX_META, WAIT, STOP, ERROR, Done, Orca, Run, build, git, next_free, poll, save_body, tool  # noqa: E402
 from harnesses import launch_args  # noqa: E402
 from pairs import Pair, parse_pair, pair_key  # noqa: E402
 
@@ -102,7 +105,19 @@ class Prober:
                 if idx >= len(styles):
                     self.r.set(**{f"PROBE_STYLE_{key}": None})
                     return "failed"
-                self.start(pair, key, idx, styles)
+                try:
+                    self.start(pair, key, idx, styles)
+                except Done as d:
+                    # Orca refused the launch itself (e.g. invalid_argument: an effort the model lacks).
+                    # That is this style failing for this pair, not a broken run (live test 2026-11-15).
+                    if not d.line.startswith("ERROR ORCA_FAILED worker-start"):
+                        raise
+                    with self.results_file(key).open("a", encoding="utf-8") as f:
+                        f.write(f"## Launch style {styles[idx]} for {pair} failed (Orca refused the launch)\n"
+                                f"{d.line}\n")
+                    self.r.set(**{f"PROBE_STYLE_{key}": idx + 1, f"PROBE_DISPATCH_{key}": None})
+                    self.r.log(f"probe {pair}: launch style {styles[idx]} refused by Orca")
+                    continue
                 return "wait"
             result = poll(self.o, self.r, dispatch)
             if result is None:
@@ -228,8 +243,28 @@ def run_advance(r, set_name, one, moved=False):
     set_name, one = r.get("PROBE_SET"), r.get("PROBE_PAIR")
     if not set_name:
         raise Done(ERROR, "ERROR NO_PROBE_SET pass --set step1|step3|resume|pair")
-    Prober(r, o, keep=set_name == "resume").advance(set_pairs(r, set_name, one))
+    try:
+        Prober(r, o, keep=set_name == "resume").advance(set_pairs(r, set_name, one))
+    except Done as d:
+        if set_name == "step3" and d.code == STOP and d.line.startswith("PROBE_FAILED"):
+            raise Done(FIX_META, f"FIX_META {step3_problems(r, d.line)}")
+        raise
     raise Done(PROBED, "PROBED")
+
+
+def step3_problems(r, failed_line):
+    """Step 3's pairs are the architect's choices (reviewers, CLERICAL_PAIR), so a failed launch goes back
+    to it as fix-meta input, in validate_meta.py's PROBLEM form, instead of stopping the run."""
+    _, pair, results = failed_line.split()
+    queue = r.run_dir / "queue.txt"
+    ids = queue.read_text(encoding="utf-8").split() if queue.exists() else []
+    lines = [l for l in launch_problems(r, ids, failed_line).splitlines() if l.startswith("PROBLEM ") and ":" in l.split()[1]]
+    if r.get("CLERICAL_PAIR") == pair:
+        lines.append(f"PROBLEM pair '{pair}': CLERICAL_PAIR failed its test launch; see {results}")
+    out = next_free(r.run_dir, "validate-{n}.txt")
+    out.write_text("\n".join(lines or [f"PROBLEM pair '{pair}': failed its test launch; see {results}"]) + "\n",
+                   encoding="utf-8")
+    return out
 
 
 def main():
