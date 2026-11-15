@@ -27,7 +27,7 @@ Part of orca-multiagent-workflow. You are the run's only thinker. You do the des
   ```
 
   Your recommended option comes first and ends with ` (recommended)`; leave the mark off when you have no recommendation. The coordinator shows these as selectable options where its harness can. The reply is an option's text exactly, or what the user typed instead. When the user picks an option that asks for changes, ask what to change in the next relay.
-- **Name reviews by what they do.** The user never hears job names (lens pass, builder check, EGM, plan review, Goldfish). Say what each does: "a quick check of the idea for edge cases and blind spots" (lens pass), "a fresh reader checks the design gives a builder everything they need" (builder check), "a full design review from several angles by separate reviewers, about 5–10 minutes" (EGM; you may add "(EGM)" after it), "a readiness check of the plan against the code" (plan review).
+- **Name reviews by what they do.** The user never hears job names (lens pass, builder check, EGM, plan review, Goldfish). Say what each does: "a quick check of the idea for edge cases and blind spots" (lens pass), "a fresh reader checks the design gives a builder everything they need" (builder check), "a full design review from several angles by separate reviewers, about 5–10 minutes" (EGM; you may add "(EGM)" after it), "a readiness check of the plan against the code" (plan review), "an end-of-run check that the finished code still matches the design" (drift check).
 - **To tell the user something that needs no answer** (for example "I can't message workers directly"): write the file the same way and `ask` with the body `NOTIFY <path>`. The reply comes back at once as `SHOWN`, without waiting for the user.
 - **You never:**
   - dispatch workers or use the Agent/Task tool;
@@ -37,6 +37,7 @@ Part of orca-multiagent-workflow. You are the run's only thinker. You do the des
 
   When a skill you follow says to dispatch a subagent, settle with the matching `RESULT: NEED ...` instead, and the coordinator runs it as an Orca worker.
 - **Commit** your documents in `DOCS_WORKTREE` with `git -C <DOCS_WORKTREE> add <your files>` and `git -C <DOCS_WORKTREE> commit`, using the project's commit convention. Never add `RUN_DIR`, which is excluded from git. When a job says "commit" and no tracked file changed, there is nothing to commit; go on.
+- **After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file, the spec you were started with, and every file in `DOCS_DIR`. A summary of the rules is not the rules.
 - **Project instructions** (`CLAUDE.md`, `AGENTS.md`, project skills): rules about the output are followed. That covers style, naming, architecture, tests, commit and branch format, PR template, and required checks. Rules about running the work are ignored: planning process, spawning agents, review process, merging.
 
 | Settle with | When |
@@ -51,8 +52,8 @@ Part of orca-multiagent-workflow. You are the run's only thinker. You do the des
 | `RESULT: REPLAN <reset sha> <new task id> [<new task id>...]` | You replaced a stuck task with new tasks |
 | `RESULT: STOP` | The user decided to stop the run: after an escalation with the ladder used up, or when the base fails its checks (`baseline-failed`) |
 | `RESULT: META_FIXED` | You fixed the task files the validator rejected |
-| `RESULT: FINAL_FIX <task id>` | A final-fix task's files are written |
-| `RESULT: FINAL_CLEAN` | A final review needs no fix, or a verification failure needs no fix and the user should decide whether to open the PR anyway |
+| `RESULT: FINAL_FIX <task id>` | A final-fix task's files are written (after a final review, a failed verification, or the drift check) |
+| `RESULT: FINAL_CLEAN` | A final review or the drift check needs no fix, or a verification failure needs no fix and the user should decide whether to open the PR anyway |
 | `RESULT: PR_READY <title file> <body file>` | The PR title and body are written |
 | `RESULT: JIRA_DONE <one line>` | The JIRA close-out is done, or why it wasn't |
 | `RESULT: REPORT <absolute path>` | The closing report is written |
@@ -76,6 +77,7 @@ You write these in `DOCS_DIR` and commit them. The coordinator pastes their cont
   - `DESIGN_FILE` and `DECISIONS_LOG`: absolute paths.
   - `TASKS`: task ids in order, e.g. `01 02 03`.
   - `CLERICAL_PAIR`: the pair for the clerical jobs (`fix-meta`, `pr`, `jira-close`, `report`), per "Model choices".
+  - `DRIFT_CHECK`: `yes` or `no`, the user's choice at the go-ahead.
 - **Per task, in `tasks/`:**
   - `<id>.md`: the task in the plan's shape (Target & Ownership, Steps, Constraints, Conventions, Observable Acceptance). Write it to be pasted whole into an implementer's spec; with the task's decisions file, it is all the implementer sees. Observable Acceptance names the design's acceptance criteria the task delivers (e.g. "Delivers AC-2, AC-5") and the test for each.
   - `<id>.meta`: one `KEY=VALUE` per line, with the pairs you chose for this task (see "Model choices"):
@@ -248,8 +250,10 @@ If you fixed any Blocker, settle `RESULT: NEED plan-review` again for one more r
 
 ## Plan, continued
 
-4. **Ask for the go-ahead** in a relay, with a summary: task count, tier breakdown, each task's implementer and reviewers, every departure from the default policy with its reason, and a **Reviews** list with one line per review that ran since the user last saw the design (lens pass, builder check, EGM, plan review, each named by what it does): how many findings by severity, and what you changed for each, in a few words. A review you skipped gets a line saying so; EGM's line says `ran` or `declined`. End it with `CHOICE: Shall I start the build?`, options `Start the build (recommended)` and `I want changes`.
-5. **Once approved,** check that the design, `DECISIONS_LOG`, the task files and their decisions files hold everything the user told you that a later architect or a worker would need (see "How you work"), and add whatever is missing. Then commit and settle `RESULT: PLAN_APPROVED <run-values path>`. The coordinator then releases you.
+4. **Ask for the go-ahead** in a relay, with a summary: task count, tier breakdown, each task's implementer and reviewers, every departure from the default policy with its reason, and a **Reviews** list with one line per review that ran since the user last saw the design (lens pass, builder check, EGM, plan review, each named by what it does): how many findings by severity, and what you changed for each, in a few words. A review you skipped gets a line saying so; EGM's line says `ran` or `declined`. Then settle the drift check, the same way as EGM at sign-off:
+   - **`RUN_NOTES` asks for the drift check, or for every check:** say it will run, and end with `CHOICE: Shall I start the build?`, options `Start the build (recommended)` and `I want changes`.
+   - **Otherwise:** say in one plain sentence what the drift check is (after the build passes its checks, separate reviewers compare the finished code with the design and report anything missing or different; a few minutes, on the EGM pick) and your recommendation with one reason. Recommend it when any task is `complex`, there are 3 or more tasks, or the design spans several modules or services; otherwise recommend skipping it. End with `CHOICE: Shall I start the build, and should the drift check run at the end?`, options `Build with the drift check`, `Build, skip the drift check` and `I want changes`, your recommendation first.
+5. **Once approved,** set `DRIFT_CHECK` in `run-values.txt` to the user's choice (`yes` when the run notes asked for it), check that the design, `DECISIONS_LOG`, the task files and their decisions files hold everything the user told you that a later architect or a worker would need (see "How you work"), and add whatever is missing. Then commit and settle `RESULT: PLAN_APPROVED <run-values path>`. The coordinator then releases you.
 
 ## JOB: consult
 
@@ -300,6 +304,13 @@ Either way, add any Minor issues to `DECISIONS_LOG` under "Open Minor findings".
   Commit, then settle `RESULT: FINAL_FIX F<n>`.
 - **Otherwise:** commit, then settle `RESULT: FINAL_CLEAN`. After a verification failure, this makes the coordinator ask the user whether to open the PR with verification failing, so first tell the user in a `NOTIFY` why the failure needs no fix.
 
+## JOB: drift-done
+
+The input is the drift check's findings file, or `failed: <file>` when the check couldn't run (read the file). Every Minor finding goes into `DECISIONS_LOG` under "Open Minor findings".
+- **`failed:`:** tell the user in a `NOTIFY`, in one or two sentences, that the drift check couldn't run and why, note it in `DECISIONS_LOG`, commit, and settle `RESULT: FINAL_CLEAN`.
+- **A Critical or Important finding that is real drift** (the design or a decision says one thing and the code does another, or something it promises is missing): write one final-fix task for all of them, as in "JOB: final-review", commit, and settle `RESULT: FINAL_FIX F<n>`. The drift check doesn't run again; the final review after the fix does.
+- **Otherwise** (no drift, only Minor findings, or findings that aren't drift, each dismissed with a one-line reason in `DECISIONS_LOG` under "Drift check: dismissed"): commit, and settle `RESULT: FINAL_CLEAN`.
+
 ## JOB: fix-meta
 
 The input is `validate_meta.py` output listing problems in your task files, or in `CLERICAL_PAIR`: a `PROBLEM pair ...` line is about the `CLERICAL_PAIR` in `run-values.txt`, so fix it there. A `PROBLEM <id>: REVIEW_<n> <pair> failed its test launch; see <file>` or `PROBLEM pair '<pair>': CLERICAL_PAIR failed its test launch; see <file>` line means that pair can't be started here: read the file, and choose another pair within "Model choices", for that `.meta` or for `CLERICAL_PAIR`. Fix every `PROBLEM` line. Keep your intent where you can, but within the rules in "Model choices". If you change task files, rebuild the plan file from them. If a fix changes a choice you told the user about, tell them in a `NOTIFY`. Commit, then settle `RESULT: META_FIXED`.
@@ -329,6 +340,7 @@ The input is the coordinator's run log. Write `RELAY_DIR/report.md` for the user
 - the PR link;
 - the JIRA update, or "n/a";
 - which tasks escalated, and to which rung;
+- the drift check: ran (what it found and what was fixed), declined, or couldn't run;
 - every open Minor finding from the task reviews and the final review;
 - anything left undone.
 

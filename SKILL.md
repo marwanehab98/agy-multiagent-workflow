@@ -5,6 +5,8 @@ description: Use when the user hands over a JIRA key or hand-written requirement
 
 # Orca multi-agent workflow
 
+**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full and your role's file (`references/coordinator.md` or `references/architect.md`), then pick up from the run's state file. A summary of the rules is not the rules.
+
 ## Overview
 
 This skill takes a JIRA story, or requirements the user wrote by hand, to a reviewed PR. The user picks a harness, model and effort for four roles; every other worker follows from those picks. One coordinator session runs the whole run as a traffic cop. It starts Orca workers, relays messages unchanged, runs the bundled scripts, and merges. It does no design, code, or judgment work itself. Each kind of thinking goes to the worker suited to it:
@@ -136,7 +138,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
     - The architect's documents are in `<DOCS_DIR>` (`<DOCS_WORKTREE>/docs/plans`), committed on the never-merged `<TOPIC>-docs` branch.
     - The coordinator's working files (state, catalog, built specs, verdicts, gate logs, relays, the run log) are in `<RUN_DIR>` (`<DOCS_WORKTREE>/.run`), which is excluded from git.
     - None of these files is written in the main checkout or `<IMPL_WORKTREE>`. Workers there get what they need pasted into their specs.
-18. **Every value and counter lives in `<RUN_DIR>/state.json`,** written and read with `scripts/state.py`. A value the coordinator only remembers, or that a context summary mentions, is not a source: read it from the state file. Before ending any turn that waits, record `STEP` and `WAITING_ON`, so a compacted or restarted coordinator can pick up (coordinator "Resume a run").
+18. **Every value and counter lives in `<RUN_DIR>/state.json`,** written and read with `scripts/state.py`. A value the coordinator only remembers, or that a context summary mentions, is not a source: read it from the state file. Before ending any turn that waits, record `STEP` and `WAITING_ON`, so a compacted or restarted coordinator can pick up (coordinator "Resume a run"). After a context compaction, the coordinator and the design architect re-read their instructions in full before doing anything else.
 19. **Checks run before reviews.** After every task, `scripts/gate.py` runs the run's check commands in `<IMPL_WORKTREE>` and puts the tree back. A failure goes straight to a fix round with the log, and no reviewer starts on code that fails its checks.
 20. **The loops are scripts.** `run_design.py` runs Step 2's design workers, `run_task.py` the task loop (Step 4), `run_finish.py` the final review and verification (Step 8), and `probe.py` the test launches. The coordinator only runs them and branches on their last line, passing on what they print unchanged. It never starts their workers, counts, retries, reads their workers' output, checks or resets a tree, or merges by hand.
 21. **A failed setup check or test launch stops the run before work starts.** A `MISSING` line from `roles.py check`, any failed check in the coordinator, and `probe.py`'s `PROBE_FAILED` all stop it: show the lines, or the file, exactly; save nothing, hand off nothing, start no worker. The one exception is an `UNKNOWN`-only check during setup, where the user picks those roles again (Setup item 4). No deadline, user instruction, or "it worked yesterday" changes this. The user fixes the cause, or picks again in a new run.

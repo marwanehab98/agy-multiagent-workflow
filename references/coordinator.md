@@ -30,7 +30,7 @@ Part of orca-multiagent-workflow. The Rules in SKILL.md hold throughout.
 
   | Job | Pair |
   | --- | --- |
-  | `consult`, `escalate`, `final-review`, `verification-failed`, `baseline-failed`, `user-message` | `ROLE_ARCHITECT` |
+  | `consult`, `escalate`, `final-review`, `verification-failed`, `drift-done`, `baseline-failed`, `user-message` | `ROLE_ARCHITECT` |
   | `fix-meta`, `pr`, `jira-close`, `report` | `CLERICAL_PAIR` once Step 3 item 8 has printed `PROBED`; `ROLE_ARCHITECT` before that |
 
 - **Workers by role.** You start only architects; the scripts start every other worker on its pair:
@@ -98,7 +98,7 @@ Branch on `DESIGN`'s last line:
 ## Step 3: Set up execution
 
 1. **Release the design architect** with `worker-release --dispatch <ARCHITECT_DISPATCH>`, and `STATE set PHASE=execution STEP="3 setup"`. From now on every architect job is a fresh worker.
-2. **Read `<run-values>`** and `STATE set` each of `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS` and `CLERICAL_PAIR`, plus `RUN_VALUES=<run-values path>` and `BASELINE_SKIP` (empty when the file has none). The `VERIFY_<n>` and `GATE_<n>` commands stay in that file; `gate.py` reads them from there.
+2. **Read `<run-values>`** and `STATE set` each of `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS` and `CLERICAL_PAIR`, plus `RUN_VALUES=<run-values path>`, `BASELINE_SKIP` (empty when the file has none) and `DRIFT_CHECK` (`no` when the file has none). The `VERIFY_<n>` and `GATE_<n>` commands stay in that file; `gate.py` reads them from there.
 3. **Create the feature branch** without checking it out: run `git -C <MAIN_CHECKOUT> branch <FEATURE_BRANCH> <START_SHA>`. If that fails, show the user its output and stop. `STATE set INITIAL_BASE_SHA=<START_SHA> LAST_MERGED=<START_SHA>`.
 4. **Create the implementation worktree:** run `ORCA worktree create --name <TOPIC>-impl --branch <TOPIC>-impl --base-branch <FEATURE_BRANCH>` and record its path as `IMPL_WORKTREE`. `bash <SKILL_DIR>/scripts/check-tree.sh <IMPL_WORKTREE> <INITIAL_BASE_SHA>` must exit 0; otherwise show its output to the user and stop.
 5. **Check the base passes the checks.** Run `python3 -I <SKILL_DIR>/scripts/gate.py --run-values <RUN_VALUES> --worktree <IMPL_WORKTREE> --head <INITIAL_BASE_SHA> --log "<RUN_DIR>/gates/baseline-{n}.log" --prefix VERIFY --skip "<BASELINE_SKIP>"`. If the file has `GATE_` lines (`grep -q '^GATE_' <RUN_VALUES>`), run it again without `--prefix`, keeping `--skip`.
@@ -137,7 +137,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 | Last line (exit) | Do |
 | --- | --- |
 | `VERIFIED <log>` (0) | Go to item 4, with `<log>` as the passing verify log. |
-| `WAIT <dispatch> <kind>` (10) | End your turn. When Orca wakes you about that worker (a final reviewer, or a `probe` of a final-fix task's reviewer pairs), run `FINISH` again. |
+| `WAIT <dispatch> <kind>` (10) | End your turn. When Orca wakes you about that worker (a final reviewer, the drift check, or a `probe` of a final-fix task's reviewer pairs), run `FINISH` again. |
 | `ARCHITECT_JOB <job> <input>` (20) | Send job `<job>` with `INPUT=<input>`. When the architect settles, save its message, release it, and run `FINISH --architect-result <the saved file>`. |
 | `RUN_QUEUE <F id>` (21) | `queue.txt` now holds that task: go to Step 4. Its `QUEUE_EMPTY` brings you back here. |
 | `PROMPT <file> <reply>...` (30) | A fixed prompt, handled as in Step 4, with `FINISH --reply <word>`. |
@@ -166,7 +166,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 
 ## Resume a run
 
-Use this when your brief or the user asks to continue a run. After a context compaction in the same session, you need only item 1 (`STATE show`) and item 5, or item 3 first when `STEP` is `resume probe`.
+Use this when your brief or the user asks to continue a run. After a context compaction in the same session (your earlier conversation is replaced by a summary), first re-read `<SKILL_DIR>/SKILL.md` and this file in full, since a summary of the rules is not the rules; then do only item 1 (`STATE show`) and item 5, or item 3 first when `STEP` is `resume probe`.
 
 1. Find `<RUN_DIR>/state.json` (for a topic, in the worktree on `refs/heads/<TOPIC>-docs`) and run `STATE show`.
    - **No state file, or no `RUN_ID` in it:** the run stopped in Step 1, before any work. Say exactly "The <TOPIC> run stopped before its architect started, so I'm starting it again." Then run Step 1, whose item 5 gives the new run its own name.
@@ -181,7 +181,7 @@ Use this when your brief or the user asks to continue a run. After a context com
 5. Pick up at the first of these that holds:
    - **`OPEN_RELAY` is set:** the relay file is the one its message names. Show it to the user again as in Rule 5, and wait.
    - **`WAITING_ON` is `ARCHITECT_DISPATCH`:** save its settle with `--out "<RUN_DIR>/results/architect-{n}.md"` (How you work, "Architect jobs"); earlier results keep their numbers.
-     - `SAVED`, routed by `LAST_JOB`: `escalate` or `fix-meta` while `STEP` starts with `run_task` goes to `TASKLOOP --architect-result <that file>`; `final-review`, `verification-failed` or `fix-meta` while `STEP` starts with `run_finish` goes to `FINISH --architect-result <that file>`. Any other job's `RESULT:` line is handled in the step or message that sent it: Step 2's list for design-phase jobs, Step 3 for `baseline-failed` and `fix-meta` there, "Messages" for `consult` and `user-message`, Step 8 for `pr`, `jira-close` and `report`.
+     - `SAVED`, routed by `LAST_JOB`: `escalate` or `fix-meta` while `STEP` starts with `run_task` goes to `TASKLOOP --architect-result <that file>`; `final-review`, `verification-failed`, `drift-done` or `fix-meta` while `STEP` starts with `run_finish` goes to `FINISH --architect-result <that file>`. Any other job's `RESULT:` line is handled in the step or message that sent it: Step 2's list for design-phase jobs, Step 3 for `baseline-failed` and `fix-meta` there, "Messages" for `consult` and `user-message`, Step 8 for `pr`, `jira-close` and `report`.
      - `NOT_FOUND`: if `worker-show` says it is still working, wait. If it is `exited` or `lost`, follow "Architect lost" (design phase) or "A fresh architect fails". Never run a step's script here: it would print the same job again and start a second architect.
    - **`OPEN_ASK` is set:** send the `consult` job again.
    - **`STEP` is `1 probe` (no `ARCHITECT_DISPATCH` yet) or `3 probe`:** run `PROBE --set step1` or `PROBE --set step3` and branch as in that step.
@@ -202,7 +202,7 @@ Use this when your brief or the user asks to continue a run. After a context com
 | `PHASE` | `design`, `execution`, `finish`, or `done` | 1, 3, 8 |
 | `STEP`, `WAITING_ON`, `OPEN_RELAY`, `OPEN_ASK`; `RESUME_STEP`, `RESUME_WAITING_ON` | Where to pick up after a compaction or restart; the saved values during a resume's re-probe | every wait; Resume |
 | `ARCHITECT_DISPATCH`, `LAST_JOB`, `LAST_JOB_INPUT`, `JOB_RETRIES` | The current architect and its job | every job |
-| `RUN_VALUES`, `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS`, `CLERICAL_PAIR`, `BASELINE_SKIP` | From `run-values.txt` | 3 |
+| `RUN_VALUES`, `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS`, `CLERICAL_PAIR`, `BASELINE_SKIP`, `DRIFT_CHECK` | From `run-values.txt` | 3 |
 | `INITIAL_BASE_SHA`, `LAST_MERGED`, `IMPL_WORKTREE` | Execution | 3; `run_task.py` updates `LAST_MERGED` |
 | `META_FAILS`, `BASELINE_FAILS`; `BASELINE_OK` | Run counters; `yes` once the base passed its checks | 3, and the scripts |
 | `PROBE_*`; `DESIGN_*`, `DOCS_HEAD`, `EGM_SKILLS`, `EGM_RUNS`, `LENS_RUNS`, `PLAN_REVIEW_RUNS`, `RETRY_<kind>`; `CURRENT_TASK`, `LOOP_<id>`, `LOOP_WAIT` and every key naming a task id (`BASE_SHA_<id>`, `WORKER_HEAD_<id>`, `PAIR_<id>`, `ATTEMPT_<id>`, `REVIEW_STAGE_<id>`, `GATE_FAILED_<id>`, `STAGE_FIX_ROUNDS_<id>_S<n>`, `GATE_FIX_ROUNDS_<id>`, `TOTAL_FIX_ROUNDS_<id>`, ...); `FIN_*`, `FINAL_FIX_ROUNDS`, `VOIDS_FINAL` | The scripts' own state (`probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`; their docstrings list them). Read them for status; never set them | 1–8 |

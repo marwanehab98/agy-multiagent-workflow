@@ -39,6 +39,11 @@ validates and before the queue is written; a failed test goes to the architect a
 PROBLEM lines naming the pair, and counts toward META_FAILS like a failed validation. --docs-moved
 (ruling R13) first moves PROBE_HEAD to the docs worktree's current HEAD, so an architect's commits made
 during that probe survive its tree check.
+Drift check (DRIFT_CHECK=yes, the user's choice at the go-ahead): once, the first time verification passes,
+EGM's drift report runs on ROLE_EGM in IMPL_WORKTREE against DESIGN_FILE and DECISIONS_LOG (phases drift,
+drift-wait; one retry), then ARCHITECT_JOB drift-done <findings file> (or "failed: <file>"). The architect
+answers RESULT: FINAL_FIX <F id> (a fix task, then a new final review; no second drift check) or
+RESULT: FINAL_CLEAN (VERIFIED). Keys: DRIFT_CHECK (from run-values), DRIFT_DONE, DRIFT_RETRY.
 State keys: FIN_PHASE, FIN_DISPATCH, FIN_OUT, FIN_HEAD, FIN_JOB, FIN_LINE, FIN_FIX, FIN_LAST_VERDICT,
 FIN_VERIFY_LOG, FINAL_N, VERIFY_K, VOIDS_FINAL, NO_VERDICT_FINAL, FIN_PROMPT_FILE, FIN_PROMPT_ACCEPT.
 """
@@ -51,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script 
 from common import (WAIT, ESCALATE, PROMPT, STOP, ERROR, Done, Orca, Run, build, first_words, next_free,  # noqa: E402
                     pick_verdict, poll, save_body, tool, verdict_line)
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
+from pairs import parse_pair  # noqa: E402
 
 VERIFIED, RUN_QUEUE = 0, 21
 NUDGE = ("You ended your turn without settling this task. If a command you started is still running, "
@@ -195,10 +201,72 @@ class Finish:
         r.log(f"verify {k} exit={rc} {log}")
         r.set(FIN_VERIFY_LOG=log)
         if rc == 0:
+            if r.get("DRIFT_CHECK") == "yes" and not r.get("DRIFT_DONE"):
+                return self.set_phase("drift")
             return self.verified(log)
         if rc == 1:
             self.job("verification-failed", log)
         raise Done(ERROR, f"ERROR GATE {out}")
+
+    # -- the optional drift check (DRIFT_CHECK=yes): once, after verification first passes
+    def drift_skills(self):
+        r = self.r
+        harness = parse_pair(r.need("ROLE_EGM")).harness
+        rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
+                       "--skill", "egm-drift-report")
+        return str(Path(out).parent) if rc == 0 else None
+
+    def do_drift(self):
+        r = self.r
+        skills = self.drift_skills()
+        if not skills:
+            note = r.run_dir / "results" / "drift-failed.md"
+            note.write_text(f"The EGM pick's harness has no egm-drift-report skill ({r.need('ROLE_EGM')}).\n",
+                            encoding="utf-8")
+            r.set(DRIFT_DONE="yes")
+            self.job("drift-done", f"failed: {note}")
+        out = r.run_dir / "drift-1.md"
+        spec = build("drift.txt", next_free(r.run_dir / "specs", "drift-{n}.txt"),
+                     {"EGM_SKILLS": skills, "DESIGN_FILE": r.need("DESIGN_FILE"),
+                      "DECISIONS_LOG": r.need("DECISIONS_LOG"), "OUTPUT_FILE": out})
+        pair = r.need("ROLE_EGM")
+        dispatch, _ = self.o.start(spec, f"Drift check: {r.need('TOPIC')}", pair, r.impl)
+        r.log(f"drift check dispatched {dispatch} {pair}")
+        self.set_phase("drift-wait", FIN_DISPATCH=dispatch, FIN_OUT=out, WAITING_ON=dispatch)
+        raise Done(WAIT, f"WAIT {dispatch} drift")
+
+    def do_drift_wait(self):
+        r = self.r
+        dispatch = r.need("FIN_DISPATCH")
+        result = poll(self.o, r, dispatch)
+        if result is None:
+            raise Done(WAIT, f"WAIT {dispatch} drift")
+        if result[0] == "idle":
+            r.set(**{f"HANDLED_SEQ_{dispatch}": result[1]})
+            if r.incr(f"NUDGES_{dispatch}") <= 1:
+                self.o.send(dispatch, "Finish and settle this task", NUDGE)
+                raise Done(WAIT, f"WAIT {dispatch} drift")
+            result = ("stopped", f"worker {dispatch} ended its turn twice without settling")
+        self.o.release(dispatch)
+        head = r.need("LAST_MERGED")
+        if tool("check-tree.sh", r.impl, head)[0] != 0:
+            tool("discard-changes.sh", r.impl, head)
+            r.log("drift check changed the worktree; changes discarded")
+        out = Path(r.need("FIN_OUT"))
+        ok = result[0] == "done" and result[1] == "succeeded" and out.is_file() and out.read_text().strip()
+        if ok:
+            r.set(DRIFT_DONE="yes", WAITING_ON=None)
+            r.log(f"drift check settled succeeded {out}")
+            self.job("drift-done", out)
+        note = save_body(result[2], next_free(r.run_dir / "results", "drift-failed-{n}.md")) if result[0] == "done" \
+            else next_free(r.run_dir / "results", "drift-failed-{n}.md")
+        if result[0] != "done":
+            note.write_text(f"{result[1]}\n", encoding="utf-8")
+        r.log(f"drift check failed: {note}")
+        if r.incr("DRIFT_RETRY") < 2:
+            return self.set_phase("drift")
+        r.set(DRIFT_DONE="yes", WAITING_ON=None)
+        self.job("drift-done", f"failed: {note}")
 
     def verified(self, log):
         self.set_phase("verified", FIN_VERIFY_LOG=log, WAITING_ON=None)
@@ -227,6 +295,10 @@ class Finish:
                             f"Verification still fails, and the architect found nothing to fix: {log}. "
                             "Reply \"continue\" to open the PR anyway, or \"stop\" to stop the run.",
                             ["continue", "stop"])
+        if job == "drift-done" and kind == "FINAL_FIX" and len(words) == 3:
+            return self.validate_fix(words[2])
+        if job == "drift-done" and kind == "FINAL_CLEAN" and len(words) == 2:
+            return self.verified(r.need("FIN_VERIFY_LOG"))
         if job == "fix-meta" and kind == "META_FIXED" and len(words) == 2:
             return self.validate_fix(r.need("FIN_FIX"))
         raise Done(ERROR, f"ERROR UNEXPECTED_ARCHITECT_RESULT job={job}: {' '.join(words)[:300]}")
@@ -317,7 +389,8 @@ class Finish:
             if phase.startswith("prompt:"):
                 raise Done(PROMPT, f"PROMPT {self.r.need('FIN_PROMPT_FILE')} {self.r.need('FIN_PROMPT_ACCEPT')}")
             handler = {"start": self.do_start, "review": self.do_review, "wait": self.do_wait,
-                       "verify": self.do_verify, "probe": self.do_probe}.get(phase)
+                       "verify": self.do_verify, "probe": self.do_probe, "drift": self.do_drift,
+                       "drift-wait": self.do_drift_wait}.get(phase)
             if handler is None:
                 raise Done(ERROR, f"ERROR UNKNOWN_PHASE {phase}")
             handler()

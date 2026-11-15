@@ -355,6 +355,76 @@ class Legacy(Finish):
         last, _ = self.expect(2, "ERROR")
         self.assertIn("OLD_FORMAT_RUN", last)
 
+class Drift(Finish):
+    """The optional end-of-run drift check (DRIFT_CHECK=yes in run-values): EGM's drift report on the EGM pick,
+    after verification passes, triaged by the architect."""
+
+    def setUp(self):
+        super().setUp()
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["ag"]["skills"]["egm-drift-report"] = "/egm/skills/egm-drift-report"
+        catalog = self.tmp / "catalog.json"
+        catalog.write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(catalog), "DRIFT_CHECK": "yes",
+                                          "LAUNCH_STYLE_ag_g_high": "slug"}))
+
+    def final_fix(self, f="F1"):
+        self.task(f, "none")
+        return self.result(f"RESULT: FINAL_FIX {f}", 21, "RUN_QUEUE")
+
+    def to_drift_job(self):
+        self.first_review("pass")
+        self.behave("write-output")
+        last, _ = self.expect(10, "WAIT")
+        self.assertTrue(last.endswith(" drift"), last)
+        return self.expect(20, "ARCHITECT_JOB")
+
+    def test_drift_runs_after_verification_on_the_egm_pick(self):
+        last, _ = self.to_drift_job()
+        out = self.run_dir / "drift-1.md"
+        self.assertEqual(last, f"ARCHITECT_JOB drift-done {out}")
+        start = self.starts()[-1]
+        self.assertIn("ag-agent", start)
+        self.assertIn(f"path:{self.impl}", start)
+        spec = list(json.loads(self.world.read_text())["tasks"].values())[-1]["spec"]
+        self.assertIn("/egm/skills/egm-drift-report/SKILL.md", spec)
+        self.assertIn(str(self.design), spec)
+        self.assertIn(str(self.decisions), spec)
+
+    def test_clean_drift_result_verifies(self):
+        self.to_drift_job()
+        last, _ = self.result("RESULT: FINAL_CLEAN", 0, "VERIFIED")
+        self.assertEqual(last, f"VERIFIED {self.run_dir / 'verify-1.log'}")
+        self.assertEqual(self.adv()[1], last)
+
+    def test_drift_fix_runs_once_then_no_second_drift(self):
+        self.to_drift_job()
+        last, _ = self.final_fix("F1")
+        self.assertEqual(last, "RUN_QUEUE F1")
+        self.SCRIPT, finish = RUN_TASK, self.SCRIPT
+        try:
+            self.behave("commit", "pass", "pass")
+            self.until(0, "QUEUE_EMPTY")
+        finally:
+            self.SCRIPT = finish
+        self.behave("pass")
+        self.expect(10, "WAIT")
+        self.expect(0, "VERIFIED")
+        self.assertEqual(sum("drift" in " ".join(c) for c in self.calls("task-create")), 1)
+
+    def test_failed_drift_worker_retries_once_then_reports_failed(self):
+        self.first_review("pass")
+        self.behave("fail", "fail")
+        self.expect(10, "WAIT")
+        self.expect(10, "WAIT")
+        last, _ = self.expect(20, "ARCHITECT_JOB")
+        self.assertTrue(last.startswith("ARCHITECT_JOB drift-done failed: "), last)
+
+    def test_no_drift_check_when_not_chosen(self):
+        self.state.write_text(json.dumps({**self.st(), "DRIFT_CHECK": "no"}))
+        self.first_review("pass")
+        self.expect(0, "VERIFIED")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
