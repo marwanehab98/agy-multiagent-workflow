@@ -233,6 +233,47 @@ class Prompts(Base):
         self.expect(20, "ESCALATE", "--reply", "retry")
         self.expect(40, "STOP", "--architect-result", self.result_file("RESULT: STOP"))
 
+    def test_reset_sha_before_base_is_rejected(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.until(20, "ESCALATE")
+        note = self.tmp / "note.md"
+        note.write_text("n\n")
+        self.expect(20, "ESCALATE", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {self.older} {note} antigravity:g-xhigh"))
+        hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
+        self.assertIn("not between the task's base", hist)
+        self.assertEqual(self.impl_head(), self.st("WORKER_HEAD_01"))  # nothing was reset
+
+    def test_three_void_reviewers_prompt_retry_or_stop(self):
+        self.behave("commit", "stopped", "stopped", "stopped")
+        self.expect(10, "WAIT")
+        self.expect(10, "WAIT")
+        self.expect(10, "WAIT")
+        self.expect(10, "WAIT")
+        last, _ = self.expect(30, "PROMPT")
+        self.assertTrue(last.endswith("retry stop"))
+        text = Path(last.split()[1]).read_text()
+        self.assertIn("Task 01 stage 1: three reviewers in a row were void", text)
+        self.behave("pass", "pass")
+        self.expect(10, "WAIT", "--reply", "retry")
+        self.assertEqual(self.st("VOIDS_01_S1"), "0")
+
+    def test_two_gate_failures_escalate(self):
+        self.behave("commit-broken", "commit", "commit")
+        self.until(20, "ESCALATE")
+        self.assertEqual(self.st("GATE_FIX_ROUNDS_01"), "2")
+
+    def test_escalation_attempt_resets_fix_counters(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.until(20, "ESCALATE")
+        note = self.tmp / "note.md"
+        note.write_text("n\n")
+        self.behave("commit", "pass", "pass")
+        self.expect(10, "WAIT", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g-xhigh"))
+        for k in ("STAGE_FIX_ROUNDS_01_S1", "STAGE_FIX_ROUNDS_01_S2", "GATE_FIX_ROUNDS_01", "TOTAL_FIX_ROUNDS_01"):
+            self.assertEqual(self.st(k), "0", k)
+
     def test_drift_before_task_prompts_and_rebuild_resets(self):
         tree = sh("git", "-C", str(self.main), "rev-parse", "feature^{tree}")
         moved = sh("git", "-C", str(self.main), "-c", "user.email=t@t", "-c", "user.name=t",

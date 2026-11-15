@@ -261,7 +261,10 @@ class Loop:
         n = self.r.incr(f"VOIDS_{t}_S{stage}")
         self.r.log(f"{t} stage{stage} reviewer void: {why}")
         if n >= 3:
-            raise Done(ERROR, f"ERROR REVIEWER_VOID_3_TIMES task {t} stage {stage}: {why}")
+            self.prompt(t, "void",
+                        f"Task {t} stage {stage}: three reviewers in a row were void ({why}).\n"
+                        "Reply \"retry\" to start a new reviewer, or \"stop\" to stop the run.",
+                        ["retry", "stop"], back_to=f"review{stage}")
         self.start_review(t, stage)
 
     # -- merge
@@ -349,6 +352,10 @@ class Loop:
                            "--gemini-model", r.need("GEMINI_MODEL"), "--allow-opus", allow)
             if rc != 0:
                 return self.reject(t, out)
+            base, head = r.need(f"BASE_SHA_{t}"), git(r.impl, "rev-parse", "HEAD")
+            if (run(["git", "-C", r.impl, "merge-base", "--is-ancestor", base, sha]).returncode != 0
+                    or run(["git", "-C", r.impl, "merge-base", "--is-ancestor", sha, "HEAD"]).returncode != 0):
+                return self.reject(t, f"reset sha {sha} is not between the task's base {base} and head {head}")
             rc, out = tool("discard-changes.sh", r.impl, sha)
             if rc != 0:
                 raise Done(ERROR, f"ERROR RESET {out}")
@@ -441,6 +448,10 @@ class Loop:
             r.set(**{f"REJECTS_{t}": 0})
             self.set_phase(t, "escalating", WAITING_ON="architect")
             raise Done(ESCALATE, f"ESCALATE {r.need(f'ESC_INPUT_{t}')}")
+        if name == "void":
+            stage = int(back[-1])
+            r.set(**{f"VOIDS_{t}_S{stage}": 0})
+            return self.start_review(t, stage)
         if name == "usage-limit":
             kind = r.need(f"PROMPT_KIND_{t}")
             if kind.startswith("review"):

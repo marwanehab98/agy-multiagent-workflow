@@ -40,6 +40,10 @@ class Base(unittest.TestCase):
         (self.main / ".gitignore").write_text("cache/\n")
         g("add", ".")
         g("commit", "-qm", "init")
+        self.older = g("rev-parse", "HEAD")
+        (self.main / "b.txt").write_text("b\n")
+        g("add", ".")
+        g("commit", "-qm", "second")
         self.base = g("rev-parse", "HEAD")
         g("branch", "feature", self.base)
         self.impl = t / "impl"
