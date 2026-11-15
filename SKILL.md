@@ -102,20 +102,20 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
    - It never retypes a worker's message: `scripts/save_message.py` saves settles and asks to files exactly as sent. Only the user's own replies are written by hand.
 5. **Relays are verbatim.** When the architect asks with the body `RELAY <path>`:
    1. Read that file.
-   2. Send the user exactly this, and nothing else:
+   2. Show it, in the one form that fits:
+      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and you have a multiple-choice question tool** (such as `AskUserQuestion`): make one call of that tool and send nothing else. Header `Architect`. The question is `From the architect:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- `.
+      - **Otherwise:** send the user exactly this, and nothing else:
 
-      ```
-      **From the architect:**
+        ```
+        **From the architect:**
 
-      <the file's contents, character for character>
-      ```
+        <the file's contents, character for character>
+        ```
 
-   3. End your turn. The user's next message that doesn't start with `coordinator:` is the answer. Write it, character for character, to `<RELAY_DIR>/<NNN>-from-user.md`.
+   3. End your turn. The user's answer is the option they selected, or what they typed instead, or their next message that doesn't start with `coordinator:`. Write it, character for character, to `<RELAY_DIR>/<NNN>-from-user.md`.
    4. Reply to the ask with `--body "RELAY <that path>"`.
 
    You don't summarize, shorten, reword, translate, fix, or comment, in either direction. A worker's answer goes back the same way, as `--body "$(cat <answer file>)"`.
-
-   **A choice block.** When the file ends with a line `CHOICE: <question>` followed only by 2–4 lines `- <option>`, and you have a multiple-choice question tool (such as `AskUserQuestion`): in step 2 send the file's text above the `CHOICE:` line, then ask `<question>` with that tool, header `Architect`, one option per `- ` line in order, each label the line's text exactly after `- `. The user's answer is the selected option's label, or the text they typed instead; step 3 writes that, character for character. Without such a tool, send the whole file in step 2 as usual.
 
    An ask with the body `NOTIFY <path>` is a message that needs no answer. Show it to the user exactly as in step 2, then reply to the ask at once with `--body "SHOWN"`, without waiting for the user.
 6. **One implementer at a time,** in one shared worktree `<IMPL_WORKTREE>`. The next task starts only after the current one passed both reviews and was merged.
