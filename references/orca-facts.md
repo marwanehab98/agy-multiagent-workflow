@@ -31,7 +31,8 @@ Part of orca-multiagent-workflow. These facts were confirmed on 2026-11-13 again
   - **Design phase ran end to end:** lens pass, builder check (with its own probe of `claude:sonnet@low`), EGM review and plan review all dispatched and settled on the chosen pairs. The architect's commits survived each script step.
   - **Task loop and finish ran end to end** on `antigravity:gemini-4-hydrogen@low` (implementer) and `claude:sonnet@medium` (both reviewers and the final reviewer): stage 1 returned FIX once, the fix round and a second stage 1 passed, stage 2 passed, `merge-task.sh` merged `2ae409e` into the `add-cli-sum` branch, the final review passed and verification exited 0. The finished tool passes all its requirements. The user chose "keep the branch".
   - **Not run:** the optional stress checks (a message while an EGM review worker runs, `--docs-moved`; a resume during a builder-check test launch).
-  - **Hand edits needed to finish:** `CLERICAL_PAIR` changed from `claude:haiku@medium` to `claude:sonnet@low` (issue 7), and `__pycache__/` added to `.git/info/exclude` (issue 10).
+  - **Second run (2026-11-15, `run_cb947add77b4`):** `claude:haiku@default` launches with `--agent claude --model haiku` and no `--effort` (style `flag`), and settles. No hand edits were needed.
+  - **Hand edits needed to finish (first run):** `CLERICAL_PAIR` changed from `claude:haiku@medium` to `claude:sonnet@low` (issue 7), and `__pycache__/` added to `.git/info/exclude` (issue 10).
 
 ## Session mailboxes (tested 2026-11-13 from an Orca chat session)
 

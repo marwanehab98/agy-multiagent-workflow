@@ -142,3 +142,26 @@ These were made by the test owner with the user's approval so the run could cont
 | B | `common.result_words` cuts the line at the first sentence break and drops trailing punctuation; the architect's settle has a fixed two-part shape | `test_run_task`, `test_run_finish`, `test_run_design`, architect scenario 5 |
 | C | `run_finish.py` passes the design's AC ids to the final reviewer, which lists exactly those | `test_run_finish` |
 | D | `BASELINE_OK=yes` after a passing baseline; resume skips item 5 | coordinator scenario 4 |
+
+## Second live run (run `run_cb947add77b4`, topic `tempconv-cli`, 2026-11-15 21:05–21:48)
+
+Project `/home/marwan/Projects/omw-temp-test` (a new temperature-converter CLI, two tasks). Picks: coordinator `claude:sonnet@low`, architect `claude:sonnet@medium`, EGM and base `antigravity:gemini-4-hydrogen@low`. The user was played by the session that made the fixes, through `orca terminal send`; it chose "Sign off and run EGM", "Start the build" and "keep the branch".
+
+**Fixes confirmed live:**
+- Setup asked every question as a multiple-choice dialog, paged the 7-row Antigravity model menu as 3 + `More`, and handed off as a terminal.
+- Requirements were saved to `.run/requirements.md` before the test launches; nothing was discarded, and the architect committed its own copy (issue 1).
+- The design relay ended in a choice block, in plain words, with a recommendation (issues 5, 6, 12); choosing EGM set `EGM_REQUESTED=yes`. No second sign-off was asked.
+- `run-values.txt` used `BASELINE_SKIP=VERIFY_1` from the start; the baseline logged it as skipped and set `BASELINE_OK=yes`, with no architect round (issue 9).
+- `CLERICAL_PAIR=claude:haiku@default` passed its test launch (launch style `flag`, no `--effort`), and the `pr` and `report` jobs ran on it (issue 7).
+- The `.git/info/exclude` cache patterns kept `__pycache__` out of every check: no commit worker was needed (issue 10).
+- Every architect `RESULT:` line was bare; results were saved as `architect-1.md` to `-4.md` without overwrites (B, A).
+- The final reviewer got `AC-1 AC-2 AC-3 AC-4 AC-5` and wrote one line for each (C).
+- Task 01 went through two stage-2 fix rounds on the same implementer and merged; task 02 passed first time; final review PASS; verification exit 0. The delivered tool was checked by hand against all four requirements and passes, with 21 tests.
+
+**New defects found and fixed:**
+- **N1. Setup paged menus of exactly 4 rows** (3 + `More`, with the 4th row hidden in `More`'s description). Fixed in `0e8ad16`: 2–4 rows are always one question; only 5+ rows page. Checked with a fresh agent on 4-, 5- and 9-row menus.
+- **N2. The coordinator showed a choice block's dialog without the relay text** (one `AskUserQuestion` call, so the user saw only the question, not the design). A first rewrite still failed in a live rehearsal: the reader stopped at step 4 and never reached the choice paragraph below. Fixed in `0b69ae1`: Rule 5 step 2 itself holds both forms, and the dialog's question carries `From the architect:` plus the whole relay text. A live rehearsal on Sonnet at low effort then showed the full relay inside the dialog. The run's coordinator had loaded the old text, so its go-ahead dialog had the same gap.
+
+**Open observations (not fixed):**
+- The coordinator adds its own sentences ("Your answer ... is back with the architect", a description of a review's findings), outside its fixed lines (Rules 4 and 14). Harmless here.
+- After EGM's two Minor fixes, the architect went on to the plan without the `NOTIFY` the new text asks for.
