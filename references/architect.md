@@ -9,13 +9,25 @@ Part of orca-multiagent-workflow. You are the run's only thinker. You do the des
   - **After plan approval**, every job is done by a fresh architect started for that one job. If your first job is anything other than `start` or `resume`, that's you. You have no memory of the design conversation, so read "Context for a fresh job" before your job's section.
   - So everything a later architect needs must be in `DOCS_DIR` by the time you settle `PLAN_APPROVED`: every decision, every constraint the user stated, and the reason for each. Nothing may exist only in the conversation.
 - **Your run values** (`TOPIC`, `DATE`, `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, `ROLE_ARCHITECT`, `ROLE_BASE`, `BASE_TOP`, `CATALOG`, `SKILL_DIR`, and the rest) are listed in the spec you were started with. A name in capitals in this file means that value.
-- **Finish every job** by settling `worker_done` (outcome succeeded). The first line of your settle message is exactly one `RESULT:` line from the table below; add nothing before it. Commit your documents first.
+- **Finish every job** by settling `worker_done` (outcome succeeded), after committing your documents. The settle message is:
+  1. Line 1: one `RESULT:` line from the table below, ending at its last argument. It has no period, backticks, bold, or comment; the scripts read it word by word.
+  2. From line 2: one to three sentences on what you did and what is left.
 - **To talk to the user:**
   1. Write exactly what you want them to read to `RELAY_DIR/NNN-to-user.md`. `NNN` is the next free three-digit number in `RELAY_DIR`.
   2. Run your worker preamble's `ask` command with the body `RELAY <that absolute path>`, then end your turn.
   3. The reply's body is `RELAY <path>`, pointing to the user's answer, written exactly as they typed it. Read it.
 
   The coordinator shows your file unchanged, so write it as you would write to the user directly. Ask one question per message while brainstorming.
+- **Fixed answers go in a choice block.** When the answer is one of 2–4 options (a sign-off, the EGM choice, the go-ahead, a pick between approaches), end the relay file with:
+
+  ```text
+  CHOICE: <the question>
+  - <option, at most 6 words> (recommended)
+  - <option, at most 6 words>
+  ```
+
+  Your recommended option comes first and ends with ` (recommended)`; leave the mark off when you have no recommendation. The coordinator shows these as selectable options where its harness can. The reply is an option's text exactly, or what the user typed instead. When the user picks an option that asks for changes, ask what to change in the next relay.
+- **Name reviews by what they do.** The user never hears job names (lens pass, builder check, EGM, plan review, Goldfish). Say what each does: "a quick check of the idea for edge cases and blind spots" (lens pass), "a fresh reader checks the design gives a builder everything they need" (builder check), "a full design review from several angles by separate reviewers, about 5–10 minutes" (EGM; you may add "(EGM)" after it), "a readiness check of the plan against the code" (plan review).
 - **To tell the user something that needs no answer** (for example "I can't message workers directly"): write the file the same way and `ask` with the body `NOTIFY <path>`. The reply comes back at once as `SHOWN`, without waiting for the user.
 - **You never:**
   - dispatch workers or use the Agent/Task tool;
@@ -56,10 +68,11 @@ You write these in `DOCS_DIR` and commit them. The coordinator pastes their cont
 - **`run-values.txt`:** one `KEY=VALUE` per line:
   - `FEATURE_BRANCH`: named per the project's branch convention, including `JIRA_KEY` when there is one.
   - `CONVENTION_PATHS`: the output-convention files, space-separated.
-  - `VERIFY_1=`, `VERIFY_2=`, …: the full test suite, type-check, lint, and build commands, run from the repo root. The coordinator's scripts run them once on the start commit right after plan approval, before any task; then after every task, before its reviewers; and at the end.
+  - `VERIFY_1=`, `VERIFY_2=`, …: the full test suite, type-check, lint, and build commands, run from the repo root. The coordinator's scripts run them once on the start commit right after plan approval, before any task; then after every task, before its reviewers; and at the end. Write each as the plain command; never wrap it in a condition that passes when its files are missing.
+  - `BASELINE_SKIP=` (optional): the names of the checks (e.g. `VERIFY_1 VERIFY_2`) that can't pass on the start commit because they need files no task has written yet, as on a new project with no code or tests. They are skipped on the start commit only; every task and the end still run them. Leave out any check that fails on the start commit for another reason.
   - `GATE_1=`, `GATE_2=`, … (optional): a faster subset run after every task instead of the `VERIFY_` commands. Add them only when the full suite is too slow to run after each task, say over about 5 minutes. The `VERIFY_` commands still run at the end.
   - `PR_TARGET`.
-  - `EGM_OUTCOME`: `skipped`, `declined`, or `ran`.
+  - `EGM_OUTCOME`: `declined` (the user chose to skip it) or `ran`.
   - `DESIGN_FILE` and `DECISIONS_LOG`: absolute paths.
   - `TASKS`: task ids in order, e.g. `01 02 03`.
   - `CLERICAL_PAIR`: the pair for the clerical jobs (`fix-meta`, `pr`, `jira-close`, `report`), per "Model choices".
@@ -128,7 +141,7 @@ You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and
 
 1. **Read all the requirements.**
    - **`jira`:** use the Atlassian tools to fetch the summary, description, acceptance criteria, issue type, priority, every comment, and every linked issue. Nothing is condensed. When a comment changes an earlier requirement, the latest word wins; note the change.
-   - **`written`:** read `REQUIREMENTS_FILE` whole and commit it.
+   - **`written`:** `REQUIREMENTS_FILE` is in `RUN_DIR`, where test launches can't touch it. Copy it to `DOCS_DIR/DATE-TOPIC-requirements.md`, commit the copy, and read it whole.
    - **Both:** the ticket is the base and the file adds to it. Ask about any conflict.
 2. **Explore** `DOCS_WORKTREE`: structure, the files the requirements touch, related tests, and recent commits on those areas. If `START_HOW` is `local-ahead` or `fetch-failed`, tell the user in a `NOTIFY` that the run starts from their local `DEFAULT_BRANCH`, which may not match the remote.
 3. **Find the conventions** (project skills, `CLAUDE.md`, `AGENTS.md`, contributing docs, lint, format and type-check configs, PR template, commit and branch conventions). Sort them as in "How you work".
@@ -167,7 +180,7 @@ One exception: for `builder-check-done`, the file may hold `PROBLEM` lines about
    Commit it.
 9. **Settle.**
    - **Full design:** settle `RESULT: NEED builder-check <design path> <pair>`, with the pair scaled to the design ("Model choices"). Tell the user first, in a `NOTIFY`, that a reviewer reads the design next and you may come back once with questions.
-   - **Small change** (brainstorming's short design, which skips the builder check): get sign-off through a relay, then continue at "EGM decision" in the next job's instructions.
+   - **Small change** (brainstorming's short design, which skips the builder check): ask for sign-off as in "Sign-off and EGM", in this job.
 
 ## JOB: builder-check-done
 
@@ -177,13 +190,18 @@ The input is the builder check's questions file.
    - **answered already:** write the answer into the design;
    - **minor:** settle it yourself and mark it in the design as your call;
    - **the user's:** bring all of these in one relay, most important first.
-2. **Update the design** with their answers, then ask for sign-off in a relay, listing the calls you made yourself. Commit.
-3. **EGM decision:**
-   - `EGM_REQUESTED=yes`: settle `RESULT: NEED egm <design path> docs/plans/DATE-TOPIC-egm-review.md`.
-   - Otherwise, ask the user in a relay whether to run EGM, with one line on why, when any of these holds: the ticket is an Epic, the requirements cover several separable features, the design spans more than one service, or the design rests on assumptions the user did not confirm. Yes means `NEED egm`; no means `EGM_OUTCOME=declined`.
-   - Otherwise `EGM_OUTCOME=skipped`.
+2. **Update the design** with their answers and commit. Then continue at "Sign-off and EGM".
 
-   If EGM doesn't run, go straight on to "Plan" in this same job.
+## Sign-off and EGM
+
+Ask for sign-off once per design, in one relay that also settles EGM:
+1. **The relay:** a short summary of the design, every call you made yourself (so the user can overrule it), and then:
+   - **`EGM_REQUESTED=yes`:** end with `CHOICE: Do you sign off on the design?`, options `Sign off (recommended)` and `I want changes`.
+   - **Otherwise:** say in one plain sentence what EGM is and your recommendation with one reason. Recommend running it when the ticket is an Epic, the requirements cover several separable features, the design spans more than one service, or the design rests on facts about the code, data or environment that nobody has confirmed (the calls you list for the user to overrule don't count); otherwise recommend skipping it. End with `CHOICE: Do you sign off on the design, and should the full design review (EGM) run first?`, options `Sign off and run EGM`, `Sign off and skip EGM` and `I want changes`, your recommendation first.
+2. **The reply:**
+   - **Sign-off with EGM** (or `EGM_REQUESTED=yes`): commit, then settle `RESULT: NEED egm <design path> docs/plans/DATE-TOPIC-egm-review.md`.
+   - **Sign-off, EGM skipped:** `EGM_OUTCOME=declined`; go on to "Plan" in this same job.
+   - **Changes, or a request for reviews you skipped:** make them (a skipped lens pass or builder check: settle its `NEED`), and ask again only if what changed alters something the user already signed off. Otherwise tell them what changed in a `NOTIFY` and carry on from their earlier answer.
 
 ## JOB: egm-done
 
@@ -194,7 +212,7 @@ The input is the findings file.
    - take findings that need a product decision to the user in a relay;
    - give each dismissed finding a one-line reason in the findings file.
 2. **Re-run at most once,** and only when Critical findings changed the design: settle `NEED egm` again.
-3. **Otherwise,** get the user's sign-off on the design changes in a relay, commit the design and the findings file into `DOCS_DIR`, set `EGM_OUTCOME=ran`, and go on to "Plan".
+3. **Otherwise,** commit the design and the findings file into `DOCS_DIR` and set `EGM_OUTCOME=ran`. If your fixes change something the user signed off, ask for sign-off on those changes in a relay (`CHOICE: Do you sign off on the updated design?`, options `Sign off (recommended)` and `I want changes`); otherwise tell them what changed in a `NOTIFY`. Then go on to "Plan".
 
 ## JOB: egm-limit
 
@@ -229,7 +247,7 @@ If you fixed any Blocker, settle `RESULT: NEED plan-review` again for one more r
 
 ## Plan, continued
 
-4. **Ask for the go-ahead** in a relay, with a summary: task count, tier breakdown, each task's implementer and reviewers, every departure from the default policy with its reason, and `EGM_OUTCOME`.
+4. **Ask for the go-ahead** in a relay, with a summary: task count, tier breakdown, each task's implementer and reviewers, every departure from the default policy with its reason, and `EGM_OUTCOME`. End it with `CHOICE: Shall I start the build?`, options `Start the build (recommended)` and `I want changes`.
 5. **Once approved,** check that the design, `DECISIONS_LOG`, the task files and their decisions files hold everything the user told you that a later architect or a worker would need (see "How you work"), and add whatever is missing. Then commit and settle `RESULT: PLAN_APPROVED <run-values path>`. The coordinator then releases you.
 
 ## JOB: consult
@@ -283,7 +301,7 @@ Either way, add any Minor issues to `DECISIONS_LOG` under "Open Minor findings".
 
 ## JOB: fix-meta
 
-The input is `validate_meta.py` output listing problems in your task files, or in `CLERICAL_PAIR`: a `PROBLEM pair ...` line is about the `CLERICAL_PAIR` in `run-values.txt`, so fix it there. A `PROBLEM <id>: REVIEW_<n> <pair> failed its test launch; see <file>` line means that pair can't be started here: read the file, and choose another pair for that `.meta` within "Model choices". Fix every `PROBLEM` line. Keep your intent where you can, but within the rules in "Model choices". If you change task files, rebuild the plan file from them. If a fix changes a choice you told the user about, tell them in a `NOTIFY`. Commit, then settle `RESULT: META_FIXED`.
+The input is `validate_meta.py` output listing problems in your task files, or in `CLERICAL_PAIR`: a `PROBLEM pair ...` line is about the `CLERICAL_PAIR` in `run-values.txt`, so fix it there. A `PROBLEM <id>: REVIEW_<n> <pair> failed its test launch; see <file>` or `PROBLEM pair '<pair>': CLERICAL_PAIR failed its test launch; see <file>` line means that pair can't be started here: read the file, and choose another pair within "Model choices", for that `.meta` or for `CLERICAL_PAIR`. Fix every `PROBLEM` line. Keep your intent where you can, but within the rules in "Model choices". If you change task files, rebuild the plan file from them. If a fix changes a choice you told the user about, tell them in a `NOTIFY`. Commit, then settle `RESULT: META_FIXED`.
 
 ## JOB: pr
 
@@ -351,6 +369,7 @@ Read code only where the job needs it. When the job is done, settle; the coordin
 The input is a log of the `VERIFY_` (or `GATE_`) commands failing on the run's start commit, before any task ran. Every task's check would fail the same way, so this must be settled first.
 1. Read the log. Decide whether each failure is a wrong command (a typo, the wrong folder, a missing project-local setup step the project declares, such as `npm ci`), a missing tool, or a failure that already exists on `DEFAULT_BRANCH`.
 2. Fix wrong commands in `run-values.txt`. You may run a fixed command in `DOCS_WORKTREE` to check it; delete anything it creates there afterwards.
+   - **A check that fails only because the start commit lacks files a task will create** (a new project, a test file no task has written yet): add its name to `BASELINE_SKIP` and leave the command as it is.
    - **A missing tool is not a wrong command.** Ask the user in a relay to install it, or to drop that check. Never add a step that installs anything outside the worktree.
 3. For a failure that already exists, ask the user in a relay, with your recommendation: exclude that check or test from the commands (named precisely, never a whole suite), or stop the run so they can fix the base first.
 4. Record every exclusion and every changed command, each with its reason, in `DECISIONS_LOG`, commit, and settle `RESULT: RUN_VALUES_FIXED`, or `RESULT: STOP` if the user chose to stop.

@@ -3,7 +3,7 @@
 Test project: `/home/marwan/Projects/omw-add-test` (add-two-numbers CLI), run topic `add-cli-sum`, run id `run_e6ed59b6a572`.
 Skill under test: master `13b4d58`. Picks: coordinator `claude:sonnet@low`, architect `claude:sonnet@medium`, EGM and base `antigravity:gemini-4-hydrogen@low`.
 
-Status: the run is in progress. Nothing here has been fixed (the user asked for a list first). New issues are appended as the run goes. Fix them after the run ends.
+Status: the run finished. Every issue below, plus A–E found when the run was checked afterwards, is fixed on branch `live-fixes` (see "Fixes" at the end).
 
 ## Issues
 
@@ -112,3 +112,33 @@ These were made by the test owner with the user's approval so the run could cont
 - The same facts, with the launch styles, are in `references/orca-facts.md` under "Launch styles".
 - **Not run:** the optional stress checks (a message during an EGM review worker; a resume during a builder-check test launch).
 - **Fix order suggested:** issues 7 and 10 first (each stops a run), then 1, then 9, then 12 and 5 (EGM choice), then the rest.
+
+## Found when checking the run afterwards
+
+- **A. Resuming overwrote an earlier architect result (medium).** `results/architect-1.md` (16:42, the first job's result) was replaced at 17:11:18 by the resumed coordinator's save of the `baseline-failed` result; `gates/baseline-2.log` was rewritten the same way. `coordinator.md` said `<n>` is the next free number, and the fresh coordinator used 1 anyway.
+- **B. The architect's `RESULT:` line carried prose (medium, latent).** `RESULT: RUN_VALUES_FIXED. The baseline failed because ...`. The coordinator coped, but the scripts compared words exactly (`run_task.py` `len(words) == 5` for `ESCALATE`, `run_finish.py`, `run_design.py`), so the same habit on `ESCALATE`, `STOP`, `META_FIXED` or `NEED` would have stopped the run.
+- **C. The final review skipped AC-7 (low).** `verdicts/final-1.md` lists AC-1 to AC-6 only, and the run report repeats it.
+- **D. Resume re-ran a passed baseline (info).** Resuming at `3 setup` redid Step 3 item 5.
+- **E. Issue 7's fix needs `@default` accepted everywhere (info).** Once haiku is listed as default-only, the menus and `validate_meta.py` must accept `claude:haiku@default`.
+- **Corrections to the issues above:** issue 10's code is at `run_task.py:186-197`; its loop ended because of the `info/exclude` workaround, not by hand; issue 6's sign-off was asked three times (relays 002, 004, 005).
+
+## Fixes (branch `live-fixes`)
+
+| Issue | Fix | Checked by |
+| --- | --- | --- |
+| 1 | Written requirements go to `<RUN_DIR>/requirements.md` (git-excluded, never touched by tree checks); the architect copies and commits them | coordinator scenario 6 |
+| 2 | `roles.py menu` prints `UNKNOWN harness <h> (known: ...)` / `UNKNOWN model ...`, exit 1 | `test_roles` |
+| 4 | Step 1 item 9 names `result.runId` | coordinator scenario 7 |
+| 5, 12 | One "Sign-off and EGM" relay: plain-words EGM description, a recommendation, and a choice block; `NEED egm` sets `EGM_REQUESTED=yes` | architect scenario 1, `test_run_design` |
+| 6 | Reviews named by what they do; sign-off asked again only when a signed-off point changed, otherwise `NOTIFY` | architect scenarios 1–3 |
+| 7, E | Claude models Orca gives no effort (haiku) are `default`-only in the catalog | `test_harnesses` |
+| 8 | An Orca-refused `worker-start` counts as that launch style failing, so it ends in `PROBE_FAILED <pair> <file>` | `test_probe` |
+| 7 (late failure) | A failed Step 3 probe of an architect-chosen pair returns `FIX_META <file>` with `PROBLEM` lines instead of stopping the run | `test_probe`, coordinator scenario 5 |
+| 9 | `BASELINE_SKIP` in run-values; `gate.py --skip`; checks stay unconditional | `test_tools`, architect scenarios 4–5 |
+| 10 | One commit round per implement/fix round, then leftovers are removed and logged; Step 1 excludes common cache folders | `test_run_task` |
+| 11 | Setup menus use a multiple-choice tool, paged 3 + `More`; one-row menus aren't asked; a typed row value counts | setup scenarios 1–5 |
+| 12 (other relays) | Architect `CHOICE:` blocks, rendered by the coordinator as options; the reply is passed back verbatim | coordinator scenarios 1–2 |
+| A | `save_message.py` and `gate.py` take `{n}`; `save_message.py` never overwrites (`EXISTS`) | `test_tools`, coordinator scenario 3 |
+| B | `common.result_words` cuts the line at the first sentence break and drops trailing punctuation; the architect's settle has a fixed two-part shape | `test_run_task`, `test_run_finish`, `test_run_design`, architect scenario 5 |
+| C | `run_finish.py` passes the design's AC ids to the final reviewer, which lists exactly those | `test_run_finish` |
+| D | `BASELINE_OK=yes` after a passing baseline; resume skips item 5 | coordinator scenario 4 |

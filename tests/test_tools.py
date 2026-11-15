@@ -60,6 +60,13 @@ class GateTests(unittest.TestCase):
         self.assertEqual(rc, 64)
         self.assertIn("UNKNOWN_SKIP VERIFY_9", out)
 
+    def test_skip_names_of_the_other_prefix_are_fine(self):
+        self.rv.write_text("VERIFY_1=true\nGATE_1=test -e add.py\n")
+        rc, out = py(GATE, "--run-values", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
+                     "--log", str(self.d / "g-{n}.log"), "--skip", "VERIFY_1 GATE_1")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("GATE_1 skipped", out)
+
     def test_empty_skip_skips_nothing(self):
         self.assertEqual(self.gate("--skip", "")[0], 1)
 

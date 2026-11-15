@@ -9,7 +9,8 @@ Usage:
 when run-values has no GATE_ lines. --prefix VERIFY runs only VERIFY_ lines.
 --log may contain {n}: it becomes the first number with no existing file, so a rerun never
 overwrites an earlier log. --skip names checks (e.g. "VERIFY_1 VERIFY_2", from run-values'
-BASELINE_SKIP) that are logged as skipped and not run; a name the chosen checks lack is bad usage.
+BASELINE_SKIP) that are logged as skipped and not run, when they are among the chosen checks;
+a name no GATE_ or VERIFY_ line has is bad usage, so one --skip serves both baseline runs.
 Each command runs with the shell, from the worktree root. All commands run even after
 one fails, so the log shows every failure at once.
 Exit 0: every command passed and the worktree is clean at <head>.
@@ -35,6 +36,11 @@ def commands(run_values, prefix):
     return sorted(chosen)
 
 
+def commands_all(run_values, prefix):
+    """Every check with this prefix, with no fallback (for validating --skip names)."""
+    return [c for c in commands(run_values, prefix) if c[1].startswith(prefix + "_")]
+
+
 def git(wt, *args):
     return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True)
 
@@ -54,9 +60,10 @@ def main():
         print(f"NO_COMMANDS no {a.prefix}_n or VERIFY_n lines in {a.run_values}")
         return 64
     skip = a.skip.split()
-    unknown = [s for s in skip if s not in {name for _, name, _ in cmds}]
+    every = [name for prefix in ("GATE", "VERIFY") for _, name, _ in commands_all(a.run_values, prefix)]
+    unknown = [s for s in skip if s not in every]
     if unknown:
-        print(f"UNKNOWN_SKIP {' '.join(unknown)} (checks: {' '.join(name for _, name, _ in cmds)})")
+        print(f"UNKNOWN_SKIP {' '.join(unknown)} (checks: {' '.join(every)})")
         return 64
     head = git(a.worktree, "rev-parse", "HEAD").stdout.strip()
     want = git(a.worktree, "rev-parse", f"{a.head}^{{commit}}").stdout.strip()

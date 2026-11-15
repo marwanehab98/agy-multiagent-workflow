@@ -30,15 +30,17 @@ The session that loads this skill is the **setup session**, whatever its harness
 
 1. **Detect:** run `mkdir -p <CFG>`, then `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`.
 2. **Remembered picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py remembered --roles <CFG>/roles.json --catalog <CATALOG>`.
-   - **`AVAILABLE yes`:** show the four `role=pair` lines in one block, then say exactly "Reply \"same\" to use these picks again, or \"new\" to choose again." This is a fixed prompt. "same" goes to item 4 with those picks; "new" goes to item 3.
-   - **`AVAILABLE no <role> <pair>`** (one line per vanished pick): for each line, say exactly "Your last <role> pick, <pair>, isn't available any more, so pick the <role> again." and ask that role as in item 3. Keep the remembered picks that are still available, and go to item 4. Never choose a replacement yourself, however close a model looks or whatever the user delegates to you: only a number the user picks from the menu counts.
+   - **`AVAILABLE yes`:** show the four `role=pair` lines in one block, then ask "Use these picks again?" as in "Asking" below, with the options `same` and `new`. This is a fixed prompt. "same" goes to item 4 with those picks; "new" goes to item 3.
+   - **`AVAILABLE no <role> <pair>`** (one line per vanished pick): for each line, say exactly "Your last <role> pick, <pair>, isn't available any more, so pick the <role> again." and ask that role as in item 3. Keep the remembered picks that are still available, and go to item 4. Never choose a replacement yourself, however close a model looks or whatever the user delegates to you: only a row the user picks from the menu counts.
    - **`NONE`:** go to item 3.
-3. **Ask the four roles,** in this order: coordinator, architect, EGM, base implementer. For each, ask three questions in turn, each a numbered list in plain text, not a multiple-choice tool. `MENU` means `python3 -I <SKILL_DIR>/scripts/roles.py menu --catalog <CATALOG>`:
+3. **Ask the four roles,** in this order: coordinator, architect, EGM, base implementer. For each, ask three questions in turn, as in "Asking" below. `MENU` means `python3 -I <SKILL_DIR>/scripts/roles.py menu --catalog <CATALOG>`:
    1. harness: `MENU`;
    2. model: `MENU --harness <harness>`;
    3. effort: `MENU --harness <harness> --model <model>`.
 
-   Each menu line is `N<TAB>value<TAB>label`. Ask "<role>: which <harness|model|effort>?", then one line per row, `N. label`, then any `BROKEN` lines exactly. The reply is a number from the list; anything else gets the same list again. The pick is `<harness>:<model>@<effort>`, using each chosen row's value.
+   Each menu line is `N<TAB>value<TAB>label`; show any `BROKEN` lines exactly before the question. The question is "<role>: which <harness|model|effort>?", and the rows are its options, labelled with each row's label, in menu order. A menu with exactly one row isn't asked: take that row and say "<role> <harness|model|effort>: <label>, the only option." The pick is `<harness>:<model>@<effort>`, using each chosen row's value.
+
+   **Asking.** With a multiple-choice question tool (such as `AskUserQuestion`), ask with it: header `Setup`, one option per row, no option marked recommended. It takes at most 4 options, so a longer menu goes in pages: rows 1–3 plus an option `More`, which asks again with the next rows; a page with 4 or fewer rows left shows them all. Without such a tool, write the question, then one line per row, `N. label`. The answer is the row the user selected, or a typed reply that is exactly a row's number, value or label; anything else, including free text that names no row, gets the same question again.
 4. **Check the picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py check --catalog <CATALOG> --jira <yes if the request has a JIRA key, else no> --coordinator <pair> --architect <pair> --egm <pair> --base <pair>`.
    - **Exit 0:** show any `NOTE` line exactly, and go on.
    - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't hand off (Rule 21).
@@ -108,6 +110,8 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
    4. Reply to the ask with `--body "RELAY <that path>"`.
 
    You don't summarize, shorten, reword, translate, fix, or comment, in either direction. A worker's answer goes back the same way, as `--body "$(cat <answer file>)"`.
+
+   **A choice block.** When the file ends with a line `CHOICE: <question>` followed only by 2–4 lines `- <option>`, and you have a multiple-choice question tool (such as `AskUserQuestion`): in step 2 send the file's text above the `CHOICE:` line, then ask `<question>` with that tool, header `Architect`, one option per `- ` line in order, each label the line's text exactly after `- `. The user's answer is the selected option's label, or the text they typed instead; step 3 writes that, character for character. Without such a tool, send the whole file in step 2 as usual.
 
    An ask with the body `NOTIFY <path>` is a message that needs no answer. Show it to the user exactly as in step 2, then reply to the ask at once with `--body "SHOWN"`, without waiting for the user.
 6. **One implementer at a time,** in one shared worktree `<IMPL_WORKTREE>`. The next task starts only after the current one passed both reviews and was merged.
