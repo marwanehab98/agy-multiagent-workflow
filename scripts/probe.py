@@ -3,7 +3,9 @@
 A probe worker starts in DOCS_WORKTREE with a spec that only asks it to settle OK. Each pair
 is tried with its harness's launch styles in order; the first that settles succeeded is
 recorded as LAUNCH_STYLE_<key>. Failures are appended to <RUN_DIR>/results/probe-<key>.md.
-After each probe worker the docs worktree is checked against PROBE_HEAD; any change is discarded.
+After each probe worker the docs worktree is checked against PROBE_HEAD; any change is discarded,
+except in the resume set (ruling R11): an architect may be working there, so a change is only logged
+(run-log line and the pair's results file) and left as is, and nothing is ever reset.
 It never polls: a call starts every pending pair at once, then exits at the first wait.
 
 Usage:
@@ -28,7 +30,8 @@ Exit 64  bad usage
 
 State keys: PROBE_SET, PROBE_PAIR, PROBE_HEAD, PROBE_STYLE_<key> (index of the style being tried),
 PROBE_DISPATCH_<key>, PROBE_RECHECK_<key> (resume: probe again), LAUNCH_STYLE_<key> (written on success). Needs DOCS_WORKTREE and CATALOG.
-Embeddable: Prober(run, orca).advance(pairs) returns on PROBED and raises Done otherwise.
+Embeddable: Prober(run, orca[, keep=True]).advance(pairs) returns on PROBED and raises Done otherwise;
+keep=True logs tree changes instead of discarding them.
 """
 import argparse
 import json
@@ -47,8 +50,8 @@ NUDGE = ("You ended your turn without settling this task. If a command you start
 
 
 class Prober:
-    def __init__(self, run, orca):
-        self.r, self.o = run, orca
+    def __init__(self, run, orca, keep=False):
+        self.r, self.o, self.keep = run, orca, keep
         self.catalog = json.loads(Path(run.need("CATALOG")).read_text(encoding="utf-8"))
         self.wt = run.need("DOCS_WORKTREE")
 
@@ -133,11 +136,16 @@ class Prober:
         self.r.set(**{f"PROBE_DISPATCH_{key}": dispatch, f"PROBE_STYLE_{key}": idx})
 
     def finish(self, dispatch, pair):
-        """Release the probe worker and put the docs worktree back if it changed anything."""
+        """Release the probe worker and put the docs worktree back if it changed anything (keep: log only)."""
         self.o.release(dispatch)
         head = self.r.need("PROBE_HEAD")
         rc, out = tool("check-tree.sh", self.wt, head)
-        if rc != 0:
+        if rc != 0 and self.keep:
+            note = f"probe {pair}: docs worktree differs from {head} ({out}); left as is"
+            self.r.log(note)
+            with self.results_file(pair_key(pair)).open("a", encoding="utf-8") as f:
+                f.write(f"## {note}\n")
+        elif rc != 0:
             rc2, out2 = tool("discard-changes.sh", self.wt, head)
             self.r.log(f"probe {pair}: docs worktree changed ({out}); discarded: {out2} (exit {rc2})")
 
@@ -184,7 +192,7 @@ def run_advance(r, set_name, one):
     set_name, one = r.get("PROBE_SET"), r.get("PROBE_PAIR")
     if not set_name:
         raise Done(ERROR, "ERROR NO_PROBE_SET pass --set step1|step3|resume|pair")
-    Prober(r, o).advance(set_pairs(r, set_name, one))
+    Prober(r, o, keep=set_name == "resume").advance(set_pairs(r, set_name, one))
     raise Done(PROBED, "PROBED")
 
 

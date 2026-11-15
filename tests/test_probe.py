@@ -127,6 +127,21 @@ class ProbeTest(Base):
         last, _ = self.until(40, "PROBE_FAILED")
         self.assertTrue(last.startswith("PROBE_FAILED ag:g@"))
 
+    def test_resume_never_discards_the_architects_work(self):
+        (self.docswt / "notes.md").write_text("uncommitted architect notes\n")
+        self.behave("ok", "ok", "ok", "ok")
+        self.expect_probe(10, "WAIT", "--set", "resume")
+        g = lambda *a: sh("git", "-C", str(self.docswt), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+        (self.docswt / "design.md").write_text("design\n")
+        g("add", "design.md")
+        g("commit", "-qm", "architect commit after PROBE_HEAD")
+        head = g("rev-parse", "HEAD")
+        self.until(0, "PROBED")
+        self.assertEqual(g("rev-parse", "HEAD"), head)
+        self.assertEqual((self.docswt / "notes.md").read_text(), "uncommitted architect notes\n")
+        self.assertIn("left as is", (self.run_dir / "run-log.md").read_text())
+        self.assertIn("left as is", (self.run_dir / "results" / "probe-cl_big_high.md").read_text())
+
     def test_old_format_state_is_refused(self):
         s = self.st()
         del s["ROLE_ARCHITECT"]

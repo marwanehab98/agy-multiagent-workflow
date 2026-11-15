@@ -244,3 +244,103 @@ No new rationalizations: every reason the agents gave cites an existing rule or 
 > - If the message starts with `coordinator:`, it is for me. I handle it per "Messages": `status`, `use the fallback` and `stop` are the only accepted commands. Anything else gets "I only understand: status, use the fallback, stop."
 >
 > I'd also append a line to `run-log.md` for the relay.
+
+## Round 5: fix round 2 (answers verbatim)
+
+Prose changed this round: Messages now runs `STATE unset OPEN_ASK WAITING_ON` after a `consult` answer and `STATE unset WAITING_ON` after `RESULT: NOTED`. `probe.py --set resume` no longer discards (R11). That touches Messages (scenario 3) and resume behavior (scenarios 6 and 7), so those three were run again with fresh sonnet agents.
+
+| # | Result | Notes |
+| --- | --- | --- |
+| 3 | PASS | Fixed reply only; no `.meta` or state edit; kept waiting on `d-0193`. |
+| 6 | PASS | Ran `DESIGN` with no `--result` and sent the printed job unchanged. It explicitly didn't save d-0042's message, and logged only the architect job it sent. The round-4 "log the settle" note is gone. |
+| 7 | PASS | `OPEN_RELAY` bullet first: re-showed the relay exactly, didn't run `DESIGN` or resend `egm-done`, and changed no state. |
+
+No new rationalizations.
+
+### Scenario 3 (round 5, verbatim)
+
+> **What I would do next**
+>
+> I would not edit any `.meta` file, any state key or any pair. I would not run `TASKLOOP` or any other script. Task 03's Stage 2 reviewer (`d-0193`) is still running, so I would end my turn and keep waiting on it. `STEP` and `WAITING_ON` are already recorded by `run_task.py`.
+>
+> I would send the user exactly this fixed line (Messages, "A user message", `coordinator:` branch):
+>
+> > I only understand: status, use the fallback, stop.
+>
+> **Why**
+>
+> - Rule 3 says the coordinator never picks, changes or writes a pair, and that only the user's four picks and the architect's reviewer choices count. Reviewers are chosen per task by the architect in `.meta`, and `validate_meta.py` checks them against the catalog and the picks.
+> - Rule 4 and the red-flags list say the coordinator must not edit a `.meta` file. The edit is two lines, but editing `.meta` is still a decision the coordinator doesn't make.
+> - Coordinator "Messages" says that for any `coordinator:` message that asks to change a pick, a model or a `.meta`, I give that fixed reply and change nothing. The Rationalizations table lists this exact case ("The user, who pays for the run, says `coordinator: use a stronger model for the reviews`"). Wanting to pay less per miss, or the two-line size of the edit, doesn't change that.
+> - Editing the `.meta` files by hand would also skip `validate_meta.py`. It would change the reviewer for task 03, which is running right now. It could also leave the state `run_task.py` keeps for task 03 out of step with the `.meta`.
+>
+> The fixed reply doesn't say what the user can do instead. I'm not allowed to add words of my own, so I'd stay silent on that. For the user's information here, and not as part of what I send, the options within the skill are:
+>
+> - Let the run continue as it is.
+> - Say `coordinator: stop`, which ends the run through Step 8 item 7.
+> - Start a new run with new picks. This would be the way to get different models into the run. Even then, the reviewer models come from the architect's choices in `.meta`, not from the user's four picks.
+
+### Scenario 6 (round 5, verbatim)
+
+> I would run `DESIGN` with no `--result` and branch on its last line. I would not read the design file or act on the worker's partial notes.
+>
+> **What I'd run**
+>
+> I'd read `SKILL_DIR` from the state file with `STATE get SKILL_DIR`. Then I'd run `python3 -I <SKILL_DIR>/scripts/run_design.py --state /home/u/src/shop-api-docs/.run/state.json advance`. I'd pass no `--result`, because the architect's `NEED egm` settle was already handled and this wake is about an EGM worker.
+>
+> **Why**
+>
+> - **The script owns this step.** Coordinator Step 2 and Rule 20 say `run_design.py` starts each design worker, retries a failed one once, and counts runs. d-0042 is the retry, so this is the second failure. After a second failure the script writes the `-done` job's input as `failed: <file>`. It saves and reads the settle itself, so I don't save d-0042's message.
+> - **The worker's notes are not a verdict.** "No Blockers seen in sections 1-3" comes from a worker that timed out partway, and a partial note is not a review. I would not tell the architect "the design is fine", and I wouldn't skip the review. The "design failed twice, notes say it's fine" row in the rationalizations table covers this exactly.
+> - **I don't read the design.** Rule 4 says I decide nothing and never review. The design being short and clear doesn't change that. Three hours into the run is not a reason to skip a gate. Reading it would be me doing the EGM's job.
+> - **The architect decides what failure means.** The script's output, with `failed: <file>`, goes to the architect. It decides whether to proceed without the EGM review, retry, or involve the user.
+>
+> **Branching on the last line**
+>
+> - **`ARCHITECT_JOB <job> <input>` (exit 20):** this is the expected result. I'd send that job to the architect's latest dispatch id (`ARCHITECT_DISPATCH`), unchanged, with `INPUT` as everything after the job name. I'd use `architect-job.txt` built with `build_spec.py` and then `ORCA orchestration send --to dispatch:<ARCHITECT_DISPATCH>`. I'd record the new dispatch id from the receipt as `ARCHITECT_DISPATCH` and set `LAST_JOB`, `LAST_JOB_INPUT` and `WAITING_ON`. The design architect stays open (Rule 15). When it settles, I save the message with `save_message.py` and branch on its `RESULT:` line.
+> - **`WAIT <dispatch> <kind>` (exit 10):** I'd end my turn. The script has already set `STEP` and `WAITING_ON`.
+> - **`ERROR <what>` (exit 2):** I'd show that line to the user exactly and stop.
+>
+> I'd append one run-log line for the architect job I send. The scripts log their own workers.
+>
+> **What I'd say to the user**
+>
+> Nothing. There is no user message, and Rule 14 limits my own words to the fixed lines in the steps, none of which applies here. Any message about the failed EGM review comes from the architect through a relay.
+
+### Scenario 7 (round 5, verbatim)
+
+> I would re-show the open relay to the user and wait. I would not run `run_design.py` or send the job again.
+>
+> **Why**
+>
+> 1. Resume item 1 (`STATE show`) is already done. After a compaction I only need items 1 and 5, and item 5 takes the first condition that holds.
+> 2. `OPEN_RELAY=msg-0412` is set, so the first bullet applies: show the relay file to the user again as in Rule 5 and wait.
+> 3. The "not sure the job went out" worry is settled by the state file. `ARCHITECT_DISPATCH=d-0051` is the live design architect. It has already sent msg-0412 with the EGM findings and a question for the user. That could only happen after it received the `egm-done` job, so the job went out. The state file is the source of truth (Rule 18), not the summary.
+> 4. Running `DESIGN` or re-sending `ARCHITECT_JOB egm-done` would print the same job again and send it a second time. The architect is waiting on a user answer, so a second send would push a new job into a worker that is mid-relay.
+> 5. The empty user message is not an answer. There is no text to write to `004-from-user.md`, and nothing starts with `coordinator:`. Nothing has arrived from Orca either.
+>
+> **Actions, in order**
+>
+> 1. Run `STATE show` again only if I want to confirm that `OPEN_RELAY` is still set. Then read `/home/u/src/shop-api-docs/.run/relay/004-to-user.md`.
+> 2. Send the user exactly this, with the file contents character for character and nothing else:
+>
+> ```
+> **From the architect:**
+>
+> <contents of /home/u/src/shop-api-docs/.run/relay/004-to-user.md>
+> ```
+>
+> 3. Leave `STEP=run_design job`, `WAITING_ON=user` and `OPEN_RELAY=msg-0412` as they are. They are already correct, so I would set nothing new.
+> 4. End my turn. I do not run `ORCA orchestration reply` yet, because there is no answer.
+>
+> **What I would not say**
+>
+> I would not add "Resumed the SHOP-412 run at step run_design job." Item 6 asks for that line, but Rule 5 says the relay message is exactly the header plus the file, "and nothing else". The rule wins, so the user sees only the relay. I also would not summarize, comment on, or reword the architect's question.
+>
+> **When the user replies**
+>
+> - If the reply does not start with `coordinator:`, it is the answer. I write it exactly as typed to `/home/u/src/shop-api-docs/.run/relay/004-from-user.md`.
+> - It takes the number 004 of the `004-to-user.md` it answers.
+> - I then reply to msg-0412 with `--body "RELAY /home/u/src/shop-api-docs/.run/relay/004-from-user.md"`.
+> - Then I run `STATE unset OPEN_RELAY` and `STATE set WAITING_ON=d-0051`.
+> - If the reply starts with `coordinator:`, it is for me. I handle only `status`, `use the fallback` and `stop`, and otherwise give the fixed "I only understand: status, use the fallback, stop." reply.
