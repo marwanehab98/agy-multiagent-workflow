@@ -40,7 +40,11 @@ The session that loads this skill is the **setup session**, whatever its harness
 
    Each menu line is `N<TAB>value<TAB>label`; show any `BROKEN` lines exactly before the question. The question is "<role>: which <harness|model|effort>?", and the rows are its options, labelled with each row's label, in menu order. A menu with exactly one row isn't asked: take that row and say "<role> <harness|model|effort>: <label>, the only option." The pick is `<harness>:<model>@<effort>`, using each chosen row's value.
 
-   **Asking.** With a multiple-choice question tool (such as `AskUserQuestion`), ask with it: header `Setup`, one option per row, no option marked recommended. It takes at most 4 options, so a longer menu goes in pages: rows 1–3 plus an option `More`, which asks again with the next rows; a page with 4 or fewer rows left shows them all. Without such a tool, write the question, then one line per row, `N. label`. The answer is the row the user selected, or a typed reply that is exactly a row's number, value or label; anything else, including free text that names no row, gets the same question again.
+   **Asking.** With a multiple-choice question tool (such as `AskUserQuestion`), ask with it: header `Setup`, no option marked recommended, and the options set by the number of rows (not counting the free-text choice the tool adds):
+   - **2–4 rows:** one question, one option per row. Never a `More` option.
+   - **5 or more rows:** pages. The first page is rows 1–3 plus an option `More`, which asks again with the remaining rows the same way, until 4 or fewer remain; those form the last page.
+
+   Without such a tool, write the question, then one line per row, `N. label`. The answer is the row the user selected, or a typed reply that is exactly a row's number, value or label; anything else, including free text that names no row, gets the same question again.
 4. **Check the picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py check --catalog <CATALOG> --jira <yes if the request has a JIRA key, else no> --coordinator <pair> --architect <pair> --egm <pair> --base <pair>`.
    - **Exit 0:** show any `NOTE` line exactly, and go on.
    - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't hand off (Rule 21).
