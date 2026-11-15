@@ -110,5 +110,71 @@ class SaveMessageTests(unittest.TestCase):
         self.assertEqual((self.results / "log.md").read_text(), "first\nRESULT: NOTED\nsummary\n")
 
 
+MERGE_LOCAL = SKILL / "scripts" / "merge-local.sh"
+
+
+class MergeLocalTests(unittest.TestCase):
+    """The user's "merge locally" choice at the end of a run: fast-forward only, never losing their work."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="mergelocal-"))
+        self.main = self.d / "main"
+        self.main.mkdir()
+        g = self.g
+        g("init", "-q", "-b", "main")
+        (self.main / "README.md").write_text("x\n")
+        g("add", ".")
+        g("commit", "-qm", "init")
+        g("branch", "feature")
+        g("worktree", "add", "-q", str(self.d / "impl"), "feature")
+        (self.d / "impl" / "a.txt").write_text("a\n")
+        sh("git", "-C", str(self.d / "impl"), "add", ".")
+        sh("git", "-C", str(self.d / "impl"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "a")
+        self.tip = sh("git", "-C", str(self.main), "rev-parse", "feature")
+
+    def g(self, *a):
+        return sh("git", "-C", str(self.main), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+
+    def merge(self):
+        r = subprocess.run(["bash", str(MERGE_LOCAL), str(self.main), "main", "feature"], capture_output=True, text=True)
+        return r.returncode, r.stdout.strip()
+
+    def test_checked_out_and_clean_fast_forwards_the_checkout(self):
+        rc, out = self.merge()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out, f"MERGED main={self.tip}")
+        self.assertEqual(self.g("rev-parse", "HEAD"), self.tip)
+        self.assertTrue((self.main / "a.txt").is_file())
+
+    def test_uncommitted_changes_in_the_checkout_refuse(self):
+        (self.main / "README.md").write_text("edited\n")
+        rc, out = self.merge()
+        self.assertEqual(rc, 2)
+        self.assertTrue(out.startswith("CHECKOUT_DIRTY"), out)
+        self.assertIn("README.md", out)
+        self.assertNotEqual(self.g("rev-parse", "main"), self.tip)
+
+    def test_untracked_files_alone_do_not_block(self):
+        (self.main / "notes.txt").write_text("mine\n")
+        rc, out = self.merge()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual((self.main / "notes.txt").read_text(), "mine\n")
+
+    def test_target_not_checked_out_moves_by_compare_and_swap(self):
+        self.g("switch", "-q", "-c", "other")
+        rc, out = self.merge()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.g("rev-parse", "main"), self.tip)
+        self.assertEqual(self.g("rev-parse", "--abbrev-ref", "HEAD"), "other")
+
+    def test_diverged_target_refuses(self):
+        (self.main / "b.txt").write_text("b\n")
+        self.g("add", ".")
+        self.g("commit", "-qm", "b on main")
+        rc, out = self.merge()
+        self.assertEqual(rc, 3)
+        self.assertTrue(out.startswith("NOT_FAST_FORWARD"), out)
+
+
 if __name__ == "__main__":
     unittest.main()

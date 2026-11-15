@@ -181,3 +181,22 @@ Project `/home/marwan/Projects/omw-wordfreq-test`, a new Node.js CLI tested with
 - Both tasks passed both reviews on the first attempt; final review PASS; verification exit 0. Checked by hand: output, ties, `--top`, empty input, every error case (one line, `wordfreq:` prefix, under 80 characters, exit 2); 14 tests pass.
 
 **New defects:** none in the skill.
+
+## Fourth live run: everything enabled (run `run_35128b63bb17`, topic `todo-cli-json`, 2026-11-15 23:19 to 2026-11-16 01:24)
+
+Project `/home/marwan/Projects/omw-todo-test`, a new Python to-do CLI with JSON storage, three tasks. Same picks as run 3. The request asked not to skip any optional review and to run EGM.
+
+**Paths covered for the first time live:**
+- The full design path: lens pass (11 findings), builder check with its own test launch (0), EGM (1 Important, 5 Minor), plan review (0). It ran only after the user asked again (see N5).
+- `BASELINE_SKIP` for two checks on the empty repo.
+- **Final-fix loop:** final reviews 1–3 each found one real Important bug (deep-nesting RecursionError, a missing-file message, a lone-surrogate traceback). Each became a final-fix task (F1–F3), built and reviewed through the task loop. After two rounds the fixed prompt "continue or stop" appeared; "continue" led to F3, and final review 4 passed.
+- **Resume:** the coordinator terminal was closed while task 02's implementer ran. A fresh session asked to "continue it" found the state, handed off to a new terminal coordinator, re-probed all six pairs, restored `STEP`, and waited on the same implementer dispatch. The run finished from there.
+- **Usage limit:** the coordinator hit the 5-hour limit after starting final review 4, resumed by itself at the reset, and carried on.
+- **Merge locally and cleanup:** see N6. After the user merged, Step 8 removed the implementation worktree and the report followed.
+- The delivered tool was checked by hand: add/list/done/remove, ids never reused, every error one line with exit 2, a corrupt file left untouched; 49 tests pass.
+
+**New defects, both fixed (branch `run-notes`):**
+- **N5. The user's run instructions were dropped at intake.** "Don't skip any of the optional review passes" reached nobody: Step 1 saves only the requirements and the `EGM_REQUESTED` flag, so the architect took the small-change path and skipped the lens pass and builder check. Fix: Step 1 saves the sentences about how to run the work, verbatim, to `.run/run-notes.md` (`RUN_NOTES`, in the architect start spec). The architect commits a copy and follows it wherever it has a choice; a request for every review pass forces the full design path. Checked 3 of 3: the right sentence is saved (the handoff instruction left out) and the architect settles `NEED lens` on a small change.
+- **N6. "Merge back to main locally" was offered and then refused.** The finishing skill offers it, but Rule 13 forbids the coordinator from touching the main checkout, so it gave the user a git command instead. Fix: `scripts/merge-local.sh` fast-forwards the target only. If the target is checked out in the main checkout, it requires no uncommitted tracked changes and uses `merge --ff-only`; otherwise it does a compare-and-swap `update-ref`. It refuses a diverged target. Step 8 item 4 and Rule 13 route a local merge through it. Unit tests: 5. Checked 2 of 2: success goes on to cleanup and the report; a dirty checkout shows the reason and offers the options again.
+
+**Seen, not fixed:** after EGM, the go-ahead mentioned that it "slightly tightens" a rule the user had signed off on, instead of a separate sign-off. The go-ahead asks for approval anyway.
