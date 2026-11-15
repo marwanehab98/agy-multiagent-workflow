@@ -1,0 +1,19 @@
+Installed plugins:
+
+  ❯ superpowers@claude-plugins-official
+    Version: 7.0.2
+    Scope: user
+    Status: ✔ enabled
+
+  ❯ superpowers@claude-plugins-official
+    Version: 7.0.2
+    Scope: project
+    Status: ✔ enabled
+
+Synced from claude.ai:
+
+  ❯ engineering@synced
+    Version: 1.2.0
+    Path: /home/user/.config/orca/claude-profiles/e2ff5987-a8bc-4d10-8b3e-6c96079739c2/home/plugins/synced/c1825c0b-4063-4f91-a050-fa150b6ead59_e1b7a8d2-9ad9-446d-ba7c-e6e620a7fd16/engineering
+    Status: ✔ loaded
+

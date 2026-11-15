@@ -1,0 +1,13 @@
+Installed plugins:
+- android-cli-plugin (enabled, 1.0.16625370)
+    Source:     antigravity-plugins-official
+    Components: 3 skills
+- egm (enabled, 0.1.1)
+    Source:     antigravity
+    Components: 7 skills, 10 agents
+- modern-web-guidance-plugin (enabled, 1.0.0)
+    Source:     antigravity-plugins-official
+    Components: 2 skills
+- superpowers (enabled, 7.0.2)
+    Source:     antigravity
+    Components: 15 skills

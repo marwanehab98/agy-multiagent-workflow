@@ -1,0 +1,5 @@
+Checking MCP server health…
+
+claude.ai Atlassian MCP: https://mcp.atlassian.com/v2/mcp - ✔ Connected
+claude.ai Context7: https://example.com/mcp - ✔ Connected
+claude.ai Linear: https://example.com/mcp - ! Needs authentication

@@ -1,0 +1,2 @@
+NAME                  TYPE   STATUS   COMMAND/URL
+atlassian-mcp-server  stdio  enabled  npx -y mcp-remote https://mcp.atlassian.com/v1/sse
