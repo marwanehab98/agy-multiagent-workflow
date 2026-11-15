@@ -1,0 +1,94 @@
+{
+ "detected_at": "2026-11-15T00:00:00+00:00",
+ "harnesses": {
+  "ag": {
+   "orca_agent": "ag-agent",
+   "binary": "/bin/ag",
+   "version": "1.0",
+   "styles": [
+    "slug",
+    "flag"
+   ],
+   "models": [
+    {
+     "model": "g",
+     "label": "G model",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+     ]
+    }
+   ],
+   "skills": {
+    "orca-multiagent-workflow": "/skills/orca-multiagent-workflow",
+    "orchestration": "/skills/orchestration",
+    "orca-cli": "/skills/orca-cli",
+    "verification-before-completion": "/skills/verification-before-completion",
+    "finishing-a-development-branch": "/skills/finishing-a-development-branch",
+    "brainstorming": "/skills/brainstorming",
+    "writing-plans": "/skills/writing-plans",
+    "egm-brainstorm": "/skills/egm-brainstorm",
+    "egm-review": "/skills/egm-review",
+    "egm-review-loop": "/skills/egm-review-loop",
+    "test-driven-development": "/skills/test-driven-development"
+   },
+   "plugins": [],
+   "mcp": {
+    "claude_ai_Atlassian": true
+   },
+   "broken": null
+  },
+  "cl": {
+   "orca_agent": "cl-agent",
+   "binary": "/bin/cl",
+   "version": "2.0",
+   "styles": [
+    "flag"
+   ],
+   "models": [
+    {
+     "model": "big",
+     "label": "Big",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    {
+     "model": "small",
+     "label": "Small",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    }
+   ],
+   "skills": {
+    "orca-multiagent-workflow": "/skills/orca-multiagent-workflow",
+    "orchestration": "/skills/orchestration",
+    "orca-cli": "/skills/orca-cli",
+    "verification-before-completion": "/skills/verification-before-completion",
+    "finishing-a-development-branch": "/skills/finishing-a-development-branch",
+    "brainstorming": "/skills/brainstorming",
+    "writing-plans": "/skills/writing-plans",
+    "egm-brainstorm": "/skills/egm-brainstorm",
+    "egm-review": "/skills/egm-review",
+    "egm-review-loop": "/skills/egm-review-loop",
+    "test-driven-development": "/skills/test-driven-development"
+   },
+   "plugins": [],
+   "mcp": {
+    "claude_ai_Atlassian": true
+   },
+   "broken": null
+  }
+ }
+}

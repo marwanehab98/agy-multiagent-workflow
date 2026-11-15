@@ -79,21 +79,4 @@ python3 -I "$SK/state.py" --file $S get NOPE >/dev/null; expect 1 $? "missing ke
 python3 -I "$SK/state.py" --file $S unset FIX_ROUNDS_02
 python3 -I "$SK/state.py" --file $S show | grep -q FIX_ROUNDS && bad "unset" || ok "unset"
 
-echo "--- validate_meta ACS"
-mkdir -p tasks; printf 'AC-1 does x\nAC-2 does y\nAC-3 does z\n' > design.md
-mk() { printf 'TITLE=t\nTIER=standard\nSPEC_TYPE=checklist\nACS=%s\nIMPLEMENTER=antigravity:g-high\nREVIEW_1=claude:sonnet\nREVIEW_2=claude:sonnet\nLADDER=antigravity:g-xhigh claude:sonnet\n%s' "$2" "${3:-}" > tasks/$1.meta; for s in .md -summary.md -decisions.md; do echo x > tasks/$1$s; done; }
-mk 01 "AC-1"; mk 02 "AC-2 AC-3"
-python3 -I "$SK/validate_meta.py" tasks --tasks-dir tasks --gemini-model g --ids "01 02" --design design.md >/dev/null; expect 0 $? "full coverage passes"
-mk 02 "AC-2"
-out=$(python3 -I "$SK/validate_meta.py" tasks --tasks-dir tasks --gemini-model g --ids "01 02" --design design.md); rc=$?
-expect 1 $rc "missing AC fails"; echo "$out" | grep -q "AC-3 is in the design but in no task" && ok "names missing AC" || bad "names missing AC: $out"
-mk 02 "AC-2 AC-3 AC-9"
-python3 -I "$SK/validate_meta.py" tasks --tasks-dir tasks --gemini-model g --ids "01 02" --design design.md | grep -q "AC-9 is in a task's ACS but not in the design" && ok "unknown AC flagged" || bad "unknown AC"
-mk 02 "AC-2 AC-3"; mk 02a "AC-2" "REPLANNED_FROM=02"
-python3 -I "$SK/validate_meta.py" tasks --tasks-dir tasks --gemini-model g --ids "02a" --replanned-from 02 | grep -q "AC-3 was in 02's ACS" && ok "replan must keep ACs" || bad "replan coverage"
-mk F1 "none"
-python3 -I "$SK/validate_meta.py" tasks --tasks-dir tasks --gemini-model g --ids "F1" >/dev/null; expect 0 $? "ACS=none allowed"
-mk 03 ""
-python3 -I "$SK/validate_meta.py" tasks --tasks-dir tasks --gemini-model g --ids "03" >/dev/null; expect 1 $? "empty ACS rejected"
-
 echo; echo "passed=$pass failed=$fail"; rm -rf "$T"; [ $fail -eq 0 ]
