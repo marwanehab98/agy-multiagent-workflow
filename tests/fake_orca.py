@@ -16,6 +16,9 @@ Behaviors ({"do": ...}):
   idle-then-commit       ends its turn unsettled; a `send` makes it commit and settle
   ok                     settle succeeded with OK           ok-edit        edit a tracked file, then settle OK
   idle-forever           ends its turn unsettled every time, even after a `send`
+  write-output           write the output file named in the spec ("Write ... to <path>"; a relative path is
+                         resolved in the worktree), settle succeeded. {"edit": true} also edits a tracked file
+  write-empty            same, but the file is empty
 
 World key "launch_rules" (optional): a list of {"agent", "model", "effort"} (effort may be null = no --effort).
 When present, a worker-start matching no rule consumes no behavior and fails like a model the account lacks.
@@ -71,6 +74,15 @@ def review_file(w, d):
     return m.group(1)
 
 
+def output_file(w, d, wt):
+    m = re.search(r"Write\b[^\n]*? to (\S+?)[,.:](?:\s|$)", w["tasks"][d["taskId"]]["spec"])
+    if not m:
+        raise SystemExit("spec has no output file")
+    path = Path(wt, m.group(1))  # an absolute path wins
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def act(w, d, wt, b):
     task, do = d["taskId"], b["do"]
     done = lambda outcome, body: (send(w, d["id"], task, "worker_done", body, {"outcome": outcome}),
@@ -115,6 +127,13 @@ def act(w, d, wt, b):
         Path(wt, tracked).write_text("reformatted\n")
         Path(review_file(w, d)).write_text("Critical: none.\nVERDICT: PASS\n")
         done("succeeded", "Reviewed and reformatted a file.")
+    elif do in ("write-output", "write-empty"):
+        path = output_file(w, d, wt)
+        path.write_text("" if do == "write-empty" else "Critical: none.\nImportant: x.md:1 unclear.\n")
+        if b.get("edit"):
+            tracked = subprocess.run(["git", "-C", wt, "ls-files"], capture_output=True, text=True).stdout.split()[0]
+            Path(wt, tracked).write_text("edited by a design worker\n")
+        done("succeeded", f"written {path}")
     elif do == "ok":
         done("succeeded", "OK")
     elif do == "ok-edit":
