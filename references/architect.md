@@ -321,7 +321,7 @@ The input is something the user wrote outside a relay. If it changes requirement
 - record it in `DECISIONS_LOG` and the affected task files;
 - reply to the user in a relay if they need an answer.
 
-Settle `RESULT: NOTED`.
+Commit, then settle `RESULT: NOTED`. An uncommitted record can be wiped when a review worker running in the docs worktree finishes.
 
 ## JOB: resume
 
