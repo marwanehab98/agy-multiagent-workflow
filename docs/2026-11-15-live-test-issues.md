@@ -165,3 +165,19 @@ Project `/home/marwan/Projects/omw-temp-test` (a new temperature-converter CLI, 
 **Follow-up fixes (branch `minor-fixes`):**
 - **N3. The coordinator narrated its turns** ("Your answer ... is back with the architect", a description of a review's findings), outside its fixed lines. Answering in description mode didn't reproduce it (3 of 3 said they'd print nothing), so it was tested in live Sonnet-low terminal rehearsals against a stubbed `run_task.py`: on the old text, 6 of 6 turns ended in narration paragraphs. Fix: "What you print" in `coordinator.md`, an exact end-of-turn block (`Merged task <id> at <head>.` lines, then `Waiting: <what>`). After two tightening rounds: the block was right in every turn, turn 2 was clean 3 of 3, and turn 1 still had a one-sentence preamble 2 of 3, never about a worker's output. Known residue.
 - **N4. EGM's results reached the user only as a count.** The separate `NOTIFY` after `egm-done` was skipped live. Before the fix, 0 of 3 go-ahead relays said what changed. Fix: no `NOTIFY` after `egm-done` unless a signed-off point changed; the go-ahead relay has a required **Reviews** list (one line per review since the user last saw the design: findings by severity and what changed). After: 3 of 3 sent no separate notice and listed every review with its changes.
+
+## Third live run (run `run_757a3648bd1d`, topic `wordfreq-cli`, 2026-11-15 22:33–23:03)
+
+Project `/home/marwan/Projects/omw-wordfreq-test`, a new Node.js CLI tested with `node --test`, two tasks. Picks: coordinator `claude:sonnet@low`, architect `claude:sonnet@medium`, EGM `antigravity:gemini-4-hydrogen@low`, base `antigravity:gemini-3.8-flash@low` (a model not used before). The user was played through `orca terminal send`: it chose "new" picks, answered one design question, chose "Sign off and skip EGM", started the build, sent a plain message during a review, and kept the branch.
+
+**Confirmed live:**
+- Setup: the 4-row Claude model menu was one question (N1); the 5-row effort menu and 7-row Antigravity menu were paged; "More" gave a last page of 4.
+- Every architect relay with a choice block showed the whole relay inside the dialog, headed "From the architect:" (N2). This included a real design question (ASCII vs Unicode letters) with a recommendation.
+- The coordinator ended every waiting turn with the `Waiting:` line, and merge turns with `Merged task <id> at <head>.` (N3). Some mid-turn commentary remained during Step 1 ("Test-launch workers have settled; running PROBE again.").
+- The go-ahead relay had the **Reviews** list: lens pass and builder check skipped, EGM declined, plan review ran with 0 findings (N4). `EGM_OUTCOME=declined`.
+- **Stress check, never run before:** a plain message sent while task 01's first reviewer ran was saved verbatim and sent as a `user-message` job only after the loop's wait. The architect recorded it in the design, tasks and decisions log and committed it. `TASKLOOP --docs-moved` then logged "docs worktree moved by an architect job: PROBE_HEAD DOCS_HEAD now d9ceb41", the commit survived, and later reviews saw the constraint.
+- `claude:haiku@default` again passed its test launch and ran the `pr` and `report` jobs.
+- The baseline passed with no skip: `node --test` exits 0 when there are no tests, and the architect correctly added no `BASELINE_SKIP`.
+- Both tasks passed both reviews on the first attempt; final review PASS; verification exit 0. Checked by hand: output, ties, `--top`, empty input, every error case (one line, `wordfreq:` prefix, under 80 characters, exit 2); 14 tests pass.
+
+**New defects:** none in the skill.
