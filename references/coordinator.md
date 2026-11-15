@@ -14,7 +14,8 @@ Part of orca-multiagent-workflow. The Rules in SKILL.md hold throughout.
 - **File numbers:** `<n>` or `<NNN>` in a file name is the next free number in that folder. The exception is `<NNN>-from-user.md`, which takes the number of the `<NNN>-to-user.md` it answers. All paths you pass to scripts are absolute.
 - **Fixed prompts:** some steps stop with a fixed prompt and list the replies they accept. While one is open, a user message that isn't one of those replies and doesn't start with `coordinator:` gets the same prompt again, followed by "Reply with exactly one of: <the accepted replies>." Don't send it to the architect.
 - **Record every dispatch id you start** in the state file, and **keep a run log:** append one line per event to `<RUN_DIR>/run-log.md`, `<time> <event>` for what you do yourself: the architects you start and their settles, merges you see, the PR URL. The scripts log their own workers.
-- **Launch arguments:** `ARGS(<pair>)` means `$(python3 -I <SKILL_DIR>/scripts/harnesses.py args --state <RUN_DIR>/state.json --pair <pair>)`. It prints the `--agent`, `--model` and `--effort` options for that pair, in the launch style its test launch proved. Never type those options yourself (Rule 3).
+- **Launch arguments:** `ARGS(<pair>)` means the one line `python3 -I <SKILL_DIR>/scripts/harnesses.py args --state <RUN_DIR>/state.json --pair <pair>` prints: the `--agent`, `--model` and `--effort` options for that pair, in the launch style its test launch proved. Run it on its own first. Exit 0: put its line where `ARGS(...)` stands. Any other exit: show the user its output exactly and stop; never put that output into a `worker-start`. Never type those options yourself (Rule 3).
+- **An architect job in flight comes first** (from sending it until you've handled its `RESULT:` line). Never run `DESIGN`, `PROBE`, `TASKLOOP` or `FINISH` then, even when Orca wakes you about one of their workers: keep waiting. **`--docs-moved` is only for `consult` and `user-message`** (Messages): those jobs run while a script waits, and may commit in the docs worktree, which that script would reset away. Once you've handled the `RESULT:` of one of them, if `STEP` names a script, run it once with `--docs-moved` added, which keeps those commits, and branch as its step says: `DESIGN`, `TASKLOOP` or `FINISH` when `STEP` starts with `run_design`, `run_task` or `run_finish`; `PROBE` when it ends in `probe`. Every other job's `RESULT:` goes where its step says, without the flag. Never set the scripts' keys yourself.
 - **Architect jobs** (Rule 15). Set `LAST_JOB=<JOB>`, `LAST_JOB_INPUT=<input>` and `WAITING_ON=<ARCHITECT_DISPATCH>` (the new id) before you end your turn. The architect settles with a `RESULT:` line: save the settle with `save_message.py --dispatch <ARCHITECT_DISPATCH> --type worker_done --out <RUN_DIR>/results/architect-<n>.md`, and branch on its first line.
   - **Design phase** (`PHASE=design`): build `architect-job.txt`, run `ORCA orchestration send --to dispatch:<ARCHITECT_DISPATCH> --subject "Architect job: <JOB>" --body "$(cat <spec file>)"`, and record the new dispatch id from the receipt as `ARCHITECT_DISPATCH`.
   - **After plan approval:** build `architect-start.txt` with `FIRST_JOB=<JOB>` and `INPUT=<input>`, run `ORCA orchestration worker-start --spec-file <spec> --task-title "Architect job: <JOB>" --worktree path:<DOCS_WORKTREE> ARGS(<the job's pair>) --json`, and record its dispatch id as `ARCHITECT_DISPATCH`. Once you've handled its `RESULT:` line, release it.
@@ -48,14 +49,14 @@ Part of orca-multiagent-workflow. The Rules in SKILL.md hold throughout.
 3. **Find the main checkout.** `MAIN_CHECKOUT` is `git rev-parse --show-toplevel`. `DEFAULT_BRANCH` is `git -C <MAIN_CHECKOUT> symbolic-ref --short refs/remotes/origin/HEAD` without its `origin/` prefix; if that fails, `git -C <MAIN_CHECKOUT> branch --show-current`. The run never checks out a branch in the main checkout, so it doesn't need to be clean.
 4. **Choose the start commit:** run `bash <SKILL_DIR>/scripts/start-point.sh <MAIN_CHECKOUT> <DEFAULT_BRANCH>`. It prints `START <sha> <how>`, which gives `START_SHA` and `START_HOW`. On exit 3, say exactly "Local `<DEFAULT_BRANCH>` and `origin/<DEFAULT_BRANCH>` have diverged. Reconcile them, then tell me \"retry\"." This is a fixed prompt; "retry" repeats this item.
 5. **Check for an earlier run of this topic.** Run `git -C <MAIN_CHECKOUT> worktree list --porcelain`, and look for a worktree on `refs/heads/<TOPIC>-docs`.
-   - **If one exists and its `.run/state.json` exists,** say exactly "There's already a run for <TOPIC> at <its path>. Reply \"resume\" to continue it, or \"new\" to start a separate run." This is a fixed prompt. "resume" goes to "Resume a run" with that state file, and "new" goes to the next bullet.
+   - **If one exists and its `.run/state.json` exists,** say exactly "There's already a run for <TOPIC> at <its path>. Reply \"resume\" to continue it, or \"new\" to start a separate run." This is a fixed prompt. "new" goes to the next bullet. "resume" hands that run to its own coordinator, since picks are fixed for a run and you started on the new ones: do SKILL.md "Continue a run" item 3 with that state file, then stop this session. Create nothing first.
    - **If `<TOPIC>-docs` or `<TOPIC>-impl` exists as a branch** (`git -C <MAIN_CHECKOUT> show-ref --verify refs/heads/<name>`), or the user said "new," change `TOPIC` to `<TOPIC>-<k>`, the smallest `<k>` from 2 up for which neither branch exists.
 6. **Create the docs worktree:**
    1. Run `ORCA worktree create --name <TOPIC>-docs --branch <TOPIC>-docs --base-branch <START_SHA>`. If Orca refuses a commit as the base, run it again with `--base-branch <DEFAULT_BRANCH>`. Record its path as `DOCS_WORKTREE`. Then `DOCS_DIR` is `<DOCS_WORKTREE>/docs/plans`, `RUN_DIR` is `<DOCS_WORKTREE>/.run`, and `RELAY_DIR` is `<RUN_DIR>/relay`.
    2. `bash <SKILL_DIR>/scripts/check-tree.sh <DOCS_WORKTREE> <START_SHA>` must exit 0. On exit 1, run `bash <SKILL_DIR>/scripts/discard-changes.sh <DOCS_WORKTREE> <START_SHA>`; the branch is new, so nothing is lost.
    3. Append `.run/` to `$(git -C <MAIN_CHECKOUT> rev-parse --git-common-dir)/info/exclude`, plus `<DOCS_WORKTREE>`'s parent folder (e.g. `.worktrees/`) if it is inside `<MAIN_CHECKOUT>`. Run `mkdir -p <DOCS_DIR> <RELAY_DIR> <RUN_DIR>/specs <RUN_DIR>/verdicts <RUN_DIR>/asks <RUN_DIR>/gates <RUN_DIR>/results`.
 7. **Create the state file:** `STATE set` every value from items 1–6, plus `ORCA=<the resolved executable>` and `PHASE=design`.
-8. **Copy the picks:** run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <RUN_DIR>/catalog.json`, then `python3 -I <SKILL_DIR>/scripts/roles.py to-state --roles <ROLES_FILE> --state <RUN_DIR>/state.json --catalog <RUN_DIR>/catalog.json`. It sets `ROLE_COORDINATOR`, `ROLE_ARCHITECT`, `ROLE_EGM`, `ROLE_BASE`, `BASE_TOP` and `CATALOG`.
+8. **Copy the picks:** run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <RUN_DIR>/catalog.json`; then `roles.py check` as in item 1, with `--catalog <RUN_DIR>/catalog.json`; then `python3 -I <SKILL_DIR>/scripts/roles.py to-state --roles <ROLES_FILE> --state <RUN_DIR>/state.json --catalog <RUN_DIR>/catalog.json`, which sets `ROLE_COORDINATOR`, `ROLE_ARCHITECT`, `ROLE_EGM`, `ROLE_BASE`, `BASE_TOP` and `CATALOG`. If any of the three exits other than 0, show the user its output exactly and stop (Rule 21).
 9. **Bind the Orca run:** run `ORCA orchestration run-create --objective "orca-multiagent-workflow: <TOPIC>" --json`, and record its run id as `RUN_ID`.
 10. **Test-launch the picks:** run `PROBE --set step1` and branch on its last line:
 
@@ -81,7 +82,7 @@ Branch on `DESIGN`'s last line:
 
 | Last line (exit) | Do |
 | --- | --- |
-| `WAIT <dispatch> <kind>` (10) | End your turn. When Orca wakes you with that worker's settle or an escalation for it, run `DESIGN` (no `--result`) and branch again; the script saves and reads the settle. |
+| `WAIT <dispatch> <kind>` (10) | End your turn. When Orca wakes you with that worker's settle or an escalation for it, run `DESIGN` (no `--result`) and branch again, unless an architect job is in flight (How you work); the script saves and reads the settle. |
 | `ARCHITECT_JOB <job> <input>` (20) | Send the architect job `<job>` with `INPUT=<input>` (everything after the job name), unchanged. Its next `RESULT:` line goes through the list above. |
 
 `run_design.py` checks the docs worktree, test-launches the builder-check pair, starts each worker, retries a failed one once, counts runs, and writes the `-done` job's input, including `failed: <file>` after a second failure. You never do any of that in this step, and never read a design worker's output.
@@ -97,7 +98,7 @@ Branch on `DESIGN`'s last line:
    - **Exit 1:** `STATE incr BASELINE_FAILS`. At 3, show the user the last log's path and stop. Otherwise send job `baseline-failed` with `INPUT=<that log>`. `RESULT: RUN_VALUES_FIXED` repeats this item; `RESULT: STOP` goes to Step 8 item 7.
 6. **Write the queue:** put the `TASKS` ids, space-separated, in `<RUN_DIR>/queue.txt`. It is the only list of tasks you follow; `REPLAN` and `FINAL_FIX` change it.
 7. **Validate the plan:** run `python3 -I <SKILL_DIR>/scripts/validate_meta.py tasks --state <RUN_DIR>/state.json --tasks-dir <DOCS_DIR>/tasks --ids "<the queue>" --design <DESIGN_FILE> > <RUN_DIR>/validate-<n>.txt`, then `python3 -I <SKILL_DIR>/scripts/validate_meta.py harness-pair --state <RUN_DIR>/state.json --pair <CLERICAL_PAIR> >> <the same file>`.
-   - **Both exit 0:** go on.
+   - **Both exit 0:** `STATE set META_FAILS=0` and go on.
    - **Otherwise:** `STATE incr META_FAILS`. At 3, show the user the last output and stop. Otherwise send job `fix-meta` with `INPUT=<that file>`. On `RESULT: META_FIXED`, read `CLERICAL_PAIR` from `<RUN_VALUES>` again, `STATE set` it, and repeat this item.
 8. **Test-launch the plan's pairs:** run `PROBE --set step3` and branch as in Step 1 item 10, with `STEP="3 probe"`; `PROBED` goes on to item 9.
 9. **Tell the user exactly:** "Plan approved: <number of tasks> tasks. Implementation is starting." Then go to Step 4.
@@ -117,7 +118,7 @@ Branch on `DESIGN`'s last line:
    | `PROMPT <file> <reply>...` (30) | A fixed prompt. Show the user the file's contents exactly, and nothing else. A reply that is one of the listed words: run `TASKLOOP --reply <word>`. Any other reply that doesn't start with `coordinator:`: show the file again, followed by "Reply with exactly one of: <the words>." |
    | `STOP <reason>` (40) | Dispatch nothing more and go to Step 8 item 7. |
 
-2. **Whenever Orca wakes you** with a `worker_done`, or an escalation with `stopReason` or `failureKind`, from a worker in this loop, run `TASKLOOP` again. A worker's ask and an `approval` are handled by "Messages", and the loop keeps waiting.
+2. **Whenever Orca wakes you** with a `worker_done`, or an escalation with `stopReason` or `failureKind`, from a worker in this loop, run `TASKLOOP` again, unless an architect job is in flight (How you work). A worker's ask and an `approval` are handled by "Messages", and the loop keeps waiting.
 
 You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in this step; the script does all of it.
 
@@ -128,7 +129,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 | Last line (exit) | Do |
 | --- | --- |
 | `VERIFIED <log>` (0) | Go to item 4, with `<log>` as the passing verify log. |
-| `WAIT <dispatch> final-review` (10) | End your turn. When Orca wakes you about that worker, run `FINISH` again. |
+| `WAIT <dispatch> <kind>` (10) | End your turn. When Orca wakes you about that worker (a final reviewer, or a `probe` of a final-fix task's reviewer pairs), run `FINISH` again. |
 | `ARCHITECT_JOB <job> <input>` (20) | Send job `<job>` with `INPUT=<input>`. When the architect settles, save its message, release it, and run `FINISH --architect-result <the saved file>`. |
 | `RUN_QUEUE <F id>` (21) | `queue.txt` now holds that task: go to Step 4. Its `QUEUE_EMPTY` brings you back here. |
 | `PROMPT <file> <reply>...` (30) | A fixed prompt, handled as in Step 4, with `FINISH --reply <word>`. |
@@ -144,11 +145,11 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 ## Messages (any step)
 
 - **An architect ask whose body is `RELAY <path>` or `NOTIFY <path>`:** relay it (Rule 5). For `RELAY`, `STATE set OPEN_RELAY=<message id> WAITING_ON=user` before you end your turn; once you've replied, `STATE unset OPEN_RELAY` and `STATE set WAITING_ON=<ARCHITECT_DISPATCH>`.
-- **Any other worker's ask:** save it with `save_message.py --id <message id> --header "task=<id> <title>" --out <RUN_DIR>/asks/<n>.md` (in the design phase the header is `design phase`), `STATE set OPEN_ASK=<message id>`, and send job `consult` with `INPUT=<that file>`. On `RESULT: ANSWER <file>`, run `ORCA orchestration reply --id <OPEN_ASK> --body "$(cat <file>)"`, then `STATE unset OPEN_ASK WAITING_ON`, so a resume goes back to the step's own `STEP`.
+- **Any other worker's ask:** save it with `save_message.py --id <message id> --header "task=<id> <title>" --out <RUN_DIR>/asks/<n>.md` (in the design phase the header is `design phase`), `STATE set OPEN_ASK=<message id>`, and send job `consult` with `INPUT=<that file>`. On `RESULT: ANSWER <file>`, run `ORCA orchestration reply --id <OPEN_ASK> --body "$(cat <file>)"`, then `STATE unset OPEN_ASK WAITING_ON`, so a resume goes back to the step's own `STEP`, and go back to that step with `--docs-moved` (How you work).
 - **A user message:**
   - **Starting with `coordinator:`:** it is for you. "status" means show the last 10 run-log lines. "use the fallback" means "Architect lost" below. "stop" means stop every worker with `worker-stop`, then go to Step 8 item 7. Anything else, including a request to change a pick, a model or a `.meta`: say exactly "I only understand: status, use the fallback, stop." and change nothing.
   - **Otherwise, with a relay open:** it is the answer. Write it, exactly as typed, to `<RELAY_DIR>/<NNN>-from-user.md`, then reply to the architect's ask with `--body "RELAY <that path>"`.
-  - **Otherwise:** write it the same way and send job `user-message` with `INPUT=<that path>`. If an architect job is still running, send it only after that job's `RESULT:` line, so two architects never work at once. On `RESULT: NOTED`, `STATE unset WAITING_ON`.
+  - **Otherwise:** write it the same way and send job `user-message` with `INPUT=<that path>`. If an architect job is still running, send it only after that job's `RESULT:` line, so two architects never work at once. On `RESULT: NOTED`, `STATE unset WAITING_ON`, and go back to the step as for `consult`.
 - **A fresh architect fails** (after plan approval): it settles `failed`, its first line isn't `RESULT:`, or Orca reports it `exited` or `lost`. Release or stop it, then `STATE incr JOB_RETRIES`. At 1, start the same job again from `LAST_JOB` and `LAST_JOB_INPUT`. At 2, say exactly "The architect failed twice on job <LAST_JOB>. Reply \"retry\" to try again, or \"stop\" to stop the run." This is a fixed prompt: "retry" resets `JOB_RETRIES` to 0 and starts the job again; "stop" goes to Step 8 item 7. Reset `JOB_RETRIES` to 0 after every job that settles with a `RESULT:` line.
 - **Architect lost** (design phase only): an Orca escalation names `ARCHITECT_DISPATCH` as `exited` or `lost`, a send to it is refused, or the user says "use the fallback".
   Build `architect-start.txt` with `FIRST_JOB=resume` and `INPUT=none`, start it with Step 1 item 12's `worker-start` command, and `STATE set` the new `ARCHITECT_DISPATCH` and `WAITING_ON` to its dispatch id; leave `LAST_JOB` as it is. After `RESULT: RESUMED`, resend `LAST_JOB` with `LAST_JOB_INPUT`, if it had no `RESULT`. Any relay the lost architect had open is dead: the new architect asks again if it still needs the answer, and a user's answer to it anyway goes as a `user-message` job. Never `send` to the old architect again (orca-facts: reopened workers can't settle).
@@ -157,7 +158,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 
 ## Resume a run
 
-Use this when your brief or the user asks to continue a run, or when Step 1 item 5 gets "resume". After a context compaction in the same session, you need only item 1 (`STATE show`) and item 5, or item 3 first when `STEP` is `resume probe`.
+Use this when your brief or the user asks to continue a run. After a context compaction in the same session, you need only item 1 (`STATE show`) and item 5, or item 3 first when `STEP` is `resume probe`.
 
 1. Find `<RUN_DIR>/state.json` (for a topic, in the worktree on `refs/heads/<TOPIC>-docs`) and run `STATE show`.
    - **No state file, or no `RUN_ID` in it:** the run stopped in Step 1, before any work. Say exactly "The <TOPIC> run stopped before its architect started, so I'm starting it again." Then run Step 1, whose item 5 gives the new run its own name.

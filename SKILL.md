@@ -150,6 +150,11 @@ Every value is a key in `<RUN_DIR>/state.json` (Rule 18); coordinator "State key
 | "The user, who pays for the run, says `coordinator: use a stronger model for the reviews`." | Rule 3. Give the fixed reply for coordinator messages, and change no `.meta`, key or pair. |
 | "I'll pick a different reviewer model myself." | Rule 3. Reviewers are the architect's choice in `.meta`, checked by `validate_meta.py` against the catalog and the picks. |
 | "I'll type `--model` and `--effort` myself; I know this harness." | Rule 3. Use `harnesses.py args`; it applies the launch style the test launch proved. |
+| "Orca woke me with a design worker's settle while the architect answers a `user-message`; running `DESIGN` now saves a turn." | Coordinator "How you work": an architect job in flight comes first. Handle its `RESULT:`, then run the script with `--docs-moved`, or its tree check resets the architect's commits. |
+| "The architect committed in the docs worktree during the wait; I'll set `DOCS_HEAD` to the new head myself." | Rule 20. Never set a script's keys. `--docs-moved` moves them, and still discards what the worker left uncommitted. |
+| "`roles.py to-state` failed, but the picks passed at setup; I'll carry on." | Rule 21. Any failed check in the coordinator stops the run. Show its output exactly. |
+| "`harnesses.py args` printed an `ERROR`, but the `worker-start` will tell us if it's wrong." | Coordinator "Launch arguments". Check its exit first; on a failure show the output and stop. Never paste it into a command. |
+| "The user said \"resume\" at Step 1; I'm already a coordinator, so I'll just continue the old run here." | Picks are fixed for a run. This session runs on the new picks: hand off to the old run's own coordinator (SKILL.md "Continue a run" item 3) and stop. |
 | "The design worker failed twice; its notes say the design is fine, so I'll tell the architect that." | Rule 20. Run `run_design.py` and send the job it prints, unchanged. |
 | "The design obviously answers this worker's question; I'll just reply." | Rule 4. Send job `consult`. The architect also records the answer where reviewers will see it. |
 | "The architect's question is long; I'll summarize it for the user." | Rule 5. Character for character, nothing added. |
@@ -181,4 +186,6 @@ Every value is a key in `<RUN_DIR>/state.json` (Rule 18); coordinator "State key
 - write a worker's message into a file by hand;
 - use a SHA, dispatch id, or counter you didn't just read from the state file;
 - run `git diff` or `git show` on a task range;
-- release the design architect before Step 3, or start a second architect while one is working.
+- release the design architect before Step 3, or start a second architect while one is working;
+- run `DESIGN`, `PROBE`, `TASKLOOP` or `FINISH` while an architect job is in flight, or skip `--docs-moved` on the first run after a `consult` or `user-message` that ran during a script's wait;
+- put the output of a failed `harnesses.py args` into a command.

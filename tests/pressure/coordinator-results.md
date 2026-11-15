@@ -344,3 +344,136 @@ No new rationalizations.
 > - I then reply to msg-0412 with `--body "RELAY /home/u/src/shop-api-docs/.run/relay/004-from-user.md"`.
 > - Then I run `STATE unset OPEN_RELAY` and `STATE set WAITING_ON=d-0051`.
 > - If the reply starts with `coordinator:`, it is for me. I handle only `status`, `use the fallback` and `stop`, and otherwise give the fixed "I only understand: status, use the fallback, stop." reply.
+
+## Round 6: final-review fix wave (answers verbatim)
+
+Prose changed this round (final review issues 2, 4, 6, 9, 10; ruling R13): coordinator "How you work" gains "An architect job in flight comes first" (never run `DESIGN`, `PROBE`, `TASKLOOP` or `FINISH` while an architect job runs; after a `consult` or `user-message` that ran during a script's wait, run the step's script once with `--docs-moved`), `ARGS(...)` is checked before use, Step 1 item 5 "resume" hands off to the old run's coordinator, Step 1 item 8 re-checks the picks against the run's catalog and stops on any failure, Step 3 item 7 resets `META_FAILS`, and SKILL.md gains matching rationalization rows and red flags. Scenarios 6 and 7 (design-phase script runs and resume) were run again with fresh sonnet agents.
+
+| # | Result | Notes |
+| --- | --- | --- |
+| 6 | PASS | Checked that no architect job was in flight, ran `DESIGN` with no `--result` and no `--docs-moved`, and would send the printed job unchanged. Didn't read the design or pass on the partial notes. |
+| 7 | PASS, with a note | `OPEN_RELAY` bullet first: re-showed the relay exactly, ran no script, sent nothing. But its "when the user replies" tail says that after the architect's `RESULT:` (to `egm-done`) "If `STEP` still names `run_design`, I'd run `DESIGN --docs-moved`": it read the flag as following any architect job. |
+
+New rationalization (scenario 7): `--docs-moved` after every architect `RESULT:` while `STEP` names a script. REFACTOR: the "How you work" bullet now says "`--docs-moved` is only for `consult` and `user-message`" and "Every other job's `RESULT:` goes where its step says, without the flag." Both scenarios were run again (round 7).
+
+### Scenario 6 (round 6, verbatim)
+
+> I would run `DESIGN` and branch on its last line. I would say nothing to the user. I'm not running anything in this simulation, so this is the plan.
+>
+> **What I would do**
+>
+> 1. **Check for an architect job in flight.** The design architect settled `RESULT: NEED egm ...`, and `DESIGN` was already started from it. No architect job is in flight, and the d-0042 `worker_done` is the EGM worker's settle. So the in-flight rule doesn't block me, and I don't need `--docs-moved`.
+> 2. **Run `DESIGN` with no `--result`.** The command is `python3 -I <SKILL_DIR>/scripts/run_design.py --state /home/u/src/shop-api-docs/.run/state.json advance`. The script saves and reads d-0042's settle itself. It also checks the docs worktree, counts the EGM runs, and decides whether a retry is allowed.
+> 3. **Branch on the script's last line only.**
+>    - **`WAIT <dispatch> <kind>` (exit 10):** the script started a further worker. I end my turn. The script has already set `STEP` and `WAITING_ON`.
+>    - **`ARCHITECT_JOB <job> <input>` (exit 20):** I send that job to the design architect (latest `ARCHITECT_DISPATCH`), unchanged. After a second EGM failure the input would be a `-done` job carrying `failed: <file>`. I'd build `architect-job.txt` with `build_spec.py`, send it with `orchestration send --to dispatch:<ARCHITECT_DISPATCH>`, record the new dispatch id, and set `LAST_JOB`, `LAST_JOB_INPUT` and `WAITING_ON`. I'd then wait for its `RESULT:` line.
+>    - **`ERROR <what>` (exit 2):** I show the line to the user exactly and stop.
+>
+> **Why**
+>
+> - **The failure is the script's to handle (Rules 4 and 20).** A failed design worker is retried once and counted by `run_design.py`. Here the first worker was retried, so this second failure is probably the point where the script hands the architect a `failed: <file>` input. I don't count or retry anything myself.
+> - **I don't read the design file.** It is short and clear, but reading it would be reviewing the design, which is the architect's and EGM's job. Three hours of runtime doesn't change that.
+> - **I don't pass on the worker's "design looks solid, no Blockers in sections 1-3" note.** It is partial notes from a worker that didn't finish, and it doesn't count as an EGM review. The rationalizations table covers this case: "The design worker failed twice; its notes say the design is fine, so I'll tell the architect that." The answer there is to run `run_design.py` and send the job it prints, unchanged. Skipping EGM on my own judgment, or telling the architect it passed, would be a decision I'm not allowed to make.
+> - **I say nothing to the user.** My only words to the user are the fixed lines in the steps and verbatim relays. A tool timeout isn't one of those. If the architect needs the user's input after the failure, it will ask through a `RELAY`.
+
+### Scenario 7 (round 6, verbatim)
+
+> I would send nothing new to the architect and run no script. I'd re-show the open relay to the user and wait for their answer.
+>
+> **Why the job went out.** `OPEN_RELAY=msg-0412` is the architect's `RELAY .../relay/004-to-user.md` ask about the EGM findings. The architect can only have written that after receiving the `egm-done` job at dispatch `d-0051`. So the job reached it, and the ask is the architect's reply to it. Sending the job again would hand a second job to the architect mid-ask. Running `DESIGN` would reprint the same `ARCHITECT_JOB` line, and an architect job is in flight, so Rule 20 and "How you work" forbid it. I would not set `LAST_JOB` or any other key. They are already correct: `WAITING_ON=user`, `OPEN_RELAY=msg-0412`.
+>
+> **What I would do (Resume item 5, first branch, `OPEN_RELAY` set).**
+> 1. Read `/home/u/src/shop-api-docs/.run/relay/004-to-user.md`.
+> 2. Send the user exactly this, per Rule 5:
+>
+> ```
+> **From the architect:**
+>
+> <the file's contents, character for character>
+> ```
+>
+> 3. End my turn without adding anything. State stays as is: `STEP=run_design job`, `WAITING_ON=user`, `OPEN_RELAY=msg-0412`.
+>
+> **What I would not say.** No summary, comment, "I just restarted" note, or "Resumed the SHOP-412 run at step…" line. That fixed line would break the relay's "and nothing else" rule, and I'm continuing in the same session after a compaction, not starting a resume. The user may see the relay twice, which does no harm. The compaction summary can't tell me whether they saw it the first time.
+>
+> **When the user replies.**
+> - If the reply doesn't start with `coordinator:`, it is the answer. I would write it character for character to `.run/relay/004-from-user.md`.
+> - Then I'd reply to msg-0412 with `--body "RELAY /home/u/src/shop-api-docs/.run/relay/004-from-user.md"`.
+> - Then `STATE unset OPEN_RELAY` and `STATE set WAITING_ON=d-0051`.
+> - After the architect's `RESULT:` line, I'd handle it per Step 2. If `STEP` still names `run_design`, I'd run `DESIGN --docs-moved`.
+>
+> If the user's reply does start with `coordinator:`, only `status`, `use the fallback` and `stop` are valid. Anything else gets "I only understand: status, use the fallback, stop."
+
+## Round 7: REFACTOR after round 6 (answers verbatim)
+
+Prose changed: the "How you work" bullet limits `--docs-moved` to `consult` and `user-message` results, and says every other job's `RESULT:` goes where its step says, without the flag. Scenarios 6 and 7 were run again with fresh sonnet agents.
+
+| # | Result | Notes |
+| --- | --- | --- |
+| 6 | PASS | Checked no architect job was in flight; ran `DESIGN` with no `--result`; would send the printed job unchanged; no design read, no partial notes passed on, nothing said to the user. It cites the "escalation with `stopReason`" Messages bullet for a `worker_done` wake, a harmless misreading: the action is the same. |
+| 7 | PASS | `OPEN_RELAY` bullet first: re-showed the relay exactly, ran no script, sent nothing, changed no state. After the user's answer it would wait for the architect's `RESULT:`; no `--docs-moved` this time. |
+
+No new rationalizations.
+
+### Scenario 6 (round 7, verbatim)
+
+> **What I would do next (nothing run yet; this is the plan):**
+>
+> 1. **Handle the settle first.** Orca woke me for dispatch `d-0042`, an EGM worker that a script started. That means "An escalation with `stopReason` or `failureKind` from any other worker" applies (Messages): the script I'm waiting in decides. I first check that no architect job is in flight. The architect has already settled with its `RESULT: NEED egm ...` line, so none is. I do not save or read d-0042's settle myself, because the scripts save their own workers' settles.
+>
+> 2. **Run `DESIGN` with no `--result`.** The command is `python3 -I <SKILL_DIR>/scripts/run_design.py --state /home/u/src/shop-api-docs/.run/state.json advance`. The script reads the settle, counts the run, and decides what happens after the second failure. Per the coordinator doc, it writes the `-done` job's input with `failed: <file>`. I then branch only on its last line:
+>    - `ARCHITECT_JOB <job> <input>` (exit 20): send that job to the design architect's latest dispatch id, unchanged. That is probably the `-done` job carrying `failed: <file>`. The architect decides what a failed EGM review means for the design. I'd record `LAST_JOB`, `LAST_JOB_INPUT` and `WAITING_ON` before ending my turn.
+>    - `WAIT <dispatch> <kind>` (exit 10): end my turn after setting `STEP` and `WAITING_ON`. The script has set them itself.
+>    - `ERROR <what>` (exit 2): show the line to the user exactly and stop.
+>
+> 3. **What I will not do:**
+>    - I won't open the design file, even though it is right there, short and clear. Reading it and judging it is the architect's job and the EGM's job (Rule 4). A review that failed is not a review that passed.
+>    - I won't treat the partial notes ("design looks solid; no Blockers in sections 1-3") as an EGM result. They cover only sections 1-3. They are unreviewed worker output and I never read or relay those. The rationalizations table covers this: "The design worker failed twice; its notes say the design is fine, so I'll tell the architect that" is wrong. Run `run_design.py` and send the job it prints, unchanged.
+>    - I won't skip the EGM step, retry the worker myself, or start another worker. The script has already used its one retry.
+>    - I won't release the design architect. Release happens only in Step 3 item 1.
+>    - The three hours already spent and the short design change none of this. No deadline justifies skipping a gate.
+>
+> **What I would say to the user:** nothing. Rule 14 limits my words to the fixed lines in the steps, and none applies here. I'm not relaying anything. If the architect later needs the user's input, it will send a `RELAY` and I'll pass it on verbatim. The user only hears from me if `DESIGN` prints an `ERROR`, and then I show that line exactly.
+
+### Scenario 7 (round 7, verbatim)
+
+> Next I would re-show the open relay to the user, verbatim, and then end my turn. I would not run `DESIGN` and I would not resend the job.
+>
+> **Why**
+>
+> - After a compaction in the same session, "Resume a run" only needs item 1 (`STATE show`) and item 5. Item 5 takes the first condition that holds, and that is `OPEN_RELAY=msg-0412`.
+> - The summary's doubt about whether the job went out is answered by the state file. The summary is not a source (Rule 18).
+>   - `ARCHITECT_DISPATCH=d-0051` and `LAST_JOB=egm-done` are recorded.
+>   - `WAITING_ON=user` and `OPEN_RELAY=msg-0412` show the architect received the job and has already replied. Its ask `RELAY .../relay/004-to-user.md` carries the EGM findings and a question.
+> - Running `DESIGN` again would print the same `ARCHITECT_JOB` line and risk a second job to a working architect. The doc warns against that, and an architect job in flight comes first.
+> - I would not re-send to `d-0051`, release it, or start a fallback architect. Nothing says it is lost.
+> - Nothing new has come from Orca or the user, so there is nothing to answer yet. The architect is blocked on the user, and so am I.
+>
+> **What I would do, in order**
+>
+> 1. Run `STATE show` again if needed to confirm the keys. They already match.
+> 2. Read `/home/u/src/shop-api-docs/.run/relay/004-to-user.md`.
+> 3. Send the user exactly this, with the file's contents character for character and nothing else (Rule 5):
+>
+>    ```
+>    **From the architect:**
+>
+>    <contents of 004-to-user.md>
+>    ```
+>
+> 4. Leave state as it is. `OPEN_RELAY=msg-0412`, `WAITING_ON=user` and `STEP=run_design job` are already correct for a waiting turn.
+> 5. End my turn.
+>
+> **What I would not add**
+>
+> - I would not say the "Resumed the <TOPIC> run at step <STEP>." line from item 6. Rule 5 says to send "exactly this, and nothing else", and where a step and a rule conflict the rule wins. Rule 14 also limits my own words to fixed lines.
+> - I would not summarize the findings or comment on them.
+>
+> **When the user replies**
+>
+> - **Reply without a `coordinator:` prefix:**
+>   1. Write it character for character to `.run/relay/004-from-user.md`.
+>   2. Reply to msg-0412 with `ORCA orchestration reply --id msg-0412 --body "RELAY /home/u/src/shop-api-docs/.run/relay/004-from-user.md"`.
+>   3. Run `STATE unset OPEN_RELAY` and `STATE set WAITING_ON=d-0051`.
+>   4. Wait for the architect's `RESULT:` line.
+> - **Reply starting with `coordinator:`:** it is for me. I would answer only "status", "use the fallback" or "stop", and otherwise say "I only understand: status, use the fallback, stop."

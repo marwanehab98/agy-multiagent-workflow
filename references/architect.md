@@ -87,12 +87,12 @@ You write these in `DOCS_DIR` and commit them. The coordinator pastes their cont
 ## Model choices
 
 A pair is `<harness>:<model>@<effort>`, split at the first `:` and the last `@`; a model with no effort choice uses `@default`. From your run values:
-- `<ARCH>` is `ROLE_ARCHITECT`, your own pair. **Your harness** is its harness. **Your model** is its harness and model, at any effort.
+- `<ARCH>` is `ROLE_ARCHITECT`, the architect pick (not the model you run on for a clerical job). **Your harness** is its harness. **Your model** is its harness and model, at any effort.
 - `<BASE>` is `ROLE_BASE`, the user's base implementer pick.
 - `<BASE_TOP>` is `<BASE>` with its effort replaced by `BASE_TOP`, the base model's highest detected effort.
 - `CATALOG` is the detected catalog: each harness, its models, and each model's efforts. **A model from your harness** is a model and an effort listed under your harness there.
 
-You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and the picks; a rejected `.meta` or `CLERICAL_PAIR` comes back as job `fix-meta`, a rejected builder-check pair as `builder-check-done` with `failed:`.
+You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and the picks; a rejected `.meta` or `CLERICAL_PAIR` comes back as job `fix-meta`, a rejected builder-check pair as `builder-check-done` with `failed:`. The reviewer pairs of a `REPLAN` or final-fix task are also test-launched before they run; a failed launch comes back as job `fix-meta` too.
 
 | Pair | Where you write it | Allowed |
 | --- | --- | --- |
@@ -283,7 +283,7 @@ Either way, add any Minor issues to `DECISIONS_LOG` under "Open Minor findings".
 
 ## JOB: fix-meta
 
-The input is `validate_meta.py` output listing problems in your task files, or in `CLERICAL_PAIR`: a `PROBLEM pair ...` line is about the `CLERICAL_PAIR` in `run-values.txt`, so fix it there. Fix every `PROBLEM` line. Keep your intent where you can, but within the rules in "Model choices". If you change task files, rebuild the plan file from them. If a fix changes a choice you told the user about, tell them in a `NOTIFY`. Commit, then settle `RESULT: META_FIXED`.
+The input is `validate_meta.py` output listing problems in your task files, or in `CLERICAL_PAIR`: a `PROBLEM pair ...` line is about the `CLERICAL_PAIR` in `run-values.txt`, so fix it there. A `PROBLEM <id>: REVIEW_<n> <pair> failed its test launch; see <file>` line means that pair can't be started here: read the file, and choose another pair for that `.meta` within "Model choices". Fix every `PROBLEM` line. Keep your intent where you can, but within the rules in "Model choices". If you change task files, rebuild the plan file from them. If a fix changes a choice you told the user about, tell them in a `NOTIFY`. Commit, then settle `RESULT: META_FIXED`.
 
 ## JOB: pr
 
