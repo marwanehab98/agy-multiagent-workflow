@@ -31,8 +31,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR, VERDICTS, Done, Orca, Run,  # noqa: E402
-                    build, git, last_line, next_free, poll, run, save_body, tool, verdict_line)
+from common import (QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR, Done, Orca, Run,  # noqa: E402
+                    build, git, next_free, pick_verdict, poll, run, save_body, tool, verdict_line)
 from pairs import ladder, pair_key, parse_pair  # noqa: E402
 from probe import Prober  # noqa: E402
 
@@ -234,7 +234,7 @@ class Loop:
             self.o.release(d)
             return self.void_review(t, stage, "stopped without a verdict")
         settle = save_body(result[2], next_free(r.run_dir / "results", f"{t}-s{stage}-settle-{{n}}.md"))
-        verdict = self.pick_verdict(Path(r.need(f"REVIEW_OUT_{t}")), settle)
+        verdict = pick_verdict(Path(r.need(f"REVIEW_OUT_{t}")), settle)
         self.o.release(d)
         head = r.need(f"WORKER_HEAD_{t}")
         rc, _ = tool("check-tree.sh", r.impl, head)
@@ -256,14 +256,6 @@ class Loop:
             return self.start_review(t, stage)
         r.set(**{f"REVIEW_STAGE_{t}": stage})
         return self.fix(t, verdict, stage)
-
-    @staticmethod
-    def pick_verdict(review, settle):
-        """The reviewer's file when it ends in a VERDICT line; otherwise the settle message, copied there."""
-        if review.is_file() and last_line(review) in VERDICTS:
-            return review
-        review.write_text(settle.read_text(encoding="utf-8"), encoding="utf-8")
-        return review
 
     def void_review(self, t, stage, why):
         n = self.r.incr(f"VOIDS_{t}_S{stage}")

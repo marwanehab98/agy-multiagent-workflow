@@ -31,6 +31,15 @@ def verdict_line(path):
     return found[-1] if found else ""
 
 
+def pick_verdict(review, settle):
+    """The reviewer's file when it ends in a VERDICT line; otherwise the settle message, copied there."""
+    review, settle = Path(review), Path(settle)
+    if review.is_file() and last_line(review) in VERDICTS:
+        return review
+    review.write_text(settle.read_text(encoding="utf-8"), encoding="utf-8")
+    return review
+
+
 class Done(Exception):
     def __init__(self, code, line):
         super().__init__(line)

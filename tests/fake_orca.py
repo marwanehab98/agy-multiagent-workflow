@@ -68,7 +68,7 @@ def send(w, dispatch, task, typ, body, extra=None):
 
 
 def review_file(w, d):
-    m = re.search(r"Write your review to (\S+?):", w["tasks"][d["taskId"]]["spec"])
+    m = re.search(r"Write your review to (\S+?)[,:](?:\s|$)", w["tasks"][d["taskId"]]["spec"])
     if not m:
         raise SystemExit("reviewer spec has no review file")
     return m.group(1)
