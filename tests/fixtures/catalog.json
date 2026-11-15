@@ -38,7 +38,12 @@
    "mcp": {
     "claude_ai_Atlassian": true
    },
-   "broken": null
+   "broken": null,
+   "skill_dirs": [
+    "/home/u/.ag/config/skills"
+   ],
+   "plugin_cmd": "ag plugin list",
+   "mcp_cmd": "ag mcp list"
   },
   "cl": {
    "orca_agent": "cl-agent",
@@ -88,7 +93,12 @@
    "mcp": {
     "claude_ai_Atlassian": true
    },
-   "broken": null
+   "broken": null,
+   "skill_dirs": [
+    "/home/u/.cl/skills"
+   ],
+   "plugin_cmd": "cl plugin list",
+   "mcp_cmd": "cl mcp list"
   }
  }
 }

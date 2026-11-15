@@ -17,7 +17,7 @@ class Finish(Base):
         self.decisions.write_text("none\n")
         self.state.write_text(json.dumps({**self.st(), "TOPIC": "demo", "INITIAL_BASE_SHA": self.older,
                                           "DESIGN_FILE": str(self.design), "DECISIONS_LOG": str(self.decisions),
-                                          "LAUNCH_STYLE_cl_big_high": "flag"}))
+                                          "LAUNCH_STYLE_cl_big_high": "flag", "LAUNCH_STYLE_cl_small_high": "flag"}))
 
     def starts(self):
         return self.calls("worker-start")
@@ -213,6 +213,52 @@ class Fixes(Finish):
         self.result("RESULT: META_FIXED", 20, "ARCHITECT_JOB")
         last, _ = self.result("RESULT: META_FIXED", 2, "ERROR")
         self.assertIn("META_INVALID_3_TIMES", last)
+
+    def unproved_fix(self, f="F1", reviews="cl:small@low"):
+        self.to_job("fix")
+        self.task(f, "none")
+        meta = self.docs / "tasks" / f"{f}.meta"
+        meta.write_text(meta.read_text().replace("cl:small@high", reviews))
+
+    def test_final_fix_review_pairs_are_probed_before_the_queue(self):
+        self.unproved_fix()
+        self.behave("ok")
+        last, _ = self.result("RESULT: FINAL_FIX F1", 10, "WAIT")
+        self.assertTrue(last.endswith(" probe"), last)
+        self.assertEqual(self.st("WAITING_ON"), last.split()[1])
+        self.assertEqual((self.run_dir / "queue.txt").read_text().split(), ["01"])
+        self.assertEqual(self.st("FINAL_FIX_ROUNDS"), None)
+        last, _ = self.expect(21, "RUN_QUEUE")
+        self.assertEqual(last, "RUN_QUEUE F1")
+        self.assertEqual(self.st("LAUNCH_STYLE_cl_small_low"), "flag")
+        self.assertEqual(self.st("FINAL_FIX_ROUNDS"), "1")
+
+    def test_final_fix_probe_failure_goes_to_fix_meta(self):
+        self.unproved_fix()
+        self.behave("fail")
+        self.result("RESULT: FINAL_FIX F1", 10, "WAIT")
+        last, _ = self.expect(20, "ARCHITECT_JOB")
+        self.assertTrue(last.startswith("ARCHITECT_JOB fix-meta "), last)
+        text = Path(last.split()[2]).read_text()
+        self.assertIn("PROBLEM F1: REVIEW_1 cl:small@low failed its test launch; see ", text)
+        self.assertEqual(self.st("META_FAILS"), "1")
+        self.task("F1", "none")
+        last, _ = self.result("RESULT: META_FIXED", 21, "RUN_QUEUE")
+        self.assertEqual(last, "RUN_QUEUE F1")
+        self.assertEqual(self.st("META_FAILS"), "0")
+
+    def test_docs_moved_during_final_fix_probe(self):
+        self.unproved_fix()
+        self.behave("ok-edit")
+        self.result("RESULT: FINAL_FIX F1", 10, "WAIT")
+        g = lambda *a: sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+        (self.docs_wt / "decisions.md").write_text("user-message decision\n")
+        g("add", "decisions.md")
+        g("commit", "-qm", "architect commit while the probe runs")
+        head = g("rev-parse", "HEAD")
+        self.expect(21, "RUN_QUEUE", "--docs-moved")
+        self.assertEqual(g("rev-parse", "HEAD"), head)
+        self.assertEqual(g("status", "--porcelain", "--untracked-files=all"), "")
 
     def test_architect_stop(self):
         self.to_job("fix")

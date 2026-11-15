@@ -1,5 +1,7 @@
 """Tests for scripts/run_task.py against the fake Orca CLI. Run: bash tests/run_all.sh"""
 import json
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -352,6 +354,12 @@ class PicksAndLadder(Base):
         rc, last, _ = self.adv()
         self.assertEqual((rc, last.split()[:2]), (2, ["ERROR", "OLD_FORMAT_RUN"]))
 
+    def test_bad_usage_exits_64(self):
+        for args in (["advance", "--nope"], []):
+            r = subprocess.run([sys.executable, "-I", str(self.SCRIPT), "--state", str(self.state), *args],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 64, r.stderr)
+
     def test_ladder_from_picks(self):
         self.use_up_ladder()
         self.assertEqual(self.st("PAIR_01"), "cl:big@high")
@@ -369,6 +377,21 @@ class PicksAndLadder(Base):
         self.assertEqual(self.st("PAIR_01"), "cl:small@low")
         self.assertEqual(self.st("LAUNCH_STYLE_cl_small_low"), "flag")
         self.assertIn("--effort", self.calls("worker-start")[-1])
+
+    def test_docs_moved_during_past_ladder_probe(self):
+        note = self.use_up_ladder()
+        self.behave("ok-edit", "pending")
+        self.expect(10, "WAIT", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} cl:small@low"))
+        g = lambda *a: sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+        (self.docs_wt / "decisions.md").write_text("user-message decision\n")
+        g("add", "decisions.md")
+        g("commit", "-qm", "architect commit while the probe runs")
+        head = g("rev-parse", "HEAD")
+        last, _ = self.expect(10, "WAIT", "--docs-moved")
+        self.assertTrue(last.endswith(" impl"), last)
+        self.assertEqual(g("rev-parse", "HEAD"), head)
+        self.assertEqual(g("status", "--porcelain", "--untracked-files=all"), "")
 
     def test_failed_probe_rejects_the_answer(self):
         note = self.use_up_ladder()
@@ -393,6 +416,51 @@ class PicksAndLadder(Base):
 
 
 class Replan(Base):
+    def setUp(self):
+        super().setUp()
+        self.state.write_text(json.dumps({**self.st(), "LAUNCH_STYLE_cl_small_high": "flag"}))  # proved at Step 3
+
+    def replan_to(self, tid, reviews="cl:small@low"):
+        (self.run_dir / "queue.txt").write_text("01 02\n")
+        self.behave("fail")
+        self.expect(10, "WAIT")
+        self.expect(20, "ESCALATE")
+        self.task(tid, "AC-1", "REPLANNED_FROM=01")
+        meta = self.docs / "tasks" / f"{tid}.meta"
+        meta.write_text(meta.read_text().replace("cl:small@high", reviews))
+
+    def test_replan_review_pairs_are_probed_before_the_queue_changes(self):
+        self.replan_to("01a")
+        self.behave("ok", "pending")
+        last, _ = self.expect(10, "WAIT", "--architect-result", self.result_file(f"RESULT: REPLAN {self.base} 01a"))
+        self.assertTrue(last.endswith(" probe"), last)
+        self.assertEqual(self.st("WAITING_ON"), last.split()[1])
+        self.assertEqual(self.st("LOOP_01"), "replan-probe")
+        self.assertEqual((self.run_dir / "queue.txt").read_text().split(), ["01", "02"])
+        self.assertEqual(json.loads(self.world.read_text())["tasks"]["task_2"]["title"], "Launch test: cl:small@low")
+        last, _ = self.expect(10, "WAIT")
+        self.assertTrue(last.endswith(" impl"), last)
+        self.assertEqual((self.run_dir / "queue.txt").read_text().split(), ["01a", "02"])
+        self.assertEqual(self.st("LAUNCH_STYLE_cl_small_low"), "flag")
+
+    def test_replan_probe_failure_goes_to_fix_meta(self):
+        self.replan_to("01a")
+        self.behave("fail")
+        self.expect(10, "WAIT", "--architect-result", self.result_file(f"RESULT: REPLAN {self.base} 01a"))
+        last, _ = self.expect(21, "FIX_META")
+        text = Path(last.split()[1]).read_text()
+        self.assertIn("PROBLEM 01a: REVIEW_1 cl:small@low failed its test launch; see ", text)
+        self.assertIn("PROBLEM 01a: REVIEW_2 cl:small@low failed its test launch; see ", text)
+        self.assertIn("probe-cl_small_low.md", text)
+        self.assertEqual(self.st("META_FAILS"), "1")
+        self.assertEqual((self.run_dir / "queue.txt").read_text().split(), ["01", "02"])
+        self.task("01a", "AC-1", "REPLANNED_FROM=01")  # the architect picks a proven pair
+        self.behave("pending")
+        self.assertIn(" impl", self.expect(10, "WAIT", "--architect-result",
+                                           self.result_file("RESULT: META_FIXED"))[0])
+        self.assertEqual((self.run_dir / "queue.txt").read_text().split(), ["01a", "02"])
+        self.assertEqual(self.st("META_FAILS"), "0")
+
     def test_replan_runs_fix_meta_then_replaces_task(self):
         (self.run_dir / "queue.txt").write_text("01 02\n")
         self.behave("fail")

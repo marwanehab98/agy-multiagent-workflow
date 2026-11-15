@@ -12,6 +12,8 @@ Usage:
   python3 -I probe.py --state <RUN_DIR>/state.json advance --set step1|step3|resume
   python3 -I probe.py --state <file> advance --set pair --pair <harness:model@effort>
   python3 -I probe.py --state <file> advance            # continue the stored PROBE_SET
+  python3 -I probe.py --state <file> advance --docs-moved   # continue, after an architect job committed
+                                                             # in DOCS_WORKTREE while a probe ran (R13)
 
 Sets: step1 = ROLE_ARCHITECT, ROLE_EGM, ROLE_BASE and the base model at BASE_TOP;
 step3 = every REVIEW_1/REVIEW_2 in the queue's .meta files plus CLERICAL_PAIR; pair = one pair;
@@ -30,8 +32,14 @@ Exit 64  bad usage
 
 State keys: PROBE_SET, PROBE_PAIR, PROBE_HEAD, PROBE_STYLE_<key> (index of the style being tried),
 PROBE_DISPATCH_<key>, PROBE_RECHECK_<key> (resume: probe again), LAUNCH_STYLE_<key> (written on success). Needs DOCS_WORKTREE and CATALOG.
+--docs-moved (ruling R13) first moves PROBE_HEAD (and run_design's DOCS_HEAD) to the docs worktree's
+current HEAD, so the check after each probe never resets past an architect's commits; uncommitted
+changes are still discarded. The coordinator passes it on the first call after it handles the RESULT of
+an architect job (consult, user-message) that ran while this script waited. run_design.py, run_task.py
+and run_finish.py take the same flag (docs_moved()).
 Embeddable: Prober(run, orca[, keep=True]).advance(pairs) returns on PROBED and raises Done otherwise;
-keep=True logs tree changes instead of discarding them.
+keep=True logs tree changes instead of discarding them. review_pairs() and launch_problems() serve the
+REPLAN and FINAL_FIX probes in run_task.py and run_finish.py.
 """
 import argparse
 import json
@@ -159,6 +167,35 @@ def read_meta(path):
     return meta
 
 
+def review_pairs(r, ids):
+    """The REVIEW_1/REVIEW_2 pairs of the given tasks' .meta files."""
+    found = []
+    for t in ids:
+        meta = read_meta(r.task_file(t, ".meta"))
+        found += [meta[k] for k in ("REVIEW_1", "REVIEW_2") if meta.get(k)]
+    return found
+
+
+def launch_problems(r, ids, failed_line):
+    """validate_meta.py-style PROBLEM lines for the tasks whose reviewer pair failed its test launch."""
+    _, pair, results = failed_line.split()
+    lines = [f"PROBLEM {t}: {k} {pair} failed its test launch; see {results}"
+             for t in ids for k, v in read_meta(r.task_file(t, ".meta")).items()
+             if k in ("REVIEW_1", "REVIEW_2") and v == pair]
+    return "\n".join(lines or [f"PROBLEM {pair} failed its test launch; see {results}"]) + "\n"
+
+
+def docs_moved(r):
+    """--docs-moved (ruling R13): an architect job committed in DOCS_WORKTREE while a worker or probe there
+    was running. Move the baselines that tree checks reset to (PROBE_HEAD, DOCS_HEAD) to its current HEAD,
+    so the architect's commits survive; uncommitted changes are still discarded against the new head."""
+    head = git(r.need("DOCS_WORKTREE"), "rev-parse", "HEAD")
+    moved = [k for k in ("PROBE_HEAD", "DOCS_HEAD") if r.get(k) and r.get(k) != head]
+    if moved:
+        r.set(**{k: head for k in moved})
+        r.log(f"docs worktree moved by an architect job: {' '.join(moved)} now {head}")
+
+
 def set_pairs(r, name, one=None):
     if name == "pair":
         if not one:
@@ -171,20 +208,19 @@ def set_pairs(r, name, one=None):
     if name == "resume":
         return list(dict.fromkeys(set_pairs(r, "step1") + set_pairs(r, "step3")))
     if name == "step3":
-        found = []
         queue = r.run_dir / "queue.txt"
-        for t in queue.read_text(encoding="utf-8").split() if queue.exists() else []:
-            meta = read_meta(r.task_file(t, ".meta"))
-            found += [meta[k] for k in ("REVIEW_1", "REVIEW_2") if meta.get(k)]
+        found = review_pairs(r, queue.read_text(encoding="utf-8").split() if queue.exists() else [])
         if r.get("CLERICAL_PAIR"):
             found.append(r.get("CLERICAL_PAIR"))
         return [parse_pair(x) for x in found]
     raise Done(ERROR, f"ERROR UNKNOWN_SET {name}")
 
 
-def run_advance(r, set_name, one):
+def run_advance(r, set_name, one, moved=False):
     r.require_new_format()
     o = Orca(r)
+    if moved:
+        docs_moved(r)
     if set_name and (set_name != r.get("PROBE_SET") or (set_name == "pair" and one != r.get("PROBE_PAIR"))):
         r.set(PROBE_SET=set_name, PROBE_PAIR=one)
     if set_name == "resume" and not any(k.startswith("PROBE_RECHECK_") for k in r.s):
@@ -203,12 +239,13 @@ def main():
     adv = sub.add_parser("advance")
     adv.add_argument("--set", choices=["step1", "step3", "resume", "pair"])
     adv.add_argument("--pair")
+    adv.add_argument("--docs-moved", action="store_true")
     try:
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
     try:
-        run_advance(Run(a.state), a.set, a.pair)
+        run_advance(Run(a.state), a.set, a.pair, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

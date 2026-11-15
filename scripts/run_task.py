@@ -10,6 +10,8 @@ Usage:
   python3 -I run_task.py --state <RUN_DIR>/state.json advance
   python3 -I run_task.py --state <file> advance --architect-result <file with the RESULT line>
   python3 -I run_task.py --state <file> advance --reply <the user's one-word reply>
+  python3 -I run_task.py --state <file> advance --docs-moved   # continue, after an architect job
+                                                   # (consult, user-message) committed in DOCS_WORKTREE
 
 The last line of stdout is the status; earlier lines are events (MERGED ...).
 Exit 0   QUEUE_EMPTY                       every queued task is merged
@@ -25,6 +27,12 @@ Exit 64  bad usage
 
 An escalation answer past the ladder (ESCALATE said "ladder used up") is test-launched first
 (phase probe:<attempt>, via probe.Prober); a failed test counts as a rejected answer.
+A REPLAN's new tasks have their REVIEW_1/REVIEW_2 pairs test-launched after validation and before the
+queue changes (phase replan-probe); a failed test goes to the architect as FIX_META, with PROBLEM lines
+naming the pair, and counts toward META_FAILS like a failed validation.
+These probes run in DOCS_WORKTREE and reset it to PROBE_HEAD after each one. --docs-moved (ruling R13)
+first moves PROBE_HEAD to the docs worktree's current HEAD, so an architect's commits made meanwhile
+survive; the coordinator passes it after handling the RESULT of an architect job that ran during a wait.
 
 Rules the loop enforces (moved here from coordinator Step 4):
 - One task at a time. A fresh implementer per task, kept open and reused for that task's fix rounds,
@@ -50,7 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script 
 from common import (QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR, Done, Orca, Run,  # noqa: E402
                     build, git, next_free, pick_verdict, poll, run, save_body, tool, verdict_line)
 from pairs import ladder, pair_key, parse_pair  # noqa: E402
-from probe import Prober  # noqa: E402
+from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 
 
 def read_meta(path):
@@ -431,6 +439,7 @@ class Loop:
         self.start_attempt(t, sha, note, pair)
 
     def apply_replan(self, t, pending):
+        """Validate the REPLAN's tasks; on success test-launch their reviewer pairs (phase replan-probe)."""
         r = self.r
         sha, *ids = pending.split()
         out_file = next_free(r.run_dir, "validate-{n}.txt")
@@ -438,10 +447,30 @@ class Loop:
                        "--ids", " ".join(ids), "--replanned-from", t)
         out_file.write_text(out + "\n", encoding="utf-8")
         if rc != 0:
-            if r.incr("META_FAILS") >= 3:
-                raise Done(ERROR, f"ERROR META_INVALID_3_TIMES {out_file}")
-            self.set_phase(t, "fixmeta", WAITING_ON="architect", **{f"FIXMETA_FILE_{t}": out_file})
-            raise Done(FIX_META, f"FIX_META {out_file}")
+            self.fix_meta(t, out_file)
+        self.set_phase(t, "replan-probe")
+
+    def fix_meta(self, t, out_file):
+        r = self.r
+        if r.incr("META_FAILS") >= 3:
+            raise Done(ERROR, f"ERROR META_INVALID_3_TIMES {out_file}")
+        self.set_phase(t, "fixmeta", WAITING_ON="architect", **{f"FIXMETA_FILE_{t}": out_file})
+        raise Done(FIX_META, f"FIX_META {out_file}")
+
+    def do_replan_probe(self, t):
+        """Test-launch the new tasks' reviewer pairs; a failed launch goes to the architect as fix-meta."""
+        r = self.r
+        sha, *ids = r.need(f"PENDING_REPLAN_{t}").split()
+        try:
+            Prober(r, self.o).advance(review_pairs(r, ids))
+        except Done as d:
+            if d.code == WAIT:
+                r.set(WAITING_ON=d.line.split()[1])
+            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
+                out_file = next_free(r.run_dir, "validate-{n}.txt")
+                out_file.write_text(launch_problems(r, ids, d.line), encoding="utf-8")
+                self.fix_meta(t, out_file)
+            raise
         rc, out = tool("discard-changes.sh", r.impl, sha)
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
@@ -529,7 +558,9 @@ class Loop:
             self.r.set(CURRENT_TASK=q[0], **({f"LOOP_{q[0]}": "start"} if fresh else {}))
         return q[0]
 
-    def advance(self, architect_result=None, reply_word=None):
+    def advance(self, architect_result=None, reply_word=None, moved=False):
+        if moved:
+            docs_moved(self.r)
         t = self.current()
         if architect_result:
             if not t:
@@ -564,6 +595,8 @@ class Loop:
                 self.do_merge(t)
             elif phase.startswith("probe:"):
                 self.do_probe(t)
+            elif phase == "replan-probe":
+                self.do_replan_probe(t)
             elif phase == "escalating":
                 raise Done(ESCALATE, f"ESCALATE {self.r.need(f'ESC_INPUT_{t}')}")
             elif phase == "fixmeta":
@@ -583,11 +616,15 @@ def main():
     adv = sub.add_parser("advance")
     adv.add_argument("--architect-result")
     adv.add_argument("--reply")
-    a = p.parse_args()
+    adv.add_argument("--docs-moved", action="store_true")
+    try:
+        a = p.parse_args()
+    except SystemExit as e:
+        return 64 if e.code else 0
     loop = None
     try:
         loop = Loop(a.state)
-        loop.advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None)
+        loop.advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

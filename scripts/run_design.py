@@ -8,6 +8,8 @@ docs worktree, retry once, count runs) and exits at the first point that needs a
 Usage:
   python3 -I run_design.py --state <RUN_DIR>/state.json advance --result <file whose first line is RESULT: ...>
   python3 -I run_design.py --state <file> advance            # continue (re-prints a pending job)
+  python3 -I run_design.py --state <file> advance --docs-moved   # continue, after an architect job
+                                                   # (consult, user-message) committed in DOCS_WORKTREE
 
 Results it accepts (the first non-empty line of the file):
   RESULT: NEED builder-check <design rel> <pair>
@@ -32,6 +34,11 @@ test-launched first); lens, EGM and plan review run on ROLE_EGM. A worker fails 
 is stopped or lost, hits a usage limit, or leaves its output file missing or empty; one that ends its
 turn unsettled is nudged once, and a second time counts as failed. A failure is retried once (RETRY_<kind>),
 then the done job gets "failed: <settle file>". Run limits: EGM_RUNS 3, LENS_RUNS 2, PLAN_REVIEW_RUNS 3.
+After each worker the docs worktree is put back to DOCS_HEAD, its HEAD when the worker started.
+--docs-moved (ruling R13) first moves DOCS_HEAD and PROBE_HEAD to the docs worktree's current HEAD, so
+that reset never undoes an architect's commits; uncommitted worker changes are still discarded. The
+coordinator passes it on the first call after it handles the RESULT of an architect job that ran while
+this script waited, and never calls this script while such a job is in flight.
 State keys: DESIGN_PHASE, DESIGN_NEED, DESIGN_LINE, DESIGN_DISPATCH, DESIGN_OUT, DOCS_HEAD, EGM_SKILLS,
 LENS_FIRST, PLAN_REVIEW_LAST. Needs TOPIC, DOCS_WORKTREE, ROLE_EGM and CATALOG.
 """
@@ -43,7 +50,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import WAIT, ESCALATE, STOP, ERROR, Done, Orca, Run, build, git, next_free, poll, save_body, tool  # noqa: E402
 from pairs import parse_pair  # noqa: E402
-from probe import Prober  # noqa: E402
+from probe import Prober, docs_moved  # noqa: E402
 
 TITLES = {"builder-check": "Builder check", "egm": "EGM review", "lens": "EGM lens pass",
           "plan-review": "EGM plan review"}
@@ -136,7 +143,9 @@ class Design:
         try:
             Prober(self.r, self.o).advance([pair])
         except Done as d:
-            if d.code == STOP and d.line.startswith("PROBE_FAILED"):
+            if d.code == WAIT:
+                self.r.set(WAITING_ON=d.line.split()[1])
+            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
                 self.job(DONE_JOB["builder-check"], f"failed: {d.line.split()[-1]}")
             raise
         self.set_phase("dispatch")
@@ -236,7 +245,9 @@ class Design:
         self.job(DONE_JOB[kind], str(out))
 
     # -- the loop
-    def advance(self, result_path=None):
+    def advance(self, result_path=None, moved=False):
+        if moved:
+            docs_moved(self.r)
         if result_path:
             self.take_result(result_path)
         for _ in range(50):
@@ -256,12 +267,13 @@ def main():
     sub = p.add_subparsers(dest="op", required=True)
     adv = sub.add_parser("advance")
     adv.add_argument("--result")
+    adv.add_argument("--docs-moved", action="store_true")
     try:
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
     try:
-        Design(a.state).advance(a.result)
+        Design(a.state).advance(a.result, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

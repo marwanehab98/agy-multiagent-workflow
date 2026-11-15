@@ -142,6 +142,19 @@ class ProbeTest(Base):
         self.assertIn("left as is", (self.run_dir / "run-log.md").read_text())
         self.assertIn("left as is", (self.run_dir / "results" / "probe-cl_big_high.md").read_text())
 
+    def test_docs_moved_keeps_architect_commit_discards_probe_edit(self):
+        self.behave("ok-edit")
+        self.expect_probe(10, "WAIT", "--set", "pair", "--pair", "ag:g@low")
+        g = lambda *a: sh("git", "-C", str(self.docswt), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+        (self.docswt / "decisions.md").write_text("user-message decision\n")
+        g("add", "decisions.md")
+        g("commit", "-qm", "architect commit while the probe runs")
+        head = g("rev-parse", "HEAD")
+        self.expect_probe(0, "PROBED", "--docs-moved")
+        self.assertEqual(g("rev-parse", "HEAD"), head)
+        self.assertEqual(g("status", "--porcelain", "--untracked-files=all"), "")
+        self.assertEqual(self.st("PROBE_HEAD"), head)
+
     def test_old_format_state_is_refused(self):
         s = self.st()
         del s["ROLE_ARCHITECT"]

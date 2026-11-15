@@ -9,8 +9,11 @@ Usage:
 
 `menu` prints `N<TAB>value<TAB>label` lines (harnesses, then that harness's models, then a
 model's efforts); broken harnesses follow as `BROKEN <name>: <reason>`.
-`check` prints one `OK role pair`, `UNKNOWN role pair why` or `MISSING role pair item in harness`
-per finding, plus a NOTE when architect and base share harness and model. Exit 1 on UNKNOWN/MISSING.
+`check` prints one `OK role pair`, `UNKNOWN role pair why` or `MISSING role pair item in harness: where`
+per finding (`where` names the harness's skill folders and plugin command, or its MCP command, from the
+catalog). A base pick equal to the architect pick is UNKNOWN: the architect never implements first.
+A NOTE follows when architect and base share harness and model, and another when the architect is then
+a lower effort than the base (the ladder's last rung would be weaker). Exit 1 on UNKNOWN/MISSING.
 `remembered` prints `role=pair` lines then `AVAILABLE yes`, or one `AVAILABLE no <role> <pair>` line per
 remembered pick that isn't in the catalog any more; exit 1 with `NONE` when the file is missing.
 `save` writes the picks file; `to-state` copies the picks, BASE_TOP and CATALOG into a state file.
@@ -24,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from harnesses import top_effort  # noqa: E402
-from pairs import parse_pair  # noqa: E402
+from pairs import EFFORTS, parse_pair  # noqa: E402
 import state as state_file  # noqa: E402
 
 ROLES = ("coordinator", "architect", "egm", "base")
@@ -60,8 +63,19 @@ def has_atlassian(h):
     return any("atlassian" in name.lower() and ok for name, ok in h.get("mcp", {}).items())
 
 
+def where(h, item):
+    """Where a missing item should be, from the catalog's adapter fields; empty for an older catalog."""
+    if item == "atlassian-mcp":
+        return f": connect an Atlassian MCP server ({h['mcp_cmd']})" if h.get("mcp_cmd") else ""
+    if not h.get("skill_dirs"):
+        return ""
+    plugin = f", or enable a plugin that has it ({h['plugin_cmd']})" if h.get("plugin_cmd") else ""
+    return f": put it in {' or '.join(h['skill_dirs'])}{plugin}"
+
+
 def check(catalog, jira, picks):
     lines, bad = [], False
+    a, b = parse_pair_or_none(picks["architect"]), parse_pair_or_none(picks["base"])
     for role in ROLES:
         text = picks[role]
         try:
@@ -71,6 +85,8 @@ def check(catalog, jira, picks):
             bad = True
             continue
         why = unknown_why(catalog, pair)
+        if not why and role == "base" and pair == a:
+            why = "is the architect pick, which never implements first; pick another effort or model"
         if why:
             lines.append(f"UNKNOWN {role} {text} {why}")
             bad = True
@@ -80,13 +96,15 @@ def check(catalog, jira, picks):
         if role == "architect" and jira and not has_atlassian(h):
             missing.append("atlassian-mcp")
         for item in missing:
-            lines.append(f"MISSING {role} {text} {item} in {pair.harness}")
+            lines.append(f"MISSING {role} {text} {item} in {pair.harness}{where(h, item)}")
         bad = bad or bool(missing)
         if not missing:
             lines.append(f"OK {role} {text}")
-    a, b = parse_pair_or_none(picks["architect"]), parse_pair_or_none(picks["base"])
     if a and b and (a.harness, a.model) == (b.harness, b.model):
         lines.append(f"NOTE architect and base share {a.harness}:{a.model}; the ladder skips repeated rungs")
+        if a.effort in EFFORTS and b.effort in EFFORTS and EFFORTS.index(a.effort) < EFFORTS.index(b.effort):
+            lines.append(f"NOTE the ladder's last rung, architect {a}, is a lower effort than base {b} on the same "
+                         "model, so escalating to it is weaker than the first attempt")
     return lines, bad
 
 

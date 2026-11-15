@@ -8,7 +8,9 @@ Usage:
 
 `detect` runs each harness's own CLI and writes a catalog:
   {"detected_at": iso, "harnesses": {name: {orca_agent, binary, version, styles, models,
-   skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str}}}
+   skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str,
+   skill_dirs: [folder], plugin_cmd: str, mcp_cmd: str}}}
+skill_dirs, plugin_cmd and mcp_cmd say where a missing requirement belongs (roles.py check prints them).
 A harness whose binary is missing is left out; one whose model list parses empty is
 recorded with `broken` set to the start of the raw output.
 `args --state` reads CATALOG and the LAUNCH_STYLE_ keys from a run's state file; `args --catalog` (before
@@ -34,7 +36,7 @@ EXTRA_MODELS = ["haiku"]  # Claude Code has no command that lists models; the te
 
 def real_runner(cmd):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
         return 127, str(e)
     return r.returncode, r.stdout + (r.stderr if r.returncode else "")
@@ -101,6 +103,10 @@ class Adapter:
     def mcp(self):
         raise NotImplementedError
 
+    def user_skill_dirs(self):
+        """The folders a user puts skills in by hand (plugin skill folders come on top in skill_roots)."""
+        raise NotImplementedError
+
     def skill_roots(self):
         raise NotImplementedError
 
@@ -154,10 +160,16 @@ class ClaudeAdapter(Adapter):
                 out[m.group(1).strip()] = "✔ Connected" in line
         return out
 
-    def skill_roots(self):
+    def homes(self):
         homes = [Path(self.env["CLAUDE_CONFIG_DIR"])] if self.env.get("CLAUDE_CONFIG_DIR") else []
         homes.append(self.home / ".claude")
-        homes = [h for h in dict.fromkeys(homes) if h.is_dir()]
+        return list(dict.fromkeys(homes))
+
+    def user_skill_dirs(self):
+        return [h / "skills" for h in self.homes()][:1]
+
+    def skill_roots(self):
+        homes = [h for h in self.homes() if h.is_dir()]
         roots = [h / "skills" for h in homes]
         enabled = self.plugins()
         for h in homes:
@@ -199,9 +211,12 @@ class AntigravityAdapter(Adapter):
                 out[cols[0]] = cols[2] == "enabled"
         return out
 
+    def user_skill_dirs(self):
+        return [self.home / ".gemini" / "config" / "skills"]
+
     def skill_roots(self):
         base = self.home / ".gemini" / "config"
-        return [base / "skills"] + [base / "plugins" / p / "skills" for p in self.plugins()]
+        return self.user_skill_dirs() + [base / "plugins" / p / "skills" for p in self.plugins()]
 
 
 ADAPTERS = {"claude": ClaudeAdapter, "antigravity": AntigravityAdapter}
@@ -219,6 +234,8 @@ def detect(runner, home, env=None):
             "orca_agent": a.orca_agent, "binary": found["binary"], "version": found["version"],
             "styles": list(a.styles), "models": models, "skills": a.skills(), "plugins": a.plugins(),
             "mcp": a.mcp(), "broken": None if models else (a.raw_models()[:400] or "no output"),
+            "skill_dirs": [str(d) for d in a.user_skill_dirs()],
+            "plugin_cmd": f"{a.binary} plugin list", "mcp_cmd": f"{a.binary} mcp list",
         }
     return cat
 

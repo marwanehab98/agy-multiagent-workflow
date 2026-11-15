@@ -10,7 +10,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|hydrogen|argon|gemini|antigravity|agy)\b")
+NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|flash|hydrogen|argon|gemini|antigravity|agy|claude)\b")
+EXEMPT = re.compile(r"\bCLAUDE\.md\b")  # the project instructions file, exactly as spelled; not a harness name
 CHECKED = ["SKILL.md", "references/coordinator.md", "references/architect.md", "references/templates", "scripts"]
 ALLOWED = {"scripts/harnesses.py"}
 PENDING = set()
@@ -42,12 +43,19 @@ def description_line(path):
 
 
 class NoHardcodedModels(unittest.TestCase):
+    def test_pattern_covers_claude_and_flash_but_not_claude_md(self):
+        for line in ("start a claude worker", "use Claude here", "gemini-3-flash", "Flash is cheap"):
+            self.assertTrue(NAMES.search(EXEMPT.sub("", line)), line)
+        for line in ("read CLAUDE.md first", "the project's CLAUDE.md and AGENTS.md"):
+            self.assertFalse(NAMES.search(EXEMPT.sub("", line)), line)
+        self.assertTrue(NAMES.search(EXEMPT.sub("", "read claude.md first")))  # only the exact spelling is exempt
+
     def test_no_model_or_harness_names(self):
         hits = []
         for rel, p in files():
             exempt = description_line(p) if rel == "SKILL.md" else None
             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-                if n != exempt and NAMES.search(line):
+                if n != exempt and NAMES.search(EXEMPT.sub("", line)):
                     hits.append(f"{rel}:{n}: {line.strip()[:120]}")
         if hits:
             self.fail("model or harness names found:\n" + "\n".join(hits))

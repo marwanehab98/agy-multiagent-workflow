@@ -78,6 +78,16 @@ class Happy(Design):
         self.assertEqual(self.st("LAUNCH_STYLE_cl_small_high"), "flag")
         self.expect(20, "ARCHITECT_JOB")
 
+    def test_builder_probe_wait_sets_waiting_on(self):
+        s = self.st()
+        del s["LAUNCH_STYLE_cl_small_high"]
+        self.state.write_text(json.dumps({**s, "WAITING_ON": "ctx_architect"}))
+        self.behave("pending")
+        last, _ = self.builder()
+        self.assertTrue(last.endswith(" probe"), last)
+        self.assertEqual(self.st("WAITING_ON"), last.split()[1])
+        self.assertEqual(self.st("STEP"), "run_design probe")
+
     def test_builder_probe_failure_goes_to_architect(self):
         s = self.st()
         del s["LAUNCH_STYLE_cl_small_high"]
@@ -121,6 +131,44 @@ class DocsTree(Design):
         self.assertEqual(sh("git", "-C", str(self.docs_wt), "rev-parse", "HEAD"), self.docs_head)
         self.assertEqual((self.docs_wt / "a.txt").read_text(), "a\n")
         self.assertTrue((self.run_dir / "builder-check-1.md").read_text().strip())
+
+
+    def architect_commit(self, wt):
+        """What a consult or user-message architect job does while the worker runs: commit a decision."""
+        (wt / "decisions.md").write_text("decision recorded mid-wait\n")
+        sh("git", "-C", str(wt), "add", "decisions.md")
+        sh("git", "-C", str(wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "decision")
+        return sh("git", "-C", str(wt), "rev-parse", "HEAD")
+
+    def test_docs_moved_keeps_architect_commit_discards_worker_edit(self):
+        self.behave({"do": "write-output", "edit": True})
+        self.builder()
+        head = self.architect_commit(self.docs_wt)
+        self.expect(20, "ARCHITECT_JOB", "--docs-moved")
+        self.assertEqual(sh("git", "-C", str(self.docs_wt), "rev-parse", "HEAD"), head)
+        self.assertEqual(self.docs_clean(), "")  # the worker's uncommitted edit is still discarded
+        self.assertEqual(self.st("DOCS_HEAD"), head)
+        self.assertIn("docs worktree moved", (self.run_dir / "run-log.md").read_text())
+
+    def test_without_docs_moved_the_reset_still_applies(self):
+        self.behave({"do": "write-output", "edit": True})
+        self.builder()
+        self.architect_commit(self.docs_wt)
+        self.expect(20, "ARCHITECT_JOB")
+        self.assertEqual(sh("git", "-C", str(self.docs_wt), "rev-parse", "HEAD"), self.docs_head)
+
+    def test_docs_moved_during_builder_probe_moves_probe_head(self):
+        s = self.st()
+        del s["LAUNCH_STYLE_cl_small_high"]
+        self.state.write_text(json.dumps(s))
+        self.behave("ok-edit", "write-output")
+        last, _ = self.builder()
+        self.assertTrue(last.endswith(" probe"), last)
+        head = self.architect_commit(self.docs_wt)
+        last, _ = self.expect(10, "WAIT", "--docs-moved")
+        self.assertTrue(last.endswith(" builder-check"), last)
+        self.assertEqual(sh("git", "-C", str(self.docs_wt), "rev-parse", "HEAD"), head)
+        self.assertEqual(self.docs_clean(), "")
 
 
 class Failures(Design):

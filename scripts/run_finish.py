@@ -10,11 +10,14 @@ Usage:
   python3 -I run_finish.py --state <RUN_DIR>/state.json advance
   python3 -I run_finish.py --state <file> advance --architect-result <file with the RESULT line>
   python3 -I run_finish.py --state <file> advance --reply <the user's one-word reply>
+  python3 -I run_finish.py --state <file> advance --docs-moved   # continue, after an architect job
+                                                   # (consult, user-message) committed in DOCS_WORKTREE
 
 The last line of stdout is the status.
 Exit 0   VERIFIED <log>                    the VERIFY commands passed (or the user accepted a failing
                                            run); go to Step 8 item 4 with <log> as the verify log
-Exit 10  WAIT <dispatch> final-review      end your turn; call advance again when woken
+Exit 10  WAIT <dispatch> <kind>            end your turn; call advance again when woken. kind is
+                                           final-review, or probe (a final-fix task's reviewer pairs)
 Exit 20  ARCHITECT_JOB <job> <input>       send that architect job with INPUT=<input>. Jobs:
                                            final-review <verdict file>, verification-failed <log>,
                                            fix-meta <validate output>. Save its RESULT line to a file and
@@ -31,6 +34,11 @@ final-review or verification-failed job) and RESULT: META_FIXED (to fix-meta). F
 final review runs verification; after a failed verification it asks the user whether to open the PR anyway.
 A final reviewer that is stopped or lost, or that changes the worktree, is void and replaced; the third
 void in a row prompts. Run limits: FINAL_FIX_ROUNDS 3 (prompt), META_FAILS 3 (error).
+A FINAL_FIX task's REVIEW_1/REVIEW_2 pairs are test-launched (phase probe, in DOCS_WORKTREE) after it
+validates and before the queue is written; a failed test goes to the architect as job fix-meta with
+PROBLEM lines naming the pair, and counts toward META_FAILS like a failed validation. --docs-moved
+(ruling R13) first moves PROBE_HEAD to the docs worktree's current HEAD, so an architect's commits made
+during that probe survive its tree check.
 State keys: FIN_PHASE, FIN_DISPATCH, FIN_OUT, FIN_HEAD, FIN_JOB, FIN_LINE, FIN_FIX, FIN_LAST_VERDICT,
 FIN_VERIFY_LOG, FINAL_N, VERIFY_K, VOIDS_FINAL, NO_VERDICT_FINAL, FIN_PROMPT_FILE, FIN_PROMPT_ACCEPT.
 """
@@ -41,6 +49,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (WAIT, ESCALATE, PROMPT, STOP, ERROR, Done, Orca, Run, build, next_free,  # noqa: E402
                     pick_verdict, poll, save_body, tool, verdict_line)
+from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 
 VERIFIED, RUN_QUEUE = 0, 21
 NUDGE = ("You ended your turn without settling this task. If a command you started is still running, "
@@ -215,12 +224,31 @@ class Finish:
         rc, out = tool("validate_meta.py", "tasks", "--state", str(r.path), "--tasks-dir", str(r.docs / "tasks"),
                        "--ids", fid)
         out_file.write_text(out + "\n", encoding="utf-8")
+        r.set(FIN_FIX=fid)
         if rc != 0:
-            if r.incr("META_FAILS") >= 3:
-                raise Done(ERROR, f"ERROR META_INVALID_3_TIMES {out_file}")
-            r.set(FIN_FIX=fid)
-            self.job("fix-meta", out_file)
-        r.set(META_FAILS=0, FIN_FIX=fid)
+            self.fix_meta(out_file)
+        self.set_phase("probe")
+
+    def fix_meta(self, out_file):
+        if self.r.incr("META_FAILS") >= 3:
+            raise Done(ERROR, f"ERROR META_INVALID_3_TIMES {out_file}")
+        self.job("fix-meta", out_file)
+
+    def do_probe(self):
+        """Test-launch the final-fix task's reviewer pairs; a failed launch goes to the architect as fix-meta."""
+        r = self.r
+        fid = r.need("FIN_FIX")
+        try:
+            Prober(r, self.o).advance(review_pairs(r, [fid]))
+        except Done as d:
+            if d.code == WAIT:
+                r.set(WAITING_ON=d.line.split()[1])
+            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
+                out_file = next_free(r.run_dir, "validate-{n}.txt")
+                out_file.write_text(launch_problems(r, [fid], d.line), encoding="utf-8")
+                self.fix_meta(out_file)
+            raise
+        r.set(META_FAILS=0)
         if r.incr("FINAL_FIX_ROUNDS") >= 3:
             latest = r.get("FIN_LAST_VERDICT") or r.get("FIN_VERIFY_LOG")
             self.prompt("rounds", "The final review still finds issues after two final-fix rounds: "
@@ -260,7 +288,9 @@ class Finish:
         self.set_phase("review")
 
     # -- driver
-    def advance(self, architect_result=None, reply_word=None):
+    def advance(self, architect_result=None, reply_word=None, moved=False):
+        if moved:
+            docs_moved(self.r)
         if architect_result:
             self.take_result(architect_result)
         elif reply_word:
@@ -274,7 +304,7 @@ class Finish:
             if phase.startswith("prompt:"):
                 raise Done(PROMPT, f"PROMPT {self.r.need('FIN_PROMPT_FILE')} {self.r.need('FIN_PROMPT_ACCEPT')}")
             handler = {"start": self.do_start, "review": self.do_review, "wait": self.do_wait,
-                       "verify": self.do_verify}.get(phase)
+                       "verify": self.do_verify, "probe": self.do_probe}.get(phase)
             if handler is None:
                 raise Done(ERROR, f"ERROR UNKNOWN_PHASE {phase}")
             handler()
@@ -288,12 +318,14 @@ def main():
     adv = sub.add_parser("advance")
     adv.add_argument("--architect-result")
     adv.add_argument("--reply")
+    adv.add_argument("--docs-moved", action="store_true")
     try:
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
     try:
-        Finish(a.state).advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None)
+        Finish(a.state).advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None,
+                                a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

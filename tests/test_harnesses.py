@@ -79,6 +79,16 @@ class DetectTests(unittest.TestCase):
         self.assertTrue(any(ok for n, ok in h["claude"]["mcp"].items() if "atlassian" in n.lower()))
         self.assertTrue(h["antigravity"]["mcp"]["atlassian-mcp-server"])
 
+    def test_where_requirements_belong(self):
+        h = detect_fixture()["harnesses"]
+        self.assertEqual(h["antigravity"]["skill_dirs"], [str(FAKE_HOME / ".gemini" / "config" / "skills")])
+        self.assertEqual((h["antigravity"]["plugin_cmd"], h["antigravity"]["mcp_cmd"]), ("agy plugin list", "agy mcp list"))
+        self.assertEqual(h["claude"]["skill_dirs"], [str(FAKE_HOME / ".claude" / "skills")])
+        self.assertEqual((h["claude"]["plugin_cmd"], h["claude"]["mcp_cmd"]), ("claude plugin list", "claude mcp list"))
+        with tempfile.TemporaryDirectory() as d:
+            cat = detect(fixture_runner(), FAKE_HOME, env={"CLAUDE_CONFIG_DIR": d})
+            self.assertEqual(cat["harnesses"]["claude"]["skill_dirs"][0], str(Path(d) / "skills"))
+
     def test_plugins_enabled_only_and_skills_follow_plugins(self):
         h = detect_fixture()["harnesses"]
         self.assertEqual(h["claude"]["plugins"], ["superpowers", "engineering"])
@@ -108,6 +118,19 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(top_effort(cat, "antigravity", "gemini-4-hydrogen"), "xhigh")
         self.assertEqual(top_effort(cat, "antigravity", "gemini-pro-orchestrator-g1-pro"), "default")
         self.assertEqual(top_effort(cat, "claude", "opus"), "max")
+
+
+class RealRunnerTests(unittest.TestCase):
+    def test_missing_binary_is_rc_127(self):
+        rc, out = harnesses.real_runner(["no-such-binary-for-orca-tests"])
+        self.assertEqual(rc, 127)
+        self.assertIn("no-such-binary-for-orca-tests", out)
+
+    def test_undecodable_output_is_replaced_not_raised(self):
+        rc, out = harnesses.real_runner([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'ok \\xff\\xfe end')"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith("ok ") and out.endswith(" end"), out)
+        self.assertIn("\ufffd", out)
 
 
 class CliTests(unittest.TestCase):

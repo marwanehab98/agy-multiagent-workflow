@@ -46,14 +46,26 @@ class RolesTests(unittest.TestCase):
         self.edit_catalog(lambda c: c["harnesses"]["ag"]["skills"].pop("egm-review"))
         rc, out = self.roles("check", egm="ag:g@high")
         self.assertEqual(rc, 1)
-        self.assertIn("MISSING egm ag:g@high egm-review in ag", out)
+        self.assertIn("MISSING egm ag:g@high egm-review in ag: put it in /home/u/.ag/config/skills, "
+                      "or enable a plugin that has it (ag plugin list)", out)
+
+    def test_missing_without_where_in_an_old_catalog(self):
+        def strip(c):
+            c["harnesses"]["ag"]["skills"].pop("egm-review")
+            for k in ("skill_dirs", "plugin_cmd", "mcp_cmd"):
+                c["harnesses"]["ag"].pop(k)
+        self.edit_catalog(strip)
+        rc, out = self.roles("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("MISSING egm ag:g@high egm-review in ag\n", out + "\n")
 
     def test_jira_needs_connected_atlassian(self):
         self.assertEqual(self.roles("check", jira="yes")[0], 0)
         self.edit_catalog(lambda c: c["harnesses"]["cl"]["mcp"].update({"claude_ai_Atlassian": False}))
         rc, out = self.roles("check", jira="yes")
         self.assertEqual(rc, 1)
-        self.assertIn("MISSING architect cl:big@max atlassian-mcp in cl", out)
+        self.assertIn("MISSING architect cl:big@max atlassian-mcp in cl: connect an Atlassian MCP server "
+                      "(cl mcp list)", out)
         self.assertEqual(self.roles("check", jira="no")[0], 0)
 
     def test_unknown_cases(self):
@@ -75,6 +87,28 @@ class RolesTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("NOTE architect and base share ag:g; the ladder skips repeated rungs", out)
         self.assertNotIn("NOTE", self.roles("check")[1])
+
+    def test_base_equal_to_architect_is_unknown(self):
+        rc, out = self.roles("check", architect="ag:g@high", base="ag:g@high")
+        self.assertEqual(rc, 1)
+        self.assertIn("UNKNOWN base ag:g@high is the architect pick, which never implements first; "
+                      "pick another effort or model", out)
+        self.assertNotIn("OK base", out)
+        self.assertIn("OK architect ag:g@high", out)
+
+    def test_same_model_other_effort_is_ok_with_note(self):
+        rc, out = self.roles("check", architect="ag:g@xhigh", base="ag:g@medium")
+        self.assertEqual(rc, 0)
+        self.assertIn("OK base ag:g@medium", out)
+        self.assertIn("NOTE architect and base share ag:g", out)
+        self.assertNotIn("weaker", out)
+
+    def test_architect_weaker_than_base_on_same_model_notes(self):
+        rc, out = self.roles("check", architect="ag:g@medium", base="ag:g@high")
+        self.assertEqual(rc, 0)
+        self.assertIn("NOTE the ladder's last rung, architect ag:g@medium, is a lower effort than base ag:g@high "
+                      "on the same model, so escalating to it is weaker than the first attempt", out)
+        self.assertNotIn("weaker", self.roles("check", architect="ag:g@xhigh")[1])
 
     def test_remembered_none_then_available(self):
         self.assertEqual(self.roles("remembered"), (1, "NONE"))
