@@ -14,7 +14,11 @@ Behaviors ({"do": ...}):
   edit-and-pass          edit a tracked file, verdict PASS   usage          usage-limit escalation, no settle
   stopped                lost escalation, no settle          pending        still working, nothing sent
   idle-then-commit       ends its turn unsettled; a `send` makes it commit and settle
+  ok                     settle succeeded with OK           ok-edit        edit a tracked file, then settle OK
   idle-forever           ends its turn unsettled every time, even after a `send`
+
+World key "launch_rules" (optional): a list of {"agent", "model", "effort"} (effort may be null = no --effort).
+When present, a worker-start matching no rule consumes no behavior and fails like a model the account lacks.
 """
 import json
 import os
@@ -111,6 +115,13 @@ def act(w, d, wt, b):
         Path(wt, tracked).write_text("reformatted\n")
         Path(review_file(w, d)).write_text("Critical: none.\nVERDICT: PASS\n")
         done("succeeded", "Reviewed and reformatted a file.")
+    elif do == "ok":
+        done("succeeded", "OK")
+    elif do == "ok-edit":
+        tracked = subprocess.run(["git", "-C", wt, "ls-files"], capture_output=True, text=True).stdout.split()[0]
+        Path(wt, tracked).write_text("changed by a probe\n")
+        Path(wt, "probe-stray.txt").write_text("x\n")
+        done("succeeded", "OK")
     elif do == "usage":
         send(w, d["id"], task, "escalation", "Agent hit an error: Claude hit its session limit.",
              {"turnOutcome": "failure", "failureKind": "usageLimitReached",
@@ -157,6 +168,15 @@ def main(argv):
                  "terminalState": "retained" if keep else "reclaimable"}
             d["worktree"] = wt
             w["dispatches"][did] = d
+            d["effort"] = opt(args, "--effort")
+            rules = w.get("launch_rules")
+            if rules is not None and not any((r["agent"], r["model"], r.get("effort")) == (agent, model, d["effort"])
+                                            for r in rules):
+                send(w, did, d["taskId"], "escalation",
+                     f"Model '{model}' is not available for the current authentication method", {"stopReason": "lost"})
+                d.update(liveness="exited")
+                return out({"dispatchId": did, "taskId": d["taskId"], "runId": "run_fake", "terminal": term,
+                            "keptOpen": keep})
             if not w["behaviors"]:
                 raise SystemExit(f"no behavior left for worker-start {args}")
             act(w, d, wt, w["behaviors"].pop(0))

@@ -152,6 +152,15 @@ class Orca:
         res = self.call(*args)["result"]
         return res["dispatchId"], res.get("terminal", "")
 
+    def start_args(self, spec, title, args, worktree, keep_open=False):
+        """Create a task and start a worker with the given agent args (e.g. from launch_args)."""
+        task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
+        cmd = ["worker-start", "--task", task, "--worktree", f"path:{worktree}", *args]
+        if keep_open:
+            cmd.append("--keep-open")
+        res = self.call(*cmd)["result"]
+        return res["dispatchId"], res.get("terminal", "")
+
     def try_reuse(self, spec, title, terminal, worktree):
         task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
         data = self.call("worker-start", "--task", task, "--worktree", f"path:{worktree}",

@@ -1,0 +1,1 @@
+This is a launch test. Do not read, create or change any file, and run no commands. Settle worker_done with outcome succeeded and the message OK.
