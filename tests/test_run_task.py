@@ -41,6 +41,27 @@ class HappyPath(Base):
 
 
 class GateAndFixes(Base):
+    def test_stage2_counter_survives_gate_pass(self):
+        # impl, s1 PASS, s2 FIX, fix fails gate, fix passes gate, s2 FIX, fix, s2 FIX -> escalate
+        self.behave("commit", "pass", "fix", "commit-broken", "unbreak", "fix", "commit", "fix")
+        self.until(20, "ESCALATE")
+        self.assertEqual(self.st("STAGE_FIX_ROUNDS_01_S2"), "2")
+        self.assertEqual(len(self.calls("worker-start")), 8)
+
+    def test_gate_pass_resumes_the_failed_review_stage(self):
+        # impl, s1 PASS, s2 FIX, fix fails gate, fix passes gate -> the next reviewer is stage 2
+        self.behave("commit", "pass", "fix", "commit-broken", "unbreak", "pending")
+        for _ in range(5):                           # impl, s1, s2, fix 1, fix 2
+            self.expect(10, "WAIT")
+        self.assertIn(" review2", self.expect(10, "WAIT")[0])
+
+    def test_total_fix_cap_escalates(self):
+        # s1 FIX(t1), gate fail(t2), gate pass, s1 PASS, s2 FIX(t3), gate fail(t4), gate pass, s2 FIX -> cap
+        self.behave("commit", "fix", "commit-broken", "unbreak", "pass", "fix", "commit-broken", "unbreak", "fix")
+        self.until(20, "ESCALATE")
+        self.assertEqual(self.st("TOTAL_FIX_ROUNDS_01"), "4")
+        self.assertEqual(self.st("STAGE_FIX_ROUNDS_01_S2"), "1")
+
     def test_gate_failure_goes_to_fix_on_same_terminal(self):
         self.behave("commit-broken", "unbreak", "pass", "pass")
         self.expect(10, "WAIT")
@@ -49,7 +70,7 @@ class GateAndFixes(Base):
         self.assertIn("--terminal", fix_start)
         self.assertTrue(list((self.run_dir / "gates").glob("01-*.log")))
         self.assertIn(" review1", self.expect(10, "WAIT")[0])
-        self.assertEqual(self.st("FIX_ROUNDS_01"), "0")
+        self.assertEqual(self.st("GATE_FIX_ROUNDS_01"), "0")
         self.expect(10, "WAIT")
         self.expect(0, "QUEUE_EMPTY")
         self.assertEqual(self.st("LOOP_01"), "merged")
@@ -112,7 +133,7 @@ class GateAndFixes(Base):
         self.assertIn("ctx_2 review1", self.expect(10, "WAIT")[0])
         self.assertIn("ctx_3 review1", self.expect(10, "WAIT")[0])
         self.assertIn(" fix", self.expect(10, "WAIT")[0])
-        self.assertEqual(self.st("FAILED_STAGE_01"), "1")
+        self.assertEqual(self.st("REVIEW_STAGE_01"), "1")
 
     def test_stage2_fix_rechecks_then_returns_to_stage2(self):
         self.behave("commit", "pass", "fix", "commit", "pass")
@@ -135,7 +156,7 @@ class TreeAndWorkers(Base):
         self.assertEqual(sh("git", "-C", str(self.impl), "status", "--porcelain"), "")
         self.expect(10, "WAIT")
         self.expect(0, "QUEUE_EMPTY")
-        self.assertEqual(self.st("FIX_ROUNDS_01"), "0")
+        self.assertEqual(self.st("TOTAL_FIX_ROUNDS_01"), "0")
 
     def test_stopped_reviewer_is_replaced(self):
         self.behave("commit", "stopped", "pass", "pass")

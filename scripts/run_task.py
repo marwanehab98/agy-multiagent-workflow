@@ -126,8 +126,10 @@ class Loop:
                           {"TASK_TITLE": meta["TITLE"]},
                           {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         r.set(CURRENT_TASK=t, **{f"BASE_SHA_{t}": head, f"IMPLEMENT_SPEC_{t}": spec,
-                                 f"PAIR_{t}": meta["IMPLEMENTER"], f"ATTEMPT_{t}": 0, f"FIX_ROUNDS_{t}": 0,
-                                 f"FAILED_STAGE_{t}": None, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0,
+                                 f"PAIR_{t}": meta["IMPLEMENTER"], f"ATTEMPT_{t}": 0,
+                                 f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
+                                 f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
+                                 f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0,
                                  f"NO_VERDICT_{t}_S1": 0, f"NO_VERDICT_{t}_S2": 0,
                                  f"VOIDS_{t}_S1": 0, f"VOIDS_{t}_S2": 0})
         self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
@@ -171,20 +173,21 @@ class Loop:
                        "--head", head, "--log", str(log))
         r.log(f"{t} gate exit={rc} {log}")
         if rc == 1:
-            r.set(**{f"FAILED_STAGE_{t}": "gate"})
-            return self.fix(t, log)
+            r.set(**{f"GATE_FAILED_{t}": "yes"})
+            return self.fix(t, log, "gate")
         if rc != 0:
             raise Done(ERROR, f"ERROR GATE {out}")
-        failed = r.get(f"FAILED_STAGE_{t}")
-        if failed == "gate":
-            r.set(**{f"FIX_ROUNDS_{t}": 0})
-        self.start_review(t, 2 if failed == "2" else 1)
+        r.set(**{f"GATE_FAILED_{t}": "no", f"GATE_FIX_ROUNDS_{t}": 0})
+        self.start_review(t, int(r.get(f"REVIEW_STAGE_{t}", "1")))
 
-    def fix(self, t, findings):
+    def fix(self, t, findings, kind):
+        """kind is 'gate' or the review stage number (1 or 2) whose FIX verdict started this round."""
         r = self.r
-        if int(r.get(f"FIX_ROUNDS_{t}", "0")) >= 2:
+        counter = f"GATE_FIX_ROUNDS_{t}" if kind == "gate" else f"STAGE_FIX_ROUNDS_{t}_S{kind}"
+        if int(r.get(counter, "0")) >= 2 or int(r.get(f"TOTAL_FIX_ROUNDS_{t}", "0")) >= 4:
             return self.escalate(t)
-        r.incr(f"FIX_ROUNDS_{t}")
+        r.incr(counter)
+        r.incr(f"TOTAL_FIX_ROUNDS_{t}")
         meta = self.meta(t)
         spec = build("fix.txt", next_free(r.run_dir / "specs", f"{t}-fix-{{n}}.txt"),
                           {"TASK_TITLE": meta["TITLE"], "BASE_SHA": r.need(f"BASE_SHA_{t}"),
@@ -236,15 +239,15 @@ class Loop:
         if last:
             r.set(**{f"NO_VERDICT_{t}_S{stage}": 0})
         if last == "VERDICT: PASS":
+            r.set(**{f"STAGE_FIX_ROUNDS_{t}_S{stage}": 0})
             if stage == 1:
-                if r.get(f"FAILED_STAGE_{t}") == "1":
-                    r.set(**{f"FIX_ROUNDS_{t}": 0})
+                r.set(**{f"REVIEW_STAGE_{t}": 2})
                 return self.start_review(t, 2)
             return self.set_phase(t, "merge")
         if last != "VERDICT: FIX" and r.incr(f"NO_VERDICT_{t}_S{stage}") < 2:
             return self.start_review(t, stage)
-        r.set(**{f"FAILED_STAGE_{t}": stage})
-        return self.fix(t, verdict)
+        r.set(**{f"REVIEW_STAGE_{t}": stage})
+        return self.fix(t, verdict, stage)
 
     @staticmethod
     def pick_verdict(review, settle):
@@ -353,8 +356,10 @@ class Loop:
                               {"TASK_TITLE": meta["TITLE"], "RESET_SHA": sha},
                               {"NOTE": note, "DECISIONS": r.task_file(t, "-decisions.md"),
                                "IMPLEMENT_SPEC": r.run_dir / "specs" / f"{t}-implement.txt"})
-            r.set(**{f"IMPLEMENT_SPEC_{t}": spec, f"PAIR_{t}": pair, f"FIX_ROUNDS_{t}": 0,
-                     f"FAILED_STAGE_{t}": None, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0})
+            r.set(**{f"IMPLEMENT_SPEC_{t}": spec, f"PAIR_{t}": pair,
+                     f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
+                     f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
+                     f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0})
             r.log(f"{t} escalation attempt {a} on {pair} from {sha}")
             return self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
         if kind == "REPLAN" and len(words) >= 4:
