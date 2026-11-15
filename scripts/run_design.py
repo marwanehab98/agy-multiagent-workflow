@@ -216,10 +216,6 @@ class Design:
             if src.is_file():
                 shutil.copyfile(src, out)
         rc, why = tool("check-tree.sh", self.docs_wt, r.need("DOCS_HEAD"), *allow)
-        if allow and rc == 0 and out.is_file():
-            # The copy in RUN_DIR is the keeper; an allowed file left behind would look like an
-            # uncommitted architect file to the next worker's docs-tree check.
-            (Path(self.docs_wt) / args[1]).unlink(missing_ok=True)
         if rc != 0:
             rc2, out2 = tool("discard-changes.sh", self.docs_wt, r.need("DOCS_HEAD"))
             r.log(f"design {kind} worker changed the docs worktree ({why}); discarded: {out2} (exit {rc2})")

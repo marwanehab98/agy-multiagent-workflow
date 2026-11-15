@@ -175,19 +175,27 @@ class Egm(Design):
         last, _ = self.expect(20, "ARCHITECT_JOB")
         out = self.run_dir / "egm-1.md"
         self.assertEqual(last, f"ARCHITECT_JOB egm-done {out}")
-        self.assertTrue(out.read_text().strip())
+        self.assertEqual(out.read_text(), (self.docs_wt / FINDINGS).read_text())
+        self.assertIn("Important: x.md:1 unclear.", out.read_text())
         self.assertEqual(self.st("EGM_SKILLS"), "/skills")
         task = json.loads(self.world.read_text())["tasks"]["task_1"]
         self.assertEqual(task["title"], "EGM review: demo")
         self.assertIn("/skills/egm-review/SKILL.md", task["spec"])
-        self.assertEqual(self.docs_clean(), "")
+        self.assertEqual(self.docs_clean(), f"?? {FINDINGS}")  # allowed, left for the architect to commit
+
+    def commit_findings(self):
+        """What the architect does on egm-done: commit the findings file."""
+        sh("git", "-C", str(self.docs_wt), "add", "-f", FINDINGS)
+        sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "findings", "--allow-empty")
 
     def test_egm_third_run_sends_egm_limit(self):
         self.behave("write-output", "write-output")
         self.egm_need()
         self.expect(20, "ARCHITECT_JOB")
+        self.commit_findings()
         self.egm_need()
         self.expect(20, "ARCHITECT_JOB")
+        self.commit_findings()
         last, _ = self.egm_need(expect=(20, "ARCHITECT_JOB"))
         self.assertEqual(last, "ARCHITECT_JOB egm-limit none")
         self.assertEqual(self.st("EGM_RUNS"), "3")
