@@ -244,6 +244,34 @@ class Prompts(Base):
         self.assertIn("not between the task's base", hist)
         self.assertEqual(self.impl_head(), self.st("WORKER_HEAD_01"))  # nothing was reset
 
+    def test_replan_sha_before_base_is_rejected(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.until(20, "ESCALATE")
+        queue = (self.run_dir / "queue.txt").read_text()
+        self.expect(20, "ESCALATE", "--architect-result", self.result_file(f"RESULT: REPLAN {self.older} 01b"))
+        hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
+        self.assertIn("not between the task's base", hist)
+        self.assertEqual(self.impl_head(), self.st("WORKER_HEAD_01"))
+        self.assertEqual((self.run_dir / "queue.txt").read_text(), queue)
+
+    def test_escalate_sha_off_the_head_line_is_rejected(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.until(20, "ESCALATE")
+        g = lambda *a: sh("git", "-C", str(self.impl), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+        head = g("rev-parse", "HEAD")
+        g("checkout", "-q", "--detach", self.base)
+        (self.impl / "side.txt").write_text("s\n")
+        g("add", "side.txt")
+        g("commit", "-qm", "side")
+        side = g("rev-parse", "HEAD")
+        g("checkout", "-q", "--detach", head)
+        note = self.tmp / "note.md"
+        note.write_text("n\n")
+        self.expect(20, "ESCALATE", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {side} {note} antigravity:g-xhigh"))
+        self.assertIn("not between the task's base", (self.run_dir / "verdicts" / "01-history.md").read_text())
+        self.assertEqual(self.impl_head(), head)
+
     def test_three_void_reviewers_prompt_retry_or_stop(self):
         self.behave("commit", "stopped", "stopped", "stopped")
         self.expect(10, "WAIT")

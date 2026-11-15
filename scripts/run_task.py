@@ -321,6 +321,17 @@ class Loop:
                         ["retry", "stop"], back_to="escalating")
         raise Done(ESCALATE, f"ESCALATE {r.need(f'ESC_INPUT_{t}')}")
 
+    def in_range(self, t, sha):
+        """True when sha is a descendant of the task's base and an ancestor of the worktree head."""
+        impl = self.r.impl
+        base = self.r.need(f"BASE_SHA_{t}")
+        return (run(["git", "-C", impl, "merge-base", "--is-ancestor", base, sha]).returncode == 0
+                and run(["git", "-C", impl, "merge-base", "--is-ancestor", sha, "HEAD"]).returncode == 0)
+
+    def range_msg(self, t, sha):
+        return (f"reset sha {sha} is not between the task's base {self.r.need(f'BASE_SHA_{t}')} "
+                f"and head {git(self.r.impl, 'rev-parse', 'HEAD')}")
+
     def architect_result(self, t, path):
         r = self.r
         text = Path(path).read_text(encoding="utf-8") if Path(path).is_file() else ""
@@ -352,10 +363,8 @@ class Loop:
                            "--gemini-model", r.need("GEMINI_MODEL"), "--allow-opus", allow)
             if rc != 0:
                 return self.reject(t, out)
-            base, head = r.need(f"BASE_SHA_{t}"), git(r.impl, "rev-parse", "HEAD")
-            if (run(["git", "-C", r.impl, "merge-base", "--is-ancestor", base, sha]).returncode != 0
-                    or run(["git", "-C", r.impl, "merge-base", "--is-ancestor", sha, "HEAD"]).returncode != 0):
-                return self.reject(t, f"reset sha {sha} is not between the task's base {base} and head {head}")
+            if not self.in_range(t, sha):
+                return self.reject(t, self.range_msg(t, sha))
             rc, out = tool("discard-changes.sh", r.impl, sha)
             if rc != 0:
                 raise Done(ERROR, f"ERROR RESET {out}")
@@ -372,6 +381,8 @@ class Loop:
         if kind == "REPLAN" and len(words) >= 4:
             if meta.get("REPLANNED_FROM"):
                 return self.reject(t, "Replan is not allowed for this task")
+            if not self.in_range(t, words[2]):
+                return self.reject(t, self.range_msg(t, words[2]))
             r.set(**{f"PENDING_REPLAN_{t}": " ".join(words[2:])})
             return self.apply_replan(t, " ".join(words[2:]))
         return self.reject(t, f"unrecognised answer: {' '.join(words)[:300]}")
