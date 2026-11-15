@@ -13,6 +13,8 @@ Part of orca-multiagent-workflow. These facts were confirmed on 2026-11-13 again
   - A worker's prompt says "EFFORT LEVEL: 0.50" whatever the model or effort, so a worker can't tell you its effort.
 - The EGM skills (`egm-brainstorm`, `egm-review`, `egm-review-loop`) set `disable-model-invocation: true`, so the templates give workers each `SKILL.md` path to read instead of naming the skill. `egm-review` takes `Step: uninterrupted` to skip its preset gate. Its severities are Blocker, Major and Nit.
 - The `orca-cli` handoff can target Claude Code on `sonnet`.
+- **Setup handoff** (checked 2026-11-15 against the `orca-cli` guide and `orca agent launch --help`): the guide's handoff for a fresh agent in an existing worktree is `ORCA agent launch --agent <id> [--worktree <selector>] --prompt <text> --model <id> --effort <level>`, so SKILL.md "Start here" uses it with `harnesses.py args`, not the `worker-start --spec-file` fallback. `--effort` requires `--model`; an Orca host too old for them refuses `--model`/`--effort`.
+- **`run-create` binds a run before any worker:** `ORCA orchestration run-create --objective <text>` creates and binds a Run (from `--help`). Coordinator Step 1 runs it before the test launches, because `probe.py` creates tasks with `task-create`, which fails with `run_required` until a Run is bound.
 
 ## Session mailboxes (tested 2026-11-13 from an Orca chat session)
 
