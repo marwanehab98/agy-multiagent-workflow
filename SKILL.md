@@ -1,6 +1,6 @@
 ---
 name: orca-multiagent-workflow
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through to a reviewed PR, asks to run work through Orca workers, asks to continue an earlier run of this workflow, or names orca-multiagent-workflow; also when a handoff brief says to start or resume this workflow. Not for ordinary tasks, where the standard Superpowers skills apply.
+description: Use when the user hands over a JIRA key or hand-written requirements to be taken through to a reviewed PR, asks to run work through Orca, Antigravity, or Gemini workers, asks to continue an earlier run of this workflow, or names orca-multiagent-workflow; also when a handoff brief says to start or resume this workflow. Not for ordinary tasks, where the standard Superpowers skills apply.
 ---
 
 # Orca multi-agent workflow
@@ -31,7 +31,7 @@ The session that loads this skill is the **setup session**, whatever its harness
 1. **Detect:** run `mkdir -p <CFG>`, then `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`.
 2. **Remembered picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py remembered --roles <CFG>/roles.json --catalog <CATALOG>`.
    - **`AVAILABLE yes`:** show the four `role=pair` lines in one block, then say exactly "Reply \"same\" to use these picks again, or \"new\" to choose again." This is a fixed prompt. "same" goes to item 4 with those picks; "new" goes to item 3.
-   - **`AVAILABLE no <role> <pair>`:** say exactly "Your last <role> pick, <pair>, isn't available any more, so pick the <role> again." Then ask that one role as in item 3, keep the other three remembered picks, and go to item 4. Never choose the replacement yourself, however close a model looks or whatever the user delegates to you: only a number the user picks from the menu counts.
+   - **`AVAILABLE no <role> <pair>`** (one line per vanished pick): for each line, say exactly "Your last <role> pick, <pair>, isn't available any more, so pick the <role> again." and ask that role as in item 3. Keep the remembered picks that are still available, and go to item 4. Never choose a replacement yourself, however close a model looks or whatever the user delegates to you: only a number the user picks from the menu counts.
    - **`NONE`:** go to item 3.
 3. **Ask the four roles,** in this order: coordinator, architect, EGM, base implementer. For each, ask three questions in turn, each a numbered list in plain text, not a multiple-choice tool. `MENU` means `python3 -I <SKILL_DIR>/scripts/roles.py menu --catalog <CATALOG>`:
    1. harness: `MENU`;
@@ -41,26 +41,26 @@ The session that loads this skill is the **setup session**, whatever its harness
    Each menu line is `N<TAB>value<TAB>label`. Ask "<role>: which <harness|model|effort>?", then one line per row, `N. label`, then any `BROKEN` lines exactly. The reply is a number from the list; anything else gets the same list again. The pick is `<harness>:<model>@<effort>`, using each chosen row's value.
 4. **Check the picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py check --catalog <CATALOG> --jira <yes if the request has a JIRA key, else no> --coordinator <pair> --architect <pair> --egm <pair> --base <pair>`.
    - **Exit 0:** show any `NOTE` line exactly, and go on.
-   - **Exit 1:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't hand off (Rule 21).
+   - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't hand off (Rule 21).
+   - **Exit 1 with only `UNKNOWN` lines:** show them exactly, ask each named role again as in item 3, and repeat this item.
 5. **Save:** run `python3 -I <SKILL_DIR>/scripts/roles.py save --roles <CFG>/roles.json` with the same four `--<role> <pair>` options.
 6. **Hand off** to a fresh coordinator on the coordinator pick, even if this session already runs that harness and model:
-   1. Run `python3 -I <SKILL_DIR>/scripts/state.py --file <CFG>/setup.json set CATALOG=<CATALOG>`.
-   2. `COORD_SKILL` is the output of `python3 -I <SKILL_DIR>/scripts/harnesses.py skill-dir --catalog <CATALOG> --harness <the coordinator pick's harness> --skill orca-multiagent-workflow`.
-   3. Write the brief to `<CFG>/handoff.md`:
+   1. `COORD_SKILL` is the output of `python3 -I <SKILL_DIR>/scripts/harnesses.py skill-dir --catalog <CATALOG> --harness <the coordinator pick's harness> --skill orca-multiagent-workflow`.
+   2. Write the brief to `<CFG>/handoff.md`:
 
       ```text
-      You are the coordinator of an orca-multiagent-workflow run. Read <COORD_SKILL>/SKILL.md, then run <COORD_SKILL>/references/coordinator.md from Step 1. The picks file is <CFG>/roles.json. The user's request, verbatim:
+      You are the coordinator of an orca-multiagent-workflow run. Read <COORD_SKILL>/SKILL.md, then run <COORD_SKILL>/references/coordinator.md from Step 1. The picks file is <CFG>/roles.json and the setup catalog is <CATALOG>. The user's request, verbatim:
       <the user's request, exactly as they wrote it>
       ```
 
-   4. Load the `orca-cli` skill and use its handoff command for a fresh agent in the current worktree, `ORCA agent launch`, with `--prompt "$(cat <CFG>/handoff.md)"` and, in place of `--agent`, `--model` and `--effort`, the output of `python3 -I <SKILL_DIR>/scripts/harnesses.py args --state <CFG>/setup.json --pair <the coordinator pick>`.
-   5. Say exactly "The coordinator now runs in <the tab or handle from the launch result>. Talk to it there." Then stop.
+   3. Load the `orca-cli` skill and use its handoff command for a fresh agent in the current worktree, `ORCA agent launch`, with `--prompt "$(cat <CFG>/handoff.md)"` and, in place of `--agent`, `--model` and `--effort`, the output of `python3 -I <SKILL_DIR>/scripts/harnesses.py args --catalog <CATALOG> --pair <the coordinator pick>`.
+   4. Say exactly "The coordinator now runs in <the tab or handle from the launch result>. Talk to it there." Then stop.
 
 ### Continue a run
 
-1. Find the run's state file: it is `.run/state.json` in the worktree on `refs/heads/<TOPIC>-docs` (`git worktree list --porcelain`). If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait.
+1. Find the run's state file: it is `.run/state.json` in the worktree on `refs/heads/<TOPIC>-docs` (`git worktree list --porcelain`). If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several such worktrees have a state file, list their topics as a numbered list and ask which one.
 2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's harness, model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no handoff. "resume" goes on below; "new" runs Setup.
-3. Hand off as in Setup item 6, with these changes: the pair is the state file's `ROLE_COORDINATOR`; the `--state` for `harnesses.py args` and the catalog for `skill-dir` are that state file and its `CATALOG`; and the brief says "run <COORD_SKILL>/references/coordinator.md "Resume a run" with the state file <path>" instead of Step 1.
+3. Hand off as in Setup item 6, with these changes: the pair is the state file's `ROLE_COORDINATOR`; `harnesses.py args` takes `--state <that state file>` instead of `--catalog`, and `skill-dir` takes the state file's `CATALOG`; and the brief says "run <COORD_SKILL>/references/coordinator.md "Resume a run" with the state file <path>" instead of Step 1.
 
 The architect worker reads `references/architect.md`; its spec tells it to. Confirmed Orca behavior is in `references/orca-facts.md`.
 
@@ -131,7 +131,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 18. **Every value and counter lives in `<RUN_DIR>/state.json`,** written and read with `scripts/state.py`. A value the coordinator only remembers, or that a context summary mentions, is not a source: read it from the state file. Before ending any turn that waits, record `STEP` and `WAITING_ON`, so a compacted or restarted coordinator can pick up (coordinator "Resume a run").
 19. **Checks run before reviews.** After every task, `scripts/gate.py` runs the run's check commands in `<IMPL_WORKTREE>` and puts the tree back. A failure goes straight to a fix round with the log, and no reviewer starts on code that fails its checks.
 20. **The loops are scripts.** `run_design.py` runs Step 2's design workers, `run_task.py` the task loop (Step 4), `run_finish.py` the final review and verification (Step 8), and `probe.py` the test launches. The coordinator only runs them and branches on their last line, passing on what they print unchanged. It never starts their workers, counts, retries, reads their workers' output, checks or resets a tree, or merges by hand.
-21. **A failed setup check or test launch stops the run before work starts.** `roles.py check` exiting 1 (any `MISSING` or `UNKNOWN` line) and `probe.py`'s `PROBE_FAILED` both stop it: show the lines, or the file, exactly; save nothing, hand off nothing, start no worker. No deadline, user instruction, or "it worked yesterday" changes this. The user fixes the cause, or picks again in a new run.
+21. **A failed setup check or test launch stops the run before work starts.** A `MISSING` line from `roles.py check`, any failed check in the coordinator, and `probe.py`'s `PROBE_FAILED` all stop it: show the lines, or the file, exactly; save nothing, hand off nothing, start no worker. The one exception is an `UNKNOWN`-only check during setup, where the user picks those roles again (Setup item 4). No deadline, user instruction, or "it worked yesterday" changes this. The user fixes the cause, or picks again in a new run.
 
 Run bundled scripts through their interpreter: `bash <SKILL_DIR>/scripts/<name>.sh`, `python3 -I <SKILL_DIR>/scripts/<name>.py`. Bash calls don't keep shell variables, so each value goes into a command literally, or through `$(python3 -I <SKILL_DIR>/scripts/state.py --file <RUN_DIR>/state.json get KEY)`.
 

@@ -7,14 +7,17 @@ After each probe worker the docs worktree is checked against PROBE_HEAD; any cha
 It never polls: a call starts every pending pair at once, then exits at the first wait.
 
 Usage:
-  python3 -I probe.py --state <RUN_DIR>/state.json advance --set step1|step3
+  python3 -I probe.py --state <RUN_DIR>/state.json advance --set step1|step3|resume
   python3 -I probe.py --state <file> advance --set pair --pair <harness:model@effort>
   python3 -I probe.py --state <file> advance            # continue the stored PROBE_SET
 
 Sets: step1 = ROLE_ARCHITECT, ROLE_EGM, ROLE_BASE and the base model at BASE_TOP;
-step3 = every REVIEW_1/REVIEW_2 in the queue's .meta files plus CLERICAL_PAIR; pair = one pair.
-Pairs that already hold LAUNCH_STYLE_<key> are skipped. A call without --set continues PROBE_SET;
-a different --set starts that set.
+step3 = every REVIEW_1/REVIEW_2 in the queue's .meta files plus CLERICAL_PAIR; pair = one pair;
+resume = step1 and step3 together, re-probed even when they hold LAUNCH_STYLE_<key> (a resumed run
+proves its pairs again; a success overwrites the style).
+Pairs that already hold LAUNCH_STYLE_<key> are skipped, except those marked PROBE_RECHECK_<key>.
+`--set resume` marks every pair in the set, unless marks from an unfinished resume remain. A call
+without --set continues PROBE_SET; a different --set starts that set.
 
 The last line of stdout is the status.
 Exit 0   PROBED                            every pair in the set has a working launch style
@@ -24,7 +27,7 @@ Exit 2   ERROR <what>                      bad state or Orca failure (OLD_FORMAT
 Exit 64  bad usage
 
 State keys: PROBE_SET, PROBE_PAIR, PROBE_HEAD, PROBE_STYLE_<key> (index of the style being tried),
-PROBE_DISPATCH_<key>, LAUNCH_STYLE_<key> (written on success). Needs DOCS_WORKTREE and CATALOG.
+PROBE_DISPATCH_<key>, PROBE_RECHECK_<key> (resume: probe again), LAUNCH_STYLE_<key> (written on success). Needs DOCS_WORKTREE and CATALOG.
 Embeddable: Prober(run, orca).advance(pairs) returns on PROBED and raises Done otherwise.
 """
 import argparse
@@ -60,7 +63,8 @@ class Prober:
 
     def advance(self, pairs):
         pairs = list(dict.fromkeys(p if isinstance(p, Pair) else parse_pair(p) for p in pairs))
-        pending = [p for p in pairs if not self.r.get(f"LAUNCH_STYLE_{pair_key(p)}")]
+        pending = [p for p in pairs if not self.r.get(f"LAUNCH_STYLE_{pair_key(p)}")
+                   or self.r.get(f"PROBE_RECHECK_{pair_key(p)}")]
         in_flight = any(self.r.get(f"PROBE_DISPATCH_{pair_key(p)}") for p in pending)
         if pending and not in_flight:
             self.r.set(PROBE_HEAD=git(self.wt, "rev-parse", "HEAD"))
@@ -104,7 +108,8 @@ class Prober:
                     return "wait"
                 result = ("stopped", f"worker {dispatch} ended its turn twice without settling")
             if result[0] == "done" and result[1] == "succeeded":
-                self.r.set(**{f"LAUNCH_STYLE_{key}": style, f"PROBE_STYLE_{key}": None, f"PROBE_DISPATCH_{key}": None})
+                self.r.set(**{f"LAUNCH_STYLE_{key}": style, f"PROBE_STYLE_{key}": None, f"PROBE_DISPATCH_{key}": None,
+                              f"PROBE_RECHECK_{key}": None})
                 self.finish(dispatch, pair)
                 self.r.log(f"probe {pair}: launch style {style} works")
                 return "ok"
@@ -155,6 +160,8 @@ def set_pairs(r, name, one=None):
         base = parse_pair(r.need("ROLE_BASE"))
         return [parse_pair(r.need("ROLE_ARCHITECT")), parse_pair(r.need("ROLE_EGM")), base,
                 Pair(base.harness, base.model, r.need("BASE_TOP"))]
+    if name == "resume":
+        return list(dict.fromkeys(set_pairs(r, "step1") + set_pairs(r, "step3")))
     if name == "step3":
         found = []
         queue = r.run_dir / "queue.txt"
@@ -172,9 +179,11 @@ def run_advance(r, set_name, one):
     o = Orca(r)
     if set_name and (set_name != r.get("PROBE_SET") or (set_name == "pair" and one != r.get("PROBE_PAIR"))):
         r.set(PROBE_SET=set_name, PROBE_PAIR=one)
+    if set_name == "resume" and not any(k.startswith("PROBE_RECHECK_") for k in r.s):
+        r.set(**{f"PROBE_RECHECK_{pair_key(p)}": "yes" for p in set_pairs(r, "resume")})
     set_name, one = r.get("PROBE_SET"), r.get("PROBE_PAIR")
     if not set_name:
-        raise Done(ERROR, "ERROR NO_PROBE_SET pass --set step1|step3|pair")
+        raise Done(ERROR, "ERROR NO_PROBE_SET pass --set step1|step3|resume|pair")
     Prober(r, o).advance(set_pairs(r, set_name, one))
     raise Done(PROBED, "PROBED")
 
@@ -184,7 +193,7 @@ def main():
     p.add_argument("--state", required=True)
     sub = p.add_subparsers(dest="op", required=True)
     adv = sub.add_parser("advance")
-    adv.add_argument("--set", choices=["step1", "step3", "pair"])
+    adv.add_argument("--set", choices=["step1", "step3", "resume", "pair"])
     adv.add_argument("--pair")
     try:
         a = p.parse_args()

@@ -11,8 +11,8 @@ Usage:
 model's efforts); broken harnesses follow as `BROKEN <name>: <reason>`.
 `check` prints one `OK role pair`, `UNKNOWN role pair why` or `MISSING role pair item in harness`
 per finding, plus a NOTE when architect and base share harness and model. Exit 1 on UNKNOWN/MISSING.
-`remembered` prints `role=pair` lines then `AVAILABLE yes` or `AVAILABLE no <role> <pair>`;
-exit 1 with `NONE` when the file is missing.
+`remembered` prints `role=pair` lines then `AVAILABLE yes`, or one `AVAILABLE no <role> <pair>` line per
+remembered pick that isn't in the catalog any more; exit 1 with `NONE` when the file is missing.
 `save` writes the picks file; `to-state` copies the picks, BASE_TOP and CATALOG into a state file.
 Exit 0 ok. Exit 1 findings or bad input. Exit 64 bad usage.
 """
@@ -166,9 +166,9 @@ def main(argv=None):
             picks, catalog = read_roles(a.roles), load_catalog(a.catalog)
             for role in ROLES:
                 print(f"{role}={picks[role]}")
-            gone = next(((role, picks[role]) for role in ROLES
-                         if (p := parse_pair_or_none(picks[role])) is None or unknown_why(catalog, p)), None)
-            print("AVAILABLE yes" if gone is None else f"AVAILABLE no {gone[0]} {gone[1]}")
+            gone = [(role, picks[role]) for role in ROLES
+                    if (p := parse_pair_or_none(picks[role])) is None or unknown_why(catalog, p)]
+            print("\n".join(f"AVAILABLE no {role} {pair}" for role, pair in gone) or "AVAILABLE yes")
         elif a.cmd == "save":
             for x in ROLES:
                 parse_pair(getattr(a, x))

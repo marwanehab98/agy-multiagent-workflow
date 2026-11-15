@@ -90,6 +90,12 @@ class RolesTests(unittest.TestCase):
         rc, out = self.roles("remembered")
         self.assertEqual(out.splitlines()[-1], "AVAILABLE no base ag:gone@high")
 
+    def test_remembered_lists_every_vanished_pick(self):
+        self.save(egm="ag:gone@high", base="ag:g@nope")
+        rc, out = self.roles("remembered")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.splitlines()[-2:], ["AVAILABLE no egm ag:gone@high", "AVAILABLE no base ag:g@nope"])
+
     def test_save_writes_json_and_creates_folder(self):
         self.save()
         data = json.loads(self.roles_file.read_text())

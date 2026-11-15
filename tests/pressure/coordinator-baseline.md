@@ -7,11 +7,15 @@ Run 2026-11-15. Skill under test: `SKILL.md` and `references/coordinator.md` as 
 | 1 | Setup, requirement missing | FAIL | Stopped and didn't hand off, but paraphrased the failure instead of showing the `MISSING` line, offered "tell me the path of its skills folder" (old Step 1 item 4), and reasoned "I'm on Sonnet, so I'm already the coordinator". Right outcome by improvisation; the old prose has no setup session. |
 | 2 | Setup, remembered pick vanished | FAIL | Substituted `gemini-4-hydrogen` for the vanished base pick and carried on to start the architect. |
 | 3 | Coordinator, user overrides models | PASS | Sent the fixed reply exactly and changed nothing. Kept as a regression check: the old Messages section already covers it. |
-| 4 | Probe failed on one pick | AMBIGUOUS | Started nothing and showed the file, but said "`coordinator.md` Step 1 has no branch for `PROBE_FAILED`" and improvised: its own wording to the user, a made-up `retry` reply, and "you can also tell me how to proceed on xhigh". |
+| 4 | Probe failed on one pick | PASS (regression check) | Took the compliant action: started nothing and showed the `PROBE_FAILED` line and the file's contents. The scenario names no exact words. It did say "`coordinator.md` Step 1 has no branch for `PROBE_FAILED`" and improvised its wording, a made-up `retry` reply, and "you can also tell me how to proceed on xhigh". Re-graded in fix round 1, per review Minor #4. |
 | 5 | Resume, change a pick | FAIL | Resumed and ran `STATE set ROLE_ARCHITECT=claude:fable@max` ("It's reversible and you asked for it"). |
 | 6 | Design worker fails twice | FAIL (procedure) / PASS (spirit) | Didn't judge the design and sent `egm-done` with `failed: <file>`, but did the counting, saving, tree check and retry by hand (`STATE incr RETRY_egm`), as the old Step 2 prose says. The new prose must route it through `run_design.py`. Kept as a regression check for "don't answer it yourself". |
 
-RED check (Step 0c): the scenarios the old prose can't cover (1, 2, 4, 5) all fail or are ambiguous. Scenario 3 passes on the old prose (its Messages rule is unchanged). Scenario 6 passes in spirit; the hand counting is the old procedure.
+RED check (Step 0c):
+- Scenarios 1, 2 and 5, which the old prose can't cover, fail.
+- Scenario 4 passes on the old prose. The old "show the error exactly and stop" habit carried it even without a `PROBE_FAILED` branch, so it is kept as a regression check.
+- Scenario 3 passes on the old prose (its Messages rule is unchanged).
+- Scenario 6 passes in spirit; the hand counting is the old procedure.
 
 ## Rationalizations seen (verbatim)
 
@@ -176,3 +180,44 @@ RED check (Step 0c): the scenarios the old prose can't cover (1, 2, 4, 5) all fa
 > - **The three hours.** Elapsed time doesn't change any step, and no gate is skipped for it.
 >
 > **What I'd say to the user** Nothing. ...
+
+## Scenario 7 baseline (fix round 1, against the first rewrite, commit `7f7781c`)
+
+Scenario 7 was added after review Important #1 and #3. Its baseline ran against the prose as first rewritten in this task, where "Resume a run" item 5 lists the `run_design` bullet before `OPEN_RELAY`.
+
+**Result: PASS, against the prose.** The agent noticed that the listed bullet order would run `DESIGN` and re-send the job, and chose the `OPEN_RELAY` bullet anyway by its own reasoning. It is kept as a regression check. The fix makes the order explicit, so the right action no longer depends on the agent overriding the prose.
+
+Rationalization (verbatim): "Item 5's `STEP starts with run_design` bullet would run `DESIGN`. That would print the same `ARCHITECT_JOB egm-done ...` line again and tempt me to send a second job. ... The `OPEN_RELAY` bullet fits the recorded state, so I would follow it."
+
+Answer (verbatim):
+
+> I would re-show the open relay to the user and wait. I would not run `run_design.py` again and would not re-send the architect job.
+>
+> **What I would do, in order**
+> 1. After a compaction in the same session, "Resume a run" needs only item 1 (`STATE show`) and item 5. I already have the `STATE show` output, so I would go straight to item 5 and not redo the Orca load, `run-use`, picks check or probe.
+> 2. I would not trust the summary's doubt ("not sure the job went out"). Rule 18 says the state file is the source, and it shows the job went out:
+>    - `WAITING_ON=user` and `OPEN_RELAY=msg-0412` are only set by the relay handling in "Messages", after the architect asked.
+>    - `msg-0412` is a `RELAY` ask from the architect, so the architect is alive and has acted on its work.
+>    - Item 5's `STEP starts with run_design` bullet would run `DESIGN`. That would print the same `ARCHITECT_JOB egm-done ...` line again and tempt me to send a second job. The "Architect jobs" rules say a duplicate send must be avoided, and the architect would then get two jobs. The `OPEN_RELAY` bullet fits the recorded state, so I would follow it.
+> 3. I would read the relay file `/home/u/src/shop-api-docs/.run/relay/004-to-user.md`. Orca named that path in the ask, and I would not rely on memory of its contents.
+> 4. I would send the user exactly this (Rule 5) and nothing else:
+>
+> ```
+> **From the architect:**
+>
+> <contents of 004-to-user.md, character for character>
+> ```
+>
+> 5. I would end my turn. I would leave `OPEN_RELAY=msg-0412` and `WAITING_ON=user` set and leave `STEP` and `LAST_JOB` as they are, since nothing has changed.
+>
+> **What I would not do, and why**
+> - **No `Resumed the run at step ...` line.** Item 6 isn't part of the post-compaction path, and Rule 14 and Rule 5 limit what I say to the user to the relay. Adding a status line would break the verbatim relay.
+> - **No reply to msg-0412 and no `004-from-user.md`.** The user hasn't answered yet, and the user's next message is the answer. There is nothing to relay back until then.
+> - **No summary, comment or paraphrase of the EGM findings.** I never read or interpret them, and I wouldn't quote the question myself.
+> - **No new architect.** Nothing says the design architect is lost, and Rule 15 forbids starting a second one.
+>
+> When the user next replies, the steps are:
+> 1. If the message doesn't start with `coordinator:`, write it character for character to `<RELAY_DIR>/004-from-user.md`.
+> 2. Reply to msg-0412 with `--body "RELAY <that path>"`.
+> 3. `STATE unset OPEN_RELAY`.
+> 4. Set `WAITING_ON` back to the architect's dispatch.

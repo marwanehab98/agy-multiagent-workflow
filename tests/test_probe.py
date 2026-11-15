@@ -95,6 +95,38 @@ class ProbeTest(Base):
         self.expect_probe(0, "PROBED", "--set", "pair", "--pair", "ag:g@low")
         self.assertEqual(len(self.calls("worker-start")), 1)
 
+    def test_resume_reprobes_step1_and_step3_pairs(self):
+        self.behave("ok", "ok", "ok")
+        self.expect_probe(10, "WAIT", "--set", "step1")
+        self.expect_probe(0, "PROBED")
+        s = self.st()
+        s["CLERICAL_PAIR"] = "cl:big@low"
+        self.state.write_text(json.dumps(s))
+        self.behave("ok", "ok", "ok", "ok", "ok")
+        self.expect_probe(10, "WAIT", "--set", "resume")
+        self.until(0, "PROBED")
+        titles = sorted(t["title"] for t in json.loads(self.world.read_text())["tasks"].values())[3:]
+        self.assertEqual(len(self.calls("worker-start")), 8)
+        self.assertIn("Launch test: cl:small@high", titles)
+        self.assertEqual(self.st("LAUNCH_STYLE_cl_big_low"), "flag")
+        self.expect_probe(0, "PROBED")
+        self.assertEqual(len(self.calls("worker-start")), 8)
+
+    def test_resume_overwrites_or_fails_a_recorded_style(self):
+        s = self.st()
+        s.update({"LAUNCH_STYLE_ag_g_high": "flag", "LAUNCH_STYLE_ag_g_xhigh": "flag", "LAUNCH_STYLE_cl_big_high": "flag",
+                  "LAUNCH_STYLE_cl_small_high": "flag"})
+        self.state.write_text(json.dumps(s))
+        self.behave("ok", "ok", "ok", "ok")
+        self.expect_probe(10, "WAIT", "--set", "resume")
+        self.until(0, "PROBED")
+        self.assertEqual(self.st("LAUNCH_STYLE_ag_g_high"), "slug")
+        self.rules([CL_OK, RULE("cl-agent", "small", "high")])
+        self.behave("ok", "ok")
+        self.expect_probe(10, "WAIT", "--set", "resume")
+        last, _ = self.until(40, "PROBE_FAILED")
+        self.assertTrue(last.startswith("PROBE_FAILED ag:g@"))
+
     def test_old_format_state_is_refused(self):
         s = self.st()
         del s["ROLE_ARCHITECT"]

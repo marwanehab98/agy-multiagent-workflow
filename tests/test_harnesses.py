@@ -133,6 +133,12 @@ class CliTests(unittest.TestCase):
                                          "LAUNCH_STYLE_antigravity_gemini_4_argon_low": "flag"}))
             self.assertEqual(self.cli("args", "--state", str(state), "--pair", pair)[1],
                              "--agent antigravity --model gemini-4-hydrogen-high")
+            self.assertEqual(self.cli("args", "--catalog", str(cat), "--pair", pair),
+                             (0, "--agent antigravity --model gemini-4-hydrogen-high"))
+            self.assertEqual(self.cli("args", "--catalog", str(cat), "--pair", "claude:opus@max"),
+                             (0, "--agent claude --model opus --effort max"))
+            self.assertEqual(self.cli("args", "--pair", pair)[0], 64)
+            self.assertEqual(self.cli("args", "--catalog", str(cat), "--state", str(state), "--pair", pair)[0], 64)
             rc, out = self.cli("skill-dir", "--catalog", str(cat), "--harness", "antigravity", "--skill", "egm-review")
             self.assertEqual(rc, 0)
             self.assertTrue(out.endswith("egm/skills/egm-review"))

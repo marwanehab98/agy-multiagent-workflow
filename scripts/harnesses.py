@@ -2,7 +2,7 @@
 
 Usage:
   python3 -I harnesses.py detect --out <file> [--fixtures DIR --home DIR]
-  python3 -I harnesses.py args --state <state.json> --pair <pair>      # Orca worker-start args, one line
+  python3 -I harnesses.py args (--state <state.json> | --catalog <file>) --pair <pair>   # Orca launch args, one line
   python3 -I harnesses.py skill-dir --catalog <file> --harness H --skill NAME
   python3 -I harnesses.py top-effort --catalog <file> --harness H --model M
 
@@ -11,6 +11,8 @@ Usage:
    skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str}}}
 A harness whose binary is missing is left out; one whose model list parses empty is
 recorded with `broken` set to the start of the raw output.
+`args --state` reads CATALOG and the LAUNCH_STYLE_ keys from a run's state file; `args --catalog` (before
+any run exists, e.g. the setup handoff) uses the pair's harness's first launch style.
 Exit 0 ok. Exit 1 not found (skill-dir, top-effort) or bad input. Exit 64 bad usage.
 """
 import argparse
@@ -263,7 +265,9 @@ def main(argv=None):
     d.add_argument("--fixtures")
     d.add_argument("--home")
     a = sub.add_parser("args")
-    a.add_argument("--state", required=True)
+    src = a.add_mutually_exclusive_group(required=True)
+    src.add_argument("--state")
+    src.add_argument("--catalog")
     a.add_argument("--pair", required=True)
     s = sub.add_parser("skill-dir")
     s.add_argument("--catalog", required=True)
@@ -284,8 +288,8 @@ def main(argv=None):
             env = {} if ns.fixtures else None
             Path(ns.out).write_text(json.dumps(detect(runner, home, env), indent=1) + "\n", encoding="utf-8")
         elif ns.cmd == "args":
-            state = json.loads(Path(ns.state).read_text(encoding="utf-8"))
-            catalog = json.loads(Path(state["CATALOG"]).read_text(encoding="utf-8"))
+            state = json.loads(Path(ns.state).read_text(encoding="utf-8")) if ns.state else {}
+            catalog = json.loads(Path(ns.catalog or state["CATALOG"]).read_text(encoding="utf-8"))
             pair = parse_pair(ns.pair)
             print(shlex.join(launch_args(catalog, pair, pick_style(catalog, state, pair))))
         elif ns.cmd == "skill-dir":

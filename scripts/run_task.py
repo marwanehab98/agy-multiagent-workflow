@@ -25,6 +25,22 @@ Exit 64  bad usage
 
 An escalation answer past the ladder (ESCALATE said "ladder used up") is test-launched first
 (phase probe:<attempt>, via probe.Prober); a failed test counts as a rejected answer.
+
+Rules the loop enforces (moved here from coordinator Step 4):
+- One task at a time. A fresh implementer per task, kept open and reused for that task's fix rounds,
+  released at merge or escalation.
+- The gate (gate.py) runs before every review; a failing gate goes straight to a fix round with the log.
+- Stage 1 review, then Stage 2. After a gate fix passes, the review resumes at REVIEW_STAGE_<id>.
+- Escalate after two fix rounds for one stage (STAGE_FIX_ROUNDS_<id>_S<n>, reset when that stage passes),
+  two gate fix rounds in a row (GATE_FIX_ROUNDS_<id>), or four fix rounds of any kind (TOTAL_FIX_ROUNDS_<id>).
+  An escalation attempt resets all three.
+- A reviewer that changes the worktree, or stops without settling, is void and replaced; the third void
+  in a row prompts retry or stop. A missing VERDICT line gets one new reviewer; a second counts as FIX.
+- A usage limit pauses the task with a retry/stop prompt instead of counting as a failure.
+- The escalation pair must be the ladder's next rung (validate_meta.py pair) and its reset sha must lie
+  between the task's base and the worktree's HEAD; two rejected answers prompt the user.
+- REPLAN is checked the same way and validated (with fix-meta) before the queue changes.
+- Merges go only through merge-task.sh (fast-forward, compare-and-swap on the feature branch).
 """
 import argparse
 import sys
