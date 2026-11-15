@@ -1,0 +1,6 @@
+Run the Goldfish review phase of the EGM brainstorm skill. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/egm-brainstorm/SKILL.md, then follow only its Step 2 "Goldfish Review & Synthesis", in Mode: BRAINSTORM.
+Skip Step 1 entirely: the clarification with the user is already done. The anchored feature hypothesis is the full text of {{CONCEPTS_FILE}}. Treat that as confirmed; do not ask the user anything and do not present any readiness gate. Skip Steps 3 and 4.
+Use the brainstorm lenses to find edge cases, risks, and blind spots in that hypothesis, reading the code in this repository where it helps. One round only.
+Write the synthesized findings to {{OUTPUT_FILE}}, as a plain list of findings, each with the lens that raised it and why it matters. Do not write concepts_brief.md or any other file, do not edit any file, and do not commit.
+Use Orca's ask for any blocking question, never a local prompt.
+Settle as worker_done with the number of findings and the path {{OUTPUT_FILE}}.

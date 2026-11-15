@@ -1,0 +1,12 @@
+This is a fix round for task: {{TASK_TITLE}}
+The work so far is in the review range {{BASE_SHA}}..{{WORKER_HEAD}}. Read it with git log and git show before changing anything. Commit your fixes on top; never rewrite or reset history.
+The findings below are one of two kinds. A verification log: make every command in it that exited non-zero pass. A review: fix every Stage 1 item and every Critical and Important finding, and leave Minor findings alone.
+
+Findings:
+{{FILE:FINDINGS}}
+
+Current design decisions for this task (these override the original task below where they differ):
+{{FILE:DECISIONS}}
+
+The original task, which still applies in full:
+{{FILE:IMPLEMENT_SPEC}}

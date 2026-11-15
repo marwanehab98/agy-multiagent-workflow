@@ -1,0 +1,9 @@
+Escalation for task: {{TASK_TITLE}}. Earlier attempts did not finish it. The worktree has been reset to {{RESET_SHA}}.
+Note from the architect, which overrides anything below where they differ:
+{{FILE:NOTE}}
+
+Current design decisions for this task (these override the original task below where they differ):
+{{FILE:DECISIONS}}
+
+The original task:
+{{FILE:IMPLEMENT_SPEC}}

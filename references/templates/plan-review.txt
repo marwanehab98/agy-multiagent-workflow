@@ -1,0 +1,11 @@
+Run the EGM review loop for exactly one round, findings only. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/egm-review-loop/SKILL.md and follow it with these inputs. Every input is provided; do not ask for any, and skip the confirmation step.
+- TargetFile: {{PLAN_FILE}}
+- SemanticTarget: full file
+- Reviewers: implementation_readiness, codebase_details
+- Standards: the ones the skill recommends for Implementation Plans
+- GoldfishContext (one path per line):
+{{FILE:CONTEXT}}
+Run Step 2.2 (the review swarm) once and consolidate the findings, merging findings that two reviewers raised about the same issue. Do not run Step 2.3 or egm-resolve, do not apply any fix, do not loop, and do not edit any file.
+Write the consolidated findings to {{OUTPUT_FILE}}, each with its id, reviewer, severity, the plan section it concerns, and the evidence. Do not create any other file, and do not commit.
+Use Orca's ask for any blocking question, never a local prompt.
+Settle as worker_done with the count per severity and the path {{OUTPUT_FILE}}.

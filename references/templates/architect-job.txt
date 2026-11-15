@@ -1,0 +1,3 @@
+orca-multiagent-workflow architect job: {{JOB}}
+Follow the "JOB: {{JOB}}" section of {{SKILL_DIR}}/references/architect.md.
+Input: {{INPUT}}
