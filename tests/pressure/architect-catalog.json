@@ -1,0 +1,117 @@
+{
+ "detected_at": "2026-11-15T09:00:00+00:00",
+ "harnesses": {
+  "claude": {
+   "orca_agent": "claude",
+   "binary": "/home/u/.local/bin/claude",
+   "version": "2.4.1",
+   "styles": [
+    "flag"
+   ],
+   "models": [
+    {
+     "model": "haiku",
+     "label": "Haiku (fastest, cheapest)",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    {
+     "model": "sonnet",
+     "label": "Sonnet (balanced)",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    {
+     "model": "opus",
+     "label": "Opus (strongest Claude model)",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    }
+   ],
+   "skills": {
+    "orca-multiagent-workflow": "/home/u/.claude/skills/orca-multiagent-workflow",
+    "orchestration": "/home/u/.claude/skills/orchestration",
+    "orca-cli": "/home/u/.claude/skills/orca-cli",
+    "verification-before-completion": "/home/u/.claude/skills/verification-before-completion",
+    "finishing-a-development-branch": "/home/u/.claude/skills/finishing-a-development-branch",
+    "brainstorming": "/home/u/.claude/skills/brainstorming",
+    "writing-plans": "/home/u/.claude/skills/writing-plans",
+    "test-driven-development": "/home/u/.claude/skills/test-driven-development"
+   },
+   "plugins": [
+    "superpowers"
+   ],
+   "mcp": {
+    "claude_ai_Atlassian": true
+   },
+   "broken": null
+  },
+  "antigravity": {
+   "orca_agent": "antigravity",
+   "binary": "/home/u/.local/bin/agy",
+   "version": "1.5.9",
+   "styles": [
+    "slug",
+    "flag"
+   ],
+   "models": [
+    {
+     "model": "gemini-4-hydrogen",
+     "label": "Gemini 4 Hydrogen",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+     ]
+    },
+    {
+     "model": "gemini-5-pro",
+     "label": "Gemini 5 Pro (newest; top score on code-review benchmarks)",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+     ]
+    }
+   ],
+   "skills": {
+    "orca-multiagent-workflow": "/home/u/.gemini/config/skills/orca-multiagent-workflow",
+    "orchestration": "/home/u/.gemini/config/skills/orchestration",
+    "orca-cli": "/home/u/.gemini/config/skills/orca-cli",
+    "verification-before-completion": "/home/u/.gemini/config/skills/verification-before-completion",
+    "finishing-a-development-branch": "/home/u/.gemini/config/skills/finishing-a-development-branch",
+    "brainstorming": "/home/u/.gemini/config/skills/brainstorming",
+    "writing-plans": "/home/u/.gemini/config/skills/writing-plans",
+    "test-driven-development": "/home/u/.gemini/config/skills/test-driven-development",
+    "egm-brainstorm": "/home/u/.gemini/config/skills/egm-brainstorm",
+    "egm-review": "/home/u/.gemini/config/skills/egm-review",
+    "egm-review-loop": "/home/u/.gemini/config/skills/egm-review-loop"
+   },
+   "plugins": [
+    "superpowers",
+    "egm"
+   ],
+   "mcp": {
+    "claude_ai_Atlassian": true
+   },
+   "broken": null
+  }
+ }
+}

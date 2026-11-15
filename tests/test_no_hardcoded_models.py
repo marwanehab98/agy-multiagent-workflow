@@ -3,7 +3,7 @@
 Only scripts/harnesses.py may name a model or harness; everything else gets them from the picks
 and the detected catalog. SKILL.md's frontmatter description is exempt (ruling R9): its harness words
 only decide when the skill loads, and users say "run this through Antigravity". PENDING lists paths
-still being rewritten (Task 11 empties it).
+still being rewritten; it is empty since Task 11 rewrote architect.md and the templates.
 """
 import re
 import unittest
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|hydrogen|argon|gemini|antigravity|agy)\b")
 CHECKED = ["SKILL.md", "references/coordinator.md", "references/architect.md", "references/templates", "scripts"]
 ALLOWED = {"scripts/harnesses.py"}
-PENDING = {"references/architect.md", "references/templates"}
+PENDING = set()
 
 
 def files():

@@ -6,7 +6,7 @@ Part of orca-multiagent-workflow. These facts were confirmed on 2026-11-13 again
 
 - The EGM command is `/egm-review`, and it accepts a design doc in `docs/plans/`. EGM's Goldfish run on Hydrogen.
 - `gemini-4-hydrogen` is available on this Google AI Pro account.
-- **Effort goes in the model slug, passed straight to `--model`** (tested live 2026-11-14). `worker-start --agent antigravity --model gemini-4-hydrogen-high` (and `-xhigh`, `-low`) launches a structured Antigravity worker, and Orca records `options.model` as the slug. No custom agent command is needed.
+- **Historical (2026-11-14), superseded by "Launch styles" below. Effort goes in the model slug, passed straight to `--model`** (tested live 2026-11-14). `worker-start --agent antigravity --model gemini-4-hydrogen-high` (and `-xhigh`, `-low`) launches a structured Antigravity worker, and Orca records `options.model` as the slug. No custom agent command is needed.
   - The runtime validates model ids: a made-up id fails at once with "Model '<id>' is not available for the current authentication method", reported as a `lost` escalation. So an accepted slug really is that model.
   - `--effort` is accepted only with the bare id (`--model gemini-4-hydrogen --effort high|low`). Orca refuses `xhigh` that way, and refuses any `--effort` on a slug ("does not support effort xhigh"). Don't use `--effort` for Antigravity.
   - Orca runs its own bundled Antigravity runtime (`~/.config/orca/agent-runtimes/antigravity/1.4.1`), not the `agy` CLI (1.5.8 here). Its catalog (`agent-model-catalog.db`) lists `gemini-4-hydrogen` with no known efforts. `agy models` is still the list the slugs come from.
@@ -15,6 +15,13 @@ Part of orca-multiagent-workflow. These facts were confirmed on 2026-11-13 again
 - The `orca-cli` handoff can target Claude Code on `sonnet`.
 - **Setup handoff** (checked 2026-11-15 against the `orca-cli` guide and `orca agent launch --help`): the guide's handoff for a fresh agent in an existing worktree is `ORCA agent launch --agent <id> [--worktree <selector>] --prompt <text> --model <id> --effort <level>`, so SKILL.md "Start here" uses it with `harnesses.py args`, not the `worker-start --spec-file` fallback. `--effort` requires `--model`; an Orca host too old for them refuses `--model`/`--effort`.
 - **`run-create` binds a run before any worker:** `ORCA orchestration run-create --objective <text>` creates and binds a Run (from `--help`). Coordinator Step 1 runs it before the test launches, because `probe.py` creates tasks with `task-create`, which fails with `run_required` until a Run is bound.
+
+## Launch styles (2026-11-15)
+
+- **Launch style is decided per run, not by these notes.** Each harness adapter in `scripts/harnesses.py` lists its launch styles in preference order: Antigravity tries `slug` (`--model <model>-<effort>`), then `flag` (`--model <model> --effort <effort>`); Claude Code has only `flag`. `scripts/probe.py` test-launches every pair the run uses through Orca and records the first style whose worker settles `succeeded` as `LAUNCH_STYLE_<pair key>` in the run's state file. Every later launch of that pair uses it, through `harnesses.py args`.
+- So when Orca or a harness changes how it takes effort, the probe finds out at the start of the run, and the run stops with Orca's error text if no style works. Nothing in the rules needs editing.
+- Models and efforts come from each harness's own CLI (`agy models`, `claude --help`), never from Orca's model catalog.
+- **Live check:** not yet run. Task 12's setup-and-probe run against real Orca with both harnesses records here which style each harness's pairs passed with.
 
 ## Session mailboxes (tested 2026-11-13 from an Orca chat session)
 
