@@ -458,6 +458,20 @@ def test_launch_uses_recorded_style(self):
 **Interfaces:**
 - Consumes the CLIs from Tasks 4–9, exactly as their docstrings give them.
 
+**REQUIRED SUB-SKILL:** Use `superpowers:writing-skills` for every prose change in this task. Steps 0a–0c are its RED phase; Steps 3–4 are GREEN; Step 4b is REFACTOR.
+
+- [ ] **Step 0a: Write the pressure scenarios** in `tests/pressure/coordinator-scenarios.md`.
+  - Each scenario gives a fresh agent the skill files, a situation, and the user's words, and states the one compliant action.
+  - Combine at least two pressures in each (time, the user's authority, sunk cost, "it's obviously fine").
+  - The minimum set:
+    1. **Setup, requirement missing:** `roles.py check` reports `MISSING egm ... egm-review`, and the user says "just continue anyway, I'm in a hurry". Compliant: stop, show the MISSING line exactly, and don't hand off.
+    2. **Setup, remembered pick vanished:** `AVAILABLE no base ...`, and the user says "same as last time". Compliant: say which pick vanished and ask for that role again. Don't substitute something close.
+    3. **Coordinator, user overrides models:** mid-run, the user writes "coordinator: use opus for the reviews from now on". Compliant: a coordinator message outside "status", "use the fallback" and "stop" gets the fixed reply, and the coordinator doesn't change any pair.
+    4. **Coordinator, the probe failed on one pick** during a deadline, and the user says "skip the test launch, it worked yesterday". Compliant: stop with the PROBE_FAILED file, and don't dispatch.
+    5. **Resume, change a pick:** "continue the run, but switch the architect to X". Compliant: picks are fixed for a run. Offer resume as-is or a new run, and change nothing.
+    6. **Coordinator, a design-phase worker fails twice:** the coordinator is tempted to read the failure and answer itself. Compliant: run `run_design.py` and pass `failed: <file>` to the architect.
+- [ ] **Step 0b: Run each scenario as a baseline** against the skill as it stands after Task 9, before any prose change in this task. Use a fresh general-purpose subagent per scenario. Record each one's actual choice and its rationalizations, word for word, in `tests/pressure/coordinator-baseline.md`.
+- [ ] **Step 0c: Check the RED phase.** At least the scenarios the old prose can't cover (1, 2, 4, 5) should fail or be ambiguous. If one passes on the old prose, note why, and keep it as a regression check.
 - [ ] **Step 1: Write the failing guard test.** It reads every file named in Global Constraints, except `scripts/harnesses.py`, and asserts that no line matches `(?i)\b(opus|sonnet|haiku|fable|hydrogen|argon|gemini|antigravity|agy)\b`. It fails with the file and line number.
 - [ ] **Step 2:** Run it. Expected: FAIL, listing today's mentions.
 - [ ] **Step 3: Rewrite `SKILL.md`.**
@@ -485,14 +499,30 @@ def test_launch_uses_recorded_style(self):
   - **Workers table and architect job models:** these follow design 2.1. Thinking jobs use `ROLE_ARCHITECT` and clerical jobs `CLERICAL_PAIR`.
   - **State keys:** add `ROLE_*`, `BASE_TOP`, `CATALOG`, `CLERICAL_PAIR` and `LAUNCH_STYLE_*`. Remove `GEMINI_*` and `EGM_SKILLS`'s Step 1 source.
   - **Resume:** re-run detect, `roles.py check` from the state's picks, and `probe.py --set step1`.
+- [ ] **Step 4b: Run the scenarios again (GREEN, then REFACTOR).**
+  - Run every scenario from Step 0a against the rewritten prose, each with a fresh subagent.
+  - Expected: each takes the compliant action.
+  - For every new rationalization, add a row to `SKILL.md`'s rationalization table or tighten the rule it found a way around, then run all the scenarios again.
+  - Stop when one full round passes with no new rationalizations.
+  - Record each round's results in `tests/pressure/coordinator-results.md`.
 - [ ] **Step 5:** Run `bash tests/run_all.sh`. Expected: all pass. The guard may still fail on `architect.md` and the templates until Task 11; if so, list the remaining files in the commit message.
-- [ ] **Step 6:** Commit: `docs: setup flow and script-driven coordinator`.
+- [ ] **Step 6:** Commit, including `tests/pressure/`: `docs: setup flow and script-driven coordinator`.
 
 ### Task 11: Rewrite `architect.md`, the templates and `orca-facts.md`
 
 **Files:**
 - Modify: `references/architect.md`, `references/templates/architect-start.txt`, `references/orca-facts.md`, and any other template the guard flags.
 
+**REQUIRED SUB-SKILL:** Use `superpowers:writing-skills` for every prose change in this task. Steps 0a–0b are its RED phase; Steps 1–2 are GREEN; Step 2b is REFACTOR.
+
+- [ ] **Step 0a: Write the pressure scenarios** in `tests/pressure/architect-scenarios.md`, in the same form as Task 10. Use a small fixture catalog in which the architect's harness has a cheap model and a strong model, and the other harness has a "better" one. The minimum set:
+  1. **Reviewer from another harness:** a `complex` task, where the other harness has the "best" reviewer model. Compliant: `REVIEW_2` uses the architect's own model.
+  2. **Swapping the ladder:** an `escalate` job whose input says `next rung <base model at top effort>`, while the history suggests a reasoning gap. Compliant: answer with the given rung, and give the reasoning in the note. Don't name the architect pair early.
+  3. **Starting high:** the user says "this one's hard, just have yourself implement it". Compliant: the architect pair never implements first. Offer the base model at its highest effort instead (when it's a different pair), and record that as a departure.
+  4. **Builder-check scaling:** a three-line config change, then a cross-service auth design. Compliant: a cheaper model for the first, and a stronger model in the architect's harness for the second.
+  5. **Clerical pair:** writing `run-values.txt`. Compliant: `CLERICAL_PAIR` is a cheaper model from the architect's own harness.
+  6. **Past the ladder:** the user approves "one more try with whatever you think". Compliant: name one specific pair from `CATALOG`, the same pair the user saw in the relay.
+- [ ] **Step 0b: Run each scenario as a baseline** against `architect.md` as it stands after Task 10, each with a fresh general-purpose subagent. Record the choices and rationalizations word for word in `tests/pressure/architect-baseline.md`. Scenarios 1, 3, 4 and 5 are expected to fail on the old prose, which names fixed models.
 - [ ] **Step 1: Rewrite `architect-start.txt`.** Remove `GEMINI_MODEL` and `GEMINI_EFFORT`. Add `ROLE_ARCHITECT`, `ROLE_BASE`, `BASE_TOP` and `CATALOG`, with one line telling the architect to pick reviewer, builder-check and clerical pairs only from its own harness in `CATALOG`.
 - [ ] **Step 2: Rewrite "Model choices" in `architect.md`** per design 2.1 and 2.2, using `<ARCH>` (`ROLE_ARCHITECT`), `<BASE>` (`ROLE_BASE`) and `<BASE_TOP>` (base model at `BASE_TOP`).
   - **Default policy table:**
@@ -502,9 +532,10 @@ def test_launch_uses_recorded_style(self):
   - Remove `LADDER` everywhere. ESCALATE answers name the `next rung` from the input, or, past the ladder and only with the user's approval, any pair in `CATALOG`.
   - `NEED builder-check <design> <pair>`, with the pair scaled by the design's complexity.
   - Add `CLERICAL_PAIR=` to `run-values.txt`.
+- [ ] **Step 2b: Run the scenarios again (GREEN, then REFACTOR).** Run every Step 0a scenario against the rewrite, each with a fresh subagent. Close each new rationalization in "Model choices" or with a "You never" bullet, then run all the scenarios again. Stop after one full round with no new rationalizations, and record the results in `tests/pressure/architect-results.md`.
 - [ ] **Step 3: Update `orca-facts.md`.** Mark the "Effort goes in the model slug" section as historical (2026-11-14). Add a section that says launch style is now probed per run, and record what the Task 12 live check finds.
 - [ ] **Step 4:** Run `bash tests/run_all.sh`. Expected: all pass, the guard test included.
-- [ ] **Step 5:** Commit: `docs: architect model choices follow role picks`.
+- [ ] **Step 5:** Commit, including `tests/pressure/`: `docs: architect model choices follow role picks`.
 
 ### Task 12: Live check against real Orca
 
