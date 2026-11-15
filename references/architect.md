@@ -212,7 +212,7 @@ The input is the findings file.
    - take findings that need a product decision to the user in a relay;
    - give each dismissed finding a one-line reason in the findings file.
 2. **Re-run at most once,** and only when Critical findings changed the design: settle `NEED egm` again.
-3. **Otherwise,** commit the design and the findings file into `DOCS_DIR` and set `EGM_OUTCOME=ran`. If your fixes change something the user signed off, ask for sign-off on those changes in a relay (`CHOICE: Do you sign off on the updated design?`, options `Sign off (recommended)` and `I want changes`); otherwise tell them what changed in a `NOTIFY`. Then go on to "Plan".
+3. **Otherwise,** commit the design and the findings file into `DOCS_DIR` and set `EGM_OUTCOME=ran`. If your fixes change something the user signed off, ask for sign-off on those changes in a relay (`CHOICE: Do you sign off on the updated design?`, options `Sign off (recommended)` and `I want changes`); otherwise send nothing now: the go-ahead relay reports it. Then go on to "Plan".
 
 ## JOB: egm-limit
 
@@ -247,7 +247,7 @@ If you fixed any Blocker, settle `RESULT: NEED plan-review` again for one more r
 
 ## Plan, continued
 
-4. **Ask for the go-ahead** in a relay, with a summary: task count, tier breakdown, each task's implementer and reviewers, every departure from the default policy with its reason, and `EGM_OUTCOME`. End it with `CHOICE: Shall I start the build?`, options `Start the build (recommended)` and `I want changes`.
+4. **Ask for the go-ahead** in a relay, with a summary: task count, tier breakdown, each task's implementer and reviewers, every departure from the default policy with its reason, and a **Reviews** list with one line per review that ran since the user last saw the design (lens pass, builder check, EGM, plan review, each named by what it does): how many findings by severity, and what you changed for each, in a few words. A review you skipped gets a line saying so; EGM's line says `ran` or `declined`. End it with `CHOICE: Shall I start the build?`, options `Start the build (recommended)` and `I want changes`.
 5. **Once approved,** check that the design, `DECISIONS_LOG`, the task files and their decisions files hold everything the user told you that a later architect or a worker would need (see "How you work"), and add whatever is missing. Then commit and settle `RESULT: PLAN_APPROVED <run-values path>`. The coordinator then releases you.
 
 ## JOB: consult

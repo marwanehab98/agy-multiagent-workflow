@@ -13,6 +13,13 @@ Part of orca-multiagent-workflow. The Rules in SKILL.md hold throughout.
 - **You never retype a worker's message.** Save an architect's settle, or any worker's ask, with `python3 -I <SKILL_DIR>/scripts/save_message.py --orca <ORCA> --run <RUN_ID> --out <file>` plus `--dispatch <id> --type worker_done` (a settle), or `--id <message id>` (an ask). `--header <line>` puts a line first, and `--append` adds to a file. `NOT_FOUND` means the message isn't in the inbox yet: run `ORCA orchestration check --peek --wait --timeout-ms 60000`, then save again. The scripts save their own workers' settles; you never save or read those.
 - **File numbers:** `{n}` in a path you pass to `save_message.py` or `gate.py` is filled in by the script with the next free number; use the path its output names (`SAVED <path>`, `log=<path>`). `save_message.py` never overwrites a file: `EXISTS <path>` means you passed a used name, so pass the `{n}` form. Elsewhere, `<n>` or `<NNN>` in a file name is the next free number in that folder. The exception is `<NNN>-from-user.md`, which takes the number of the `<NNN>-to-user.md` it answers. All paths you pass to scripts are absolute.
 - **Fixed prompts:** some steps stop with a fixed prompt and list the replies they accept. While one is open, a user message that isn't one of those replies and doesn't start with `coordinator:` gets the same prompt again, followed by "Reply with exactly one of: <the accepted replies>." Don't send it to the architect.
+- **What you print.** Run your commands without commentary. Your text in a turn is a relay (Rule 5), the output or fixed line a step tells you to show, or, when the turn ends in a wait, exactly this block and nothing more:
+
+  ```text
+  Merged task <id> at <head>.      (one line per MERGED <id> <head> the script printed, if any)
+  Waiting: <the script's WAIT line | architect <LAST_JOB> | user>
+  ```
+
 - **Record every dispatch id you start** in the state file, and **keep a run log:** append one line per event to `<RUN_DIR>/run-log.md`, `<time> <event>` for what you do yourself: the architects you start and their settles, merges you see, the PR URL. The scripts log their own workers.
 - **Launch arguments:** `ARGS(<pair>)` means the one line `python3 -I <SKILL_DIR>/scripts/harnesses.py args --state <RUN_DIR>/state.json --pair <pair>` prints: the `--agent`, `--model` and `--effort` options for that pair, in the launch style its test launch proved. Run it on its own first. Exit 0: put its line where `ARGS(...)` stands. Any other exit: show the user its output exactly and stop; never put that output into a `worker-start`. Never type those options yourself (Rule 3).
 - **An architect job in flight comes first** (from sending it until you've handled its `RESULT:` line). Never run `DESIGN`, `PROBE`, `TASKLOOP` or `FINISH` then, even when Orca wakes you about one of their workers: keep waiting. The one exception is Resume item 3's `PROBE --set resume`: it never discards, so it may run while an architect job is in flight. **`--docs-moved` is only for `consult` and `user-message`** (Messages): those jobs run while a script waits, and may commit in the docs worktree, which that script would reset away. Once you've handled the `RESULT:` of one of them, if `STEP` names a script, run it once with `--docs-moved` added, which keeps those commits, and branch as its step says: `DESIGN`, `TASKLOOP` or `FINISH` when `STEP` starts with `run_design`, `run_task` or `run_finish`, including their own probe steps such as `run_design probe`; `PROBE` only when `STEP` is exactly `1 probe`, `3 probe` or `resume probe`. Every other job's `RESULT:` goes where its step says, without the flag. Never set the scripts' keys yourself.
@@ -107,7 +114,7 @@ Branch on `DESIGN`'s last line:
 
 `run_task.py` runs every task in `<RUN_DIR>/queue.txt`: it implements, checks the tree, runs the gate, runs both reviews and the fix rounds, merges, and prepares escalations. Its rules (fix-round caps, void reviewers, usage limits, ladder checks) are in its module docstring.
 
-1. **Run `TASKLOOP`.** Log any `MERGED <id> <head>` lines it prints, and branch on its **last line**:
+1. **Run `TASKLOOP`.** Log any `MERGED <id> <head>` lines it prints (they also go in your turn's block, How you work), and branch on its **last line**:
 
    | Last line (exit) | Do |
    | --- | --- |

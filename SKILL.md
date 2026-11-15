@@ -183,7 +183,7 @@ Every value is a key in `<RUN_DIR>/state.json` (Rule 18); coordinator "State key
 
 **Red flags.** Stop and re-read the rule if you are about to:
 
-- write a sentence to the user that isn't a relay or a fixed line from a step;
+- write a sentence to the user that isn't a relay, a fixed line from a step, or the `Waiting:` status line;
 - choose, substitute, or change a pair, or edit a `ROLE_*` or `LAUNCH_STYLE_*` key, `roles.json`, or a `.meta` file;
 - type `--agent`, `--model` or `--effort` yourself;
 - save picks, hand off, or start any worker after `roles.py check` exited 1 or a probe printed `PROBE_FAILED`;
