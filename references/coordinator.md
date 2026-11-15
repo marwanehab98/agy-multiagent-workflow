@@ -48,6 +48,7 @@ Part of orca-multiagent-workflow. The Rules in SKILL.md hold throughout.
 1. **Set the values** from your brief and the user's request:
    - `REQUIREMENTS_SOURCE`: `jira` when there's a JIRA key; `written` when there's pasted text or a file path; `jira` plus a requirements file when there are both. When there's neither, say exactly "Give me a JIRA key or the requirements (pasted text or a file path)." and wait.
    - `JIRA_KEY`, or `none`. `EGM_REQUESTED`: `yes` only if the user asked for EGM or a spec review.
+   - **Run notes:** the sentences of the request that say how to run the work rather than what to build (which reviews to run or skip, how to split it, what to ask about), copied exactly. Leave out instructions about the handoff itself (such as opening the coordinator as a terminal). Item 11 saves them.
    - `TOPIC`: `JIRA_KEY`, or a 2–4 word kebab-case slug of the requirements. `DATE`: today, `YYYY-MM-DD`.
    - `SKILL_DIR`: the folder holding the `SKILL.md` your brief named. `ROLES_FILE` and `SETUP_CATALOG`: the picks file and the setup catalog your brief named.
 
@@ -73,7 +74,7 @@ Part of orca-multiagent-workflow. The Rules in SKILL.md hold throughout.
     | `WAIT <dispatch> probe` (10) | `STATE set STEP="1 probe" WAITING_ON=<dispatch>` and end your turn. When Orca wakes you about a test-launch worker, run `PROBE` (no `--set`) and branch again. |
     | `PROBE_FAILED <pair> <file>` (40) | Show the user the file's contents exactly, then say exactly "The test launch of <pair> failed, so the run stops here." Start nothing (Rule 21). |
 
-11. **Save written requirements** to `<RUN_DIR>/requirements.md` and record it as `REQUIREMENTS_FILE`: for a file path, `cp` it; for pasted text, write it exactly as the user typed it, with only the requirements, not instructions about the run. Otherwise `REQUIREMENTS_FILE` is `none`. Never write it in `<DOCS_DIR>`: a test launch's tree check deletes anything uncommitted there. The architect commits its own copy.
+11. **Save written requirements** to `<RUN_DIR>/requirements.md` and record it as `REQUIREMENTS_FILE`: for a file path, `cp` it; for pasted text, write it exactly as the user typed it, with only the requirements, not instructions about the run. Otherwise `REQUIREMENTS_FILE` is `none`. Save the run notes from item 1 the same way to `<RUN_DIR>/run-notes.md` and record it as `RUN_NOTES`, or `RUN_NOTES=none` when there are none. Never write either in `<DOCS_DIR>`: a test launch's tree check deletes anything uncommitted there. The architect commits its own copy.
 12. **Start the architect.** Build `architect-start.txt` with `FIRST_JOB=start`, `INPUT=none`, and every run value it names. Run `ORCA orchestration worker-start --spec-file <spec> --task-title "Architect: <TOPIC>" --worktree path:<DOCS_WORKTREE> ARGS(<ROLE_ARCHITECT>) --keep-open --json`, record `ARCHITECT_DISPATCH` (`dispatchId`), and `STATE set LAST_JOB=start LAST_JOB_INPUT=none STEP="2 design" WAITING_ON=<ARCHITECT_DISPATCH>`.
 13. **Tell the user exactly:** "The architect is designing this with you. I'll pass its questions to you here unchanged; reply here and I'll pass your answers back unchanged. To talk to me instead, start your message with `coordinator:`." Then end your turn.
 
@@ -170,6 +171,7 @@ Use this when your brief or the user asks to continue a run. After a context com
 1. Find `<RUN_DIR>/state.json` (for a topic, in the worktree on `refs/heads/<TOPIC>-docs`) and run `STATE show`.
    - **No state file, or no `RUN_ID` in it:** the run stopped in Step 1, before any work. Say exactly "The <TOPIC> run stopped before its architect started, so I'm starting it again." Then run Step 1, whose item 5 gives the new run its own name.
    - **No `ROLE_ARCHITECT` in it:** the run is from before configurable roles. Say exactly "ERROR OLD_FORMAT_RUN remove <RUN_DIR> and start a new run" and stop.
+   - **No `RUN_NOTES` in it:** `STATE set RUN_NOTES=none`.
 2. Load Orca as in Step 1 item 2, then run `ORCA orchestration run-use --id <RUN_ID>`. If it fails, show the user its output and stop.
 3. **Check and re-probe the picks.** The run keeps its `ROLE_*` picks; never change one.
    1. Run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`, then `roles.py check` as in Step 1 item 1, with `--catalog <CATALOG>` and the four `ROLE_*` values. Stop on exit 1.
@@ -192,7 +194,7 @@ Use this when your brief or the user asks to continue a run. After a context com
 
 | Keys | Meaning | Set in |
 | --- | --- | --- |
-| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `EGM_REQUESTED` | From the brief and the request; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later | 1 |
+| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `EGM_REQUESTED` | From the brief and the request; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later | 1 |
 | `ORCA`, `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, `START_SHA`, `START_HOW` | Tools and repo | 1 |
 | `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, `RUN_ID` | The docs worktree and the Orca run | 1 |
 | `ROLE_COORDINATOR`, `ROLE_ARCHITECT`, `ROLE_EGM`, `ROLE_BASE`, `BASE_TOP`, `CATALOG` | The picks, the base model's highest effort, and the catalog; fixed for the run | 1 (`roles.py to-state`) |

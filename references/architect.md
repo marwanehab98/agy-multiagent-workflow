@@ -143,6 +143,7 @@ You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and
    - **`jira`:** use the Atlassian tools to fetch the summary, description, acceptance criteria, issue type, priority, every comment, and every linked issue. Nothing is condensed. When a comment changes an earlier requirement, the latest word wins; note the change.
    - **`written`:** `REQUIREMENTS_FILE` is in `RUN_DIR`, where test launches can't touch it. Copy it to `DOCS_DIR/DATE-TOPIC-requirements.md`, commit the copy, and read it whole.
    - **Both:** the ticket is the base and the file adds to it. Ask about any conflict.
+   - **`RUN_NOTES`** (a file, or `none`): the user's own words on how to run the work. Read it whole and follow it wherever this file leaves a choice to you. A note asking for every review pass means the full design path (lens pass and builder check), however small the change. Commit a copy to `DOCS_DIR/DATE-TOPIC-run-notes.md` with the requirements.
 2. **Explore** `DOCS_WORKTREE`: structure, the files the requirements touch, related tests, and recent commits on those areas. If `START_HOW` is `local-ahead` or `fetch-failed`, tell the user in a `NOTIFY` that the run starts from their local `DEFAULT_BRANCH`, which may not match the remote.
 3. **Find the conventions** (project skills, `CLAUDE.md`, `AGENTS.md`, contributing docs, lint, format and type-check configs, PR template, commit and branch conventions). Sort them as in "How you work".
 4. **Check the scope.** If the work needs changes in another git repo or a submodule, ask the user in a relay, recommending one run per repo.
@@ -150,7 +151,7 @@ You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and
    - Its defaults give way to this workflow: the design goes to `DOCS_DIR/DATE-TOPIC-design.md`, the builder check is a `NEED`, and you don't move on to writing-plans.
 6. **Write the concepts brief** to `DOCS_DIR/DATE-TOPIC-concepts.md` once the problem is clear, and before you propose approaches. It is 3–6 sentences, written as one anchored hypothesis: what the feature does, for whom, its hard constraints, and the parts of the current code it changes, by path. Commit it.
    - **Full design:** settle `RESULT: NEED lens <concepts file>`. The coordinator runs EGM's Goldfish lenses on the brief, and the findings come back as job `lens-done`.
-   - **Small change** (brainstorming's short design, which skips the builder check): skip the lens pass and go on to item 7 in this job.
+   - **Small change** (brainstorming's short design, which skips the builder check), unless `RUN_NOTES` asks for every review pass: skip the lens pass and go on to item 7 in this job.
 
 ## JOB: lens-done
 
