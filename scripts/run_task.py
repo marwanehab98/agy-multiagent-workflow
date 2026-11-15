@@ -22,118 +22,12 @@ Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 """
 import argparse
-import datetime
-import json
-import os
-import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR = 0, 10, 20, 21, 30, 40, 2
-HERE = Path(__file__).resolve().parent
-
-
-VERDICTS = ("VERDICT: PASS", "VERDICT: FIX")
-
-
-def last_line(path):
-    lines = [l.strip() for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
-    return lines[-1] if lines else ""
-
-
-def verdict_line(path):
-    """The verdict a review file gives: its last line, or else the last VERDICT line anywhere in it."""
-    if last_line(path) in VERDICTS:
-        return last_line(path)
-    found = re.findall(r"VERDICT: (?:PASS|FIX)\b", Path(path).read_text(encoding="utf-8"))
-    return found[-1] if found else ""
-
-
-class Done(Exception):
-    def __init__(self, code, line):
-        super().__init__(line)
-        self.code, self.line = code, line
-
-
-# ---------------------------------------------------------------- state and helpers
-
-class Run:
-    def __init__(self, path):
-        self.path = Path(path)
-        self.s = json.loads(self.path.read_text(encoding="utf-8"))
-
-    def get(self, key, default=None):
-        return self.s.get(key, default)
-
-    def need(self, key):
-        if key not in self.s:
-            raise Done(ERROR, f"ERROR MISSING_STATE {key}")
-        return self.s[key]
-
-    def set(self, **kv):
-        for k, v in kv.items():
-            if v is None:
-                self.s.pop(k, None)
-            else:
-                self.s[k] = str(v)
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".state-")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(self.s, f, indent=1, sort_keys=True)
-            f.write("\n")
-        os.replace(tmp, self.path)
-
-    def incr(self, key):
-        n = int(self.get(key, "0")) + 1
-        self.set(**{key: n})
-        return n
-
-    # paths
-    @property
-    def run_dir(self):
-        return Path(self.need("RUN_DIR"))
-
-    @property
-    def docs(self):
-        return Path(self.need("DOCS_DIR"))
-
-    @property
-    def impl(self):
-        return self.need("IMPL_WORKTREE")
-
-    def task_file(self, t, suffix):
-        return self.docs / "tasks" / f"{t}{suffix}"
-
-    def log(self, event):
-        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with (self.run_dir / "run-log.md").open("a", encoding="utf-8") as f:
-            f.write(f"{stamp} {event}\n")
-
-
-def run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-
-
-def git(wt, *args):
-    r = run(["git", "-C", wt, *args])
-    return r.stdout.strip() if r.returncode == 0 else None
-
-
-def tool(name, *args):
-    """Run a sibling script through its interpreter. Returns (exit code, stdout)."""
-    path = HERE / name
-    cmd = ["bash", str(path), *args] if name.endswith(".sh") else [sys.executable, "-I", str(path), *args]
-    r = run(cmd)
-    return r.returncode, (r.stdout + r.stderr).strip()
-
-
-def next_free(folder, pattern):
-    folder.mkdir(parents=True, exist_ok=True)
-    n = 1
-    while (folder / pattern.format(n=n)).exists():
-        n += 1
-    return folder / pattern.format(n=n)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
+from common import (QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR, VERDICTS, Done, Orca, Run,  # noqa: E402
+                    build, git, last_line, next_free, poll, run, save_body, tool, verdict_line)
 
 
 def read_meta(path):
@@ -143,85 +37,6 @@ def read_meta(path):
             k, v = line.split("=", 1)
             meta[k.strip()] = v.strip()
     return meta
-
-
-def split_pair(pair):
-    agent, model = pair.split(":", 1)
-    return agent, model
-
-
-# ---------------------------------------------------------------- orca
-
-class Orca:
-    def __init__(self, r):
-        self.r = r
-        self.exe = r.need("ORCA")
-
-    def call(self, *args, ok_required=True):
-        res = run([self.exe, "orchestration", *args, "--json"])
-        try:
-            data = json.loads(res.stdout)
-        except json.JSONDecodeError:
-            data = {"ok": False, "raw": (res.stdout + res.stderr)[:800]}
-        if ok_required and not data.get("ok"):
-            raise Done(ERROR, f"ERROR ORCA_FAILED {' '.join(args[:1])}: {json.dumps(data)[:800]}")
-        return data
-
-    def start(self, spec, title, pair=None, terminal=None, keep_open=False):
-        task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
-        args = ["worker-start", "--task", task, "--worktree", f"path:{self.r.impl}"]
-        if terminal:
-            args += ["--terminal", terminal]
-        else:
-            agent, model = split_pair(pair)
-            args += ["--agent", agent, "--model", model]
-            if keep_open:
-                args.append("--keep-open")
-        res = self.call(*args)["result"]
-        return res["dispatchId"], res.get("terminal", "")
-
-    def try_reuse(self, spec, title, terminal):
-        task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
-        data = self.call("worker-start", "--task", task, "--worktree", f"path:{self.r.impl}",
-                         "--terminal", terminal, ok_required=False)
-        if not data.get("ok"):
-            return None
-        return data["result"]["dispatchId"], data["result"].get("terminal", terminal)
-
-    def send(self, dispatch, subject, body):
-        return self.call("send", "--to", f"dispatch:{dispatch}", "--subject", subject, "--body", body)["result"]
-
-    def show(self, dispatch):
-        data = self.call("worker-show", "--dispatch", dispatch, ok_required=False)
-        return data.get("result") if data.get("ok") else None
-
-    def release(self, dispatch):
-        if dispatch:
-            self.call("worker-release", "--dispatch", dispatch, ok_required=False)
-
-    def inbox(self):
-        run_id = self.r.need("RUN_ID")
-        return self.call("inbox", "--terminal", f"run:{run_id}", "--limit", "500", "--full")["result"]["messages"]
-
-
-def payload(m):
-    """`inbox --full` gives the payload as a JSON string; the concise view gives an object."""
-    p = m.get("payload") or {}
-    if isinstance(p, dict):
-        return p
-    try:
-        return json.loads(p)
-    except (json.JSONDecodeError, TypeError):
-        return {}
-
-
-def save_body(msg, out, header=None, append=False):
-    out = Path(out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    text = (header + "\n" if header else "") + msg["body"].rstrip("\n") + "\n"
-    with out.open("a" if append else "w", encoding="utf-8") as f:
-        f.write(text)
-    return out
 
 
 # ---------------------------------------------------------------- the loop
@@ -252,46 +67,10 @@ class Loop:
     def meta(self, t):
         return read_meta(self.r.task_file(t, ".meta"))
 
-    # -- spec building
-    def build(self, template, out, sets=None, files=None):
-        args = ["--template", str(HERE.parent / "references" / "templates" / template), "--out", str(out)]
-        for k, v in (sets or {}).items():
-            args += ["--set", f"{k}={v}"]
-        for k, v in (files or {}).items():
-            args += ["--file", f"{k}={v}"]
-        rc, out_text = tool("build_spec.py", *args)
-        if rc != 0:
-            raise Done(ERROR, f"ERROR BUILD_SPEC {template}: {out_text}")
-        return Path(out)
-
     # -- waiting
     def wait(self, t, kind, dispatch):
         self.set_phase(t, f"wait:{kind}", LOOP_WAIT=dispatch, WAITING_ON=dispatch)
         raise Done(WAIT, f"WAIT {dispatch} {kind}")
-
-    def poll(self, dispatch):
-        """('done', outcome, msg) | ('usage', detail) | ('idle', seq) | ('stopped', note) | None while working."""
-        msgs = sorted(self.o.inbox(), key=lambda m: m.get("sequence", 0), reverse=True)
-        mine = [m for m in msgs if payload(m).get("dispatchId") == dispatch]
-        for m in mine:
-            if m["type"] == "worker_done":
-                return ("done", payload(m).get("outcome", "failed"), m)
-        handled = int(self.r.get(f"HANDLED_SEQ_{dispatch}", "0"))
-        for m in mine:
-            if m["type"] != "escalation" or m.get("sequence", 0) <= handled:
-                continue
-            p = payload(m)
-            if p.get("failureKind") == "usageLimitReached":
-                return ("usage", p.get("detail") or p.get("error") or m["subject"])
-            if p.get("stopReason") == "finished":
-                # Ended its turn without worker_done; it may be waiting on a background command.
-                return ("idle", m.get("sequence", 0))
-            if p.get("stopReason") or p.get("turnOutcome") == "failure":
-                return ("stopped", f"{m['subject']}\n{m['body']}")
-        show = self.o.show(dispatch)
-        if show and show.get("liveness") in ("exited", "lost") and show.get("stage") != "settled":
-            return ("stopped", f"worker {dispatch} is {show.get('liveness')} without settling")
-        return None
 
     NUDGE = ("You ended your turn without settling this task. If a command you started is still running, "
              "wait for it in the foreground until it finishes. Then finish the task and settle worker_done, "
@@ -318,14 +97,14 @@ class Loop:
             term = self.r.get(f"IMPL_TERMINAL_{t}")
             show = self.o.show(d) if d else None
             if show and term and show.get("terminalState") not in (None, "released"):
-                got = self.o.try_reuse(spec, title, term)
+                got = self.o.try_reuse(spec, title, term, self.r.impl)
                 if got:
                     self.r.set(**{f"IMPL_DISPATCH_{t}": got[0], f"IMPL_TERMINAL_{t}": got[1],
                                   f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
                     self.r.log(f"{t} {kind} reused {got[0]}")
                     self.wait(t, kind, got[0])
         pair = self.r.need(f"PAIR_{t}")
-        d, term = self.o.start(spec, title, pair=pair, keep_open=True)
+        d, term = self.o.start(spec, title, pair, self.r.impl, keep_open=True)
         self.r.set(**{f"IMPL_DISPATCH_{t}": d, f"IMPL_TERMINAL_{t}": term,
                       f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
         self.r.log(f"{t} {kind} dispatched {d} {pair}")
@@ -343,7 +122,7 @@ class Loop:
         if rc != 0 or run(["git", "-C", r.impl, "merge-base", "--is-ancestor", r.need("LAST_MERGED"), head]).returncode:
             raise Done(ERROR, f"ERROR IMPL_WORKTREE_NOT_READY head={head} last_merged={r.need('LAST_MERGED')} {out}")
         meta = self.meta(t)
-        spec = self.build("implement.txt", r.run_dir / "specs" / f"{t}-implement.txt",
+        spec = build("implement.txt", r.run_dir / "specs" / f"{t}-implement.txt",
                           {"TASK_TITLE": meta["TITLE"]},
                           {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         r.set(CURRENT_TASK=t, **{f"BASE_SHA_{t}": head, f"IMPLEMENT_SPEC_{t}": spec,
@@ -377,7 +156,7 @@ class Loop:
         rc, out = tool("check-tree.sh", r.impl, head)
         if rc == 2:
             meta = self.meta(t)
-            spec = self.build("commit-uncommitted.txt", next_free(r.run_dir / "specs", f"{t}-commit-{{n}}.txt"),
+            spec = build("commit-uncommitted.txt", next_free(r.run_dir / "specs", f"{t}-commit-{{n}}.txt"),
                               {"TASK_TITLE": meta["TITLE"]}, {"TASK": r.task_file(t, ".md")})
             self.start_impl(t, spec, "commit", f"Commit: {meta['TITLE']}", reuse=True)
         if rc != 0:
@@ -407,7 +186,7 @@ class Loop:
             return self.escalate(t)
         r.incr(f"FIX_ROUNDS_{t}")
         meta = self.meta(t)
-        spec = self.build("fix.txt", next_free(r.run_dir / "specs", f"{t}-fix-{{n}}.txt"),
+        spec = build("fix.txt", next_free(r.run_dir / "specs", f"{t}-fix-{{n}}.txt"),
                           {"TASK_TITLE": meta["TITLE"], "BASE_SHA": r.need(f"BASE_SHA_{t}"),
                            "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}")},
                           {"FINDINGS": findings, "DECISIONS": r.task_file(t, "-decisions.md"),
@@ -424,13 +203,13 @@ class Loop:
                   "OUTPUT_FILE": review}
         out = next_free(r.run_dir / "specs", f"{t}-s{stage}-{{n}}.txt")
         if stage == 1:
-            spec = self.build("spec-review.txt", out, common,
+            spec = build("spec-review.txt", out, common,
                               {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         else:
-            spec = self.build("quality-review.txt", out, {**common, "CONVENTION_PATHS": r.need("CONVENTION_PATHS")},
+            spec = build("quality-review.txt", out, {**common, "CONVENTION_PATHS": r.need("CONVENTION_PATHS")},
                               {"SUMMARY": r.task_file(t, "-summary.md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         pair = meta[f"REVIEW_{stage}"]
-        d, _ = self.o.start(spec, f"Stage {stage} review: {meta['TITLE']}", pair=pair)
+        d, _ = self.o.start(spec, f"Stage {stage} review: {meta['TITLE']}", pair, r.impl)
         r.log(f"{t} stage{stage} reviewer dispatched {d} {pair}")
         self.wait(t, f"review{stage}", d)
 
@@ -570,7 +349,7 @@ class Loop:
             rc, out = tool("discard-changes.sh", r.impl, sha)
             if rc != 0:
                 raise Done(ERROR, f"ERROR RESET {out}")
-            spec = self.build("escalate.txt", r.run_dir / "specs" / f"{t}-attempt{a}.txt",
+            spec = build("escalate.txt", r.run_dir / "specs" / f"{t}-attempt{a}.txt",
                               {"TASK_TITLE": meta["TITLE"], "RESET_SHA": sha},
                               {"NOTE": note, "DECISIONS": r.task_file(t, "-decisions.md"),
                                "IMPLEMENT_SPEC": r.run_dir / "specs" / f"{t}-implement.txt"})
@@ -700,7 +479,7 @@ class Loop:
                 self.do_start(t)
             elif phase.startswith("wait:"):
                 kind = phase.split(":", 1)[1]
-                result = self.poll(self.r.need("LOOP_WAIT"))
+                result = poll(self.o, self.r, self.r.need("LOOP_WAIT"))
                 if result is None:
                     raise Done(WAIT, f"WAIT {self.r.need('LOOP_WAIT')} {kind}")
                 if result[0] == "idle":
