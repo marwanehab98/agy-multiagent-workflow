@@ -200,3 +200,18 @@ Project `/home/marwan/Projects/omw-todo-test`, a new Python to-do CLI with JSON 
 - **N6. "Merge back to main locally" was offered and then refused.** The finishing skill offers it, but Rule 13 forbids the coordinator from touching the main checkout, so it gave the user a git command instead. Fix: `scripts/merge-local.sh` fast-forwards the target only. If the target is checked out in the main checkout, it requires no uncommitted tracked changes and uses `merge --ff-only`; otherwise it does a compare-and-swap `update-ref`. It refuses a diverged target. Step 8 item 4 and Rule 13 route a local merge through it. Unit tests: 5. Checked 2 of 2: success goes on to cleanup and the report; a dirty checkout shows the reason and offers the options again.
 
 **Seen, not fixed:** after EGM, the go-ahead mentioned that it "slightly tightens" a rule the user had signed off on, instead of a separate sign-off. The go-ahead asks for approval anyway.
+
+## Fifth live run: every option on (run on `omw-budget-test`, topic `budget-cli`, 2026-11-16 01:56–02:45)
+
+A new Python expense tracker (CSV, exact decimals, ids never reused), three tasks, one of them complex. The request asked for every review and the drift check.
+
+**New features and fixes confirmed live:**
+- **Run notes (N5):** `.run/run-notes.md` held exactly the instruction sentence, without the handoff instruction. The architect followed it: lens pass, builder check, EGM and plan review all ran with no prompting, and the go-ahead said the drift check would run, with no choice offered.
+- **Drift check:** dispatched on the EGM pick after verification passed (after one final-fix round, F1), and settled in 33 s with "No drift found." The architect settled `FINAL_CLEAN`, and the report has a drift line. Short, so possibly a light pass; worth watching on a bigger project.
+- **Local merge (N6):** option 1 ran `scripts/merge-local.sh`, which printed `MERGED main=ccbca7d`. `main` in the user's checkout fast-forwarded, Step 8 removed the implementation worktree, and the report followed.
+- **Architect choices:** two real design questions (how to keep ids from being reused; package vs single file) came as choice blocks with recommendations. Task 02 (complex) was started at the base model's top effort, with the reason given in the go-ahead.
+- The delivered tool was checked by hand: add/list/summary/delete, exact sums, every error one line with exit 2; 57 tests pass.
+
+**Compaction rehearsal (live, `/compact` in Sonnet-low coordinators with a stubbed task loop):** Claude Code reattaches only *pointers* to the instruction files and a truncated copy of the invoked skill. Re-reading the instructions after compaction: old text 0 of 2; rule placed only in Rule 18 and Resume 1 of 2; rule at the top of `SKILL.md` 3 of 3. All acted correctly.
+
+**N7. The coordinator printed choice blocks as text** (relays 001, 002, 004, 005 of this run) instead of opening the dialog, although `AskUserQuestion` was in its tools. Typing the answer worked, so nothing broke. It wasn't reproduced in 5 fresh rehearsals, which all used the dialog. A likely cause is the tool's own note ("only when you are blocked on a decision that is genuinely the user's"). Fix `66952ff`: the trigger names `AskUserQuestion` and says a relayed choice is the user's own decision, and "What you print" says a choice block is a dialog. It can't be confirmed until a later run shows it.
