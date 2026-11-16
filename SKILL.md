@@ -105,7 +105,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 5. **Relays are verbatim.** When the architect asks with the body `RELAY <path>`:
    1. Read that file.
    2. Show it, in the one form that fits:
-      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and you have a multiple-choice question tool** (such as `AskUserQuestion`): make one call of that tool and send nothing else. Header `Architect`. The question is `From the architect:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- `.
+      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and `AskUserQuestion` or another multiple-choice question tool is among your tools:** make one call of that tool and send nothing else. The choice is the user's own decision, so this is that tool's intended use, even though the architect wrote the question. Header `Architect`. The question is `From the architect:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- `.
       - **Otherwise:** send the user exactly this, and nothing else:
 
         ```
