@@ -68,6 +68,15 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(m["haiku"], ["default"])
         self.assertEqual(m["opus"], ["low", "medium", "high", "xhigh", "max"])
 
+    def test_install_dirs_lists_each_harness_skills_folder(self):
+        home = Path(tempfile.mkdtemp(prefix="home-"))
+        r = subprocess.run([sys.executable, "-I", str(SCRIPT), "install-dirs", "--fixtures", str(FIXTURES),
+                            "--home", str(home)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = {l.split("\t")[0]: l.split("\t")[1:] for l in r.stdout.splitlines()}
+        self.assertEqual(rows["claude"], [str(home / ".claude" / "skills"), "found"])
+        self.assertEqual(rows["antigravity"], [str(home / ".gemini" / "config" / "skills"), "found"])
+
     def test_signed_out_harness_is_broken_not_empty(self):
         h = detect_fixture(agy_models="agy_models_signed_out.txt")["harnesses"]["antigravity"]
         self.assertIn("Fetching available models", h["broken"])

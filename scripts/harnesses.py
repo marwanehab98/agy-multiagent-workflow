@@ -5,6 +5,7 @@ Usage:
   python3 -I harnesses.py args (--state <state.json> | --catalog <file>) --pair <pair>   # Orca launch args, one line
   python3 -I harnesses.py skill-dir --catalog <file> --harness H --skill NAME
   python3 -I harnesses.py top-effort --catalog <file> --harness H --model M
+  python3 -I harnesses.py install-dirs [--fixtures DIR --home DIR]   # name<TAB>skills folder<TAB>found|missing
 
 `detect` runs each harness's own CLI and writes a catalog:
   {"detected_at": iso, "harnesses": {name: {orca_agent, binary, version, styles, models,
@@ -295,6 +296,9 @@ def main(argv=None):
     s.add_argument("--catalog", required=True)
     s.add_argument("--harness", required=True)
     s.add_argument("--skill", required=True)
+    i = sub.add_parser("install-dirs")
+    i.add_argument("--fixtures")
+    i.add_argument("--home")
     t = sub.add_parser("top-effort")
     t.add_argument("--catalog", required=True)
     t.add_argument("--harness", required=True)
@@ -314,6 +318,13 @@ def main(argv=None):
             catalog = json.loads(Path(ns.catalog or state["CATALOG"]).read_text(encoding="utf-8"))
             pair = parse_pair(ns.pair)
             print(shlex.join(launch_args(catalog, pair, pick_style(catalog, state, pair))))
+        elif ns.cmd == "install-dirs":
+            home = ns.home or os.path.expanduser("~")
+            runner = fixture_runner(ns.fixtures) if ns.fixtures else real_runner
+            env = {} if ns.fixtures else None
+            for name, cls in ADAPTERS.items():
+                a = cls(runner, home, env)
+                print(f"{name}\t{a.user_skill_dirs()[0]}\t{'found' if a.find() else 'missing'}")
         elif ns.cmd == "skill-dir":
             cat = json.loads(Path(ns.catalog).read_text(encoding="utf-8"))
             folder = cat["harnesses"][ns.harness]["skills"].get(ns.skill)

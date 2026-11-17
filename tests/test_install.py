@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 INSTALL = REPO / "install.sh"
+FIXTURES = REPO / "tests" / "fixtures" / "harness"
 
 
 def sh(*cmd, cwd=None, env=None):
@@ -43,7 +44,7 @@ class InstallTests(unittest.TestCase):
         (self.target / "marker").write_text("old\n")
         rc, out = self.install()
         self.assertEqual(rc, 0, out)
-        kept = list(self.backups.iterdir())
+        kept = list((self.backups / 'custom').iterdir())
         self.assertEqual(len(kept), 1)
         self.assertTrue((kept[0] / "marker").is_file())
         self.assertFalse((self.target / "marker").exists())
@@ -57,7 +58,37 @@ class InstallTests(unittest.TestCase):
     def test_backups_are_capped_at_five(self):
         for _ in range(7):
             self.install()
-        self.assertEqual(len(list(self.backups.iterdir())), 5)
+        self.assertEqual(len(list((self.backups / 'custom').iterdir())), 5)
+
+    def harness_install(self, *extra):
+        r = sh("bash", str(INSTALL), "--home", str(self.d / "home"), "--harness-fixtures", str(FIXTURES),
+               "--backups", str(self.backups), "--skip-tests", *extra)
+        return r.returncode, (r.stdout + r.stderr).strip()
+
+    def test_harness_option_installs_into_that_harness_skills_folder(self):
+        rc, out = self.harness_install("--harness", "antigravity")
+        self.assertEqual(rc, 0, out)
+        dest = self.d / "home" / ".gemini" / "config" / "skills" / "orca-multiagent-workflow"
+        self.assertTrue((dest / "SKILL.md").is_file())
+        self.assertFalse((self.d / "home" / ".claude" / "skills" / "orca-multiagent-workflow").exists())
+
+    def test_no_option_updates_only_harnesses_that_already_have_it(self):
+        self.harness_install("--harness", "claude")
+        rc, out = self.harness_install()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.count("INSTALLED"), 1)
+        self.assertIn(".claude/skills/orca-multiagent-workflow", out)
+        self.assertFalse((self.d / "home" / ".gemini" / "config" / "skills" / "orca-multiagent-workflow").exists())
+
+    def test_no_option_and_no_existing_install_asks_for_a_harness(self):
+        rc, out = self.harness_install()
+        self.assertEqual(rc, 1)
+        self.assertIn("--harness", out)
+
+    def test_unknown_harness_is_refused(self):
+        rc, out = self.harness_install("--harness", "nope")
+        self.assertEqual(rc, 1)
+        self.assertIn("unknown harness nope", out)
 
     def test_unknown_ref_is_refused_and_nothing_changes(self):
         self.install()

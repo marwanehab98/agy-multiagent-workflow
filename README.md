@@ -4,14 +4,16 @@ A Claude Code skill that takes a JIRA story or written requirements to a reviewe
 
 ## Release
 
-Changes here don't reach running sessions until you install them:
+Changes here don't reach running sessions until you install them. `install.sh` tests the commit in a clean copy first, and never installs uncommitted work.
 
 ```sh
-bash install.sh                 # test HEAD in a clean copy, then install it
-bash install.sh --ref <commit>  # install an older version (rollback)
+bash install.sh                          # update every harness that already has the skill
+bash install.sh --harness antigravity    # also install into another harness (repeatable)
+bash install.sh --ref <commit>           # install an older version (rollback)
+python3 scripts/harnesses.py install-dirs   # the harnesses on this machine and their skills folders
 ```
 
-It installs into `~/.claude/skills/orca-multiagent-workflow`. The replaced version is kept in `~/.local/share/orca-multiagent-workflow/backups` (newest 5). `VERSION` in the installed folder names the commit.
+Each install has a `VERSION` file naming its commit. Replaced versions are kept in `~/.local/share/orca-multiagent-workflow/backups/<harness>` (newest 5 each).
 
 ## Tests
 
