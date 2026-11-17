@@ -13,6 +13,7 @@ def sh(*cmd, cwd=None, env=None):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env={**os.environ, **(env or {})})
 
 
+@unittest.skipUnless((REPO / ".git").exists(), "install.sh releases from a git checkout; skipped in install.sh's own clean copy")
 class InstallTests(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp(prefix="install-"))
