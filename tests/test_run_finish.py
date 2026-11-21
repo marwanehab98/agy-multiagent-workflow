@@ -1,5 +1,6 @@
 """Tests for scripts/run_finish.py (coordinator Step 8 items 1-3) against fake_agy.py. Run: bash tests/run_all.sh"""
 import json
+import shutil
 import unittest
 from pathlib import Path
 
@@ -463,6 +464,25 @@ class Drift(Finish):
         last, _ = self.to_drift_job()
         self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
         self.assertIn(str(SKILL / "skills" / "egm-drift-report" / "SKILL.md"), self.calls()[-1]["prompt"])
+
+    def test_drift_falls_back_to_flat_harness_sibling_skills_when_missing_from_catalog(self):
+        flat_root = self.tmp / "flat-skills"
+        pkg = flat_root / "agy-multiagent-workflow"
+        shutil.copytree(SKILL / "scripts", pkg / "scripts")
+        shutil.copytree(SKILL / "references", pkg / "references")
+        (flat_root / "egm-drift-report").mkdir(parents=True)
+        (flat_root / "egm-drift-report" / "SKILL.md").write_text("---\nname: egm-drift-report\n---\n")
+
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["antigravity"]["skills"].pop("egm-drift-report", None)
+        cat_path = self.tmp / "no-drift-cat.json"
+        cat_path.write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
+
+        self.SCRIPT = pkg / "scripts" / "run_finish.py"
+        last, _ = self.to_drift_job()
+        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
+        self.assertIn(str(flat_root / "egm-drift-report" / "SKILL.md"), self.calls()[-1]["prompt"])
 
 
 if __name__ == "__main__":

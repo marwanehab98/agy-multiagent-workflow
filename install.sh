@@ -97,6 +97,13 @@ find "$release" -name __pycache__ -prune -exec rm -rf {} +
   echo "installed $(date -Iseconds) from $repo"
 } > "$release/VERSION"
 
+prune_backups() {
+  local keep=$1
+  if [ -d "$keep" ] && compgen -G "$keep/*" >/dev/null; then
+    ls -1dt "$keep"/* | tail -n +6 | while read -r old; do rm -rf "$old"; done
+  fi
+}
+
 for i in "${!targets[@]}"; do
   label=${labels[$i]}; dest=${targets[$i]}; keep="$backups/$label"
   backup=""
@@ -108,9 +115,7 @@ for i in "${!targets[@]}"; do
       mv "$dest" "$backup"
     fi
     cp -a "$release" "$dest"
-    if [ -d "$keep" ]; then
-      ls -1dt "$keep"/* | tail -n +6 | while read -r old; do rm -rf "$old"; done
-    fi
+    prune_backups "$keep"
     echo "INSTALLED ${sha:0:12} to $dest ($label)${backup:+, previous kept at $backup}"
   else
     mkdir -p "$dest"
@@ -172,9 +177,7 @@ for i in "${!targets[@]}"; do
     if [ ${#managed[@]} -gt 0 ]; then
       printf '%s\n' "${managed[@]}" > "$dest/$name/.managed-skills"
     fi
-    if [ -d "$keep" ]; then
-      ls -1dt "$keep"/* | tail -n +6 | while read -r old; do rm -rf "$old"; done
-    fi
+    prune_backups "$keep"
     echo "INSTALLED ${sha:0:12} to $dest/$name ($count skills in $dest) ($label)${backup:+, previous kept at $backup}"
   fi
 done

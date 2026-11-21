@@ -397,6 +397,59 @@ class TreeAndWorkers(Base):
         self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
         self.assertEqual(self.calls()[3]["conversation"], "")
 
+    def test_escalation_impl_consult_fallback_resets_to_reset_sha_not_base(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.expect(20, "ESCALATE")
+        step_b = sh("git", "-C", str(self.impl), "rev-parse", "HEAD~2")
+        self.assertNotEqual(step_b, self.base)
+
+        note = self.tmp / "note.md"
+        note.write_text("keep step B\n")
+        stray = self.impl / "stray_esc_impl.txt"
+        self.behave(
+            {"do": "ask", "conv_id": "conv_esc_1"},
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n", "edit": str(stray)},
+            "commit",
+            "pass",
+            "pass",
+        )
+        self.expect(22, "CONSULT", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {step_b} {note} antigravity:g@xhigh"))
+        self.assertEqual(self.st("BASE_SHA_01"), self.base)
+        self.assertEqual(self.st("IMPL_START_SHA_01"), step_b)
+        self.assertEqual(self.impl_head(), step_b)
+
+        head_snap = self.tmp / "fallback-head.txt"
+        orig_agy = self.st("AGY")
+        wrapper = self.tmp / "capture-head-agy"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            "case \" $* \" in *\" --conversation \"*) ;; *)\n"
+            f"  [ -e {head_snap} ] || {{ git -C {self.impl} rev-parse HEAD; "
+            f"git -C {self.impl} status --porcelain --untracked-files=all; }} > {head_snap}\n"
+            ";; esac\n"
+            f"exec {orig_agy} \"$@\"\n"
+        )
+        wrapper.chmod(0o755)
+        self.state.write_text(json.dumps({**self.st(), "AGY": str(wrapper)}))
+
+        ans = self.tmp / "ans.md"
+        ans.write_text("Continue from step B.\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+
+        self.assertEqual(head_snap.read_text().splitlines(), [step_b])
+        self.assertFalse(stray.exists())
+        calls = self.calls()
+        self.assertEqual(calls[7]["conversation"], "conv_esc_1")
+        self.assertEqual(calls[8]["conversation"], "")
+        self.assertIn("Continue from step B.", calls[8]["prompt"])
+        merged = self.st("LAST_MERGED")
+        self.assertEqual(sh("git", "-C", str(self.impl), "rev-parse", f"{merged}~1"), step_b)
+        changed = sh("git", "-C", str(self.impl), "diff", "--stat", f"{self.base}..{merged}")
+        self.assertIn("work_1.txt", changed)
+        self.assertNotIn("work_3.txt", changed)
+        self.assertNotIn("stray_esc_impl.txt", changed)
+
 
 class Prompts(Base):
     def test_usage_limit_prompts_then_retry_restarts(self):

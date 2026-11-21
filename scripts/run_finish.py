@@ -29,8 +29,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, HERE, AgyRunner, Done, Run, build, first_words, next_free,  # noqa: E402
-                    pick_verdict, save_body, tool, verdict_line)
+from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, AgyRunner, Done, Run, build, bundled_skills_dir,  # noqa: E402
+                    first_words, next_free, pick_verdict, save_body, tool, verdict_line)
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 from pairs import parse_pair  # noqa: E402
 
@@ -188,10 +188,7 @@ class Finish:
                        "--skill", "egm-drift-report")
         if rc == 0:
             return str(Path(out).parent)
-        bundled = HERE.parent / "skills"
-        if (bundled / "egm-drift-report" / "SKILL.md").is_file():
-            return str(bundled)
-        return None
+        return bundled_skills_dir("egm-drift-report")
 
     def do_drift(self):
         r = self.r

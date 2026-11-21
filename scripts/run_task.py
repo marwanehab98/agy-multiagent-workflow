@@ -130,7 +130,7 @@ class Loop:
         spec = build("implement.txt", r.run_dir / "specs" / f"{t}-implement.txt",
                      {"TASK_TITLE": meta["TITLE"]},
                      {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
-        r.set(CURRENT_TASK=t, **{f"BASE_SHA_{t}": head, f"IMPLEMENT_SPEC_{t}": spec,
+        r.set(CURRENT_TASK=t, **{f"BASE_SHA_{t}": head, f"IMPL_START_SHA_{t}": head, f"IMPLEMENT_SPEC_{t}": spec,
                                  f"PAIR_{t}": meta["IMPLEMENTER"], f"ATTEMPT_{t}": 0,
                                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
                                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
@@ -330,7 +330,7 @@ class Loop:
             if kind.startswith("review") or kind == "fix":
                 self._discard_or_error(r.need(f"WORKER_HEAD_{t}"))
             elif kind == "impl":
-                self._discard_or_error(r.need(f"BASE_SHA_{t}"))
+                self._discard_or_error(r.get(f"IMPL_START_SHA_{t}") or r.need(f"BASE_SHA_{t}"))
             if not kind.startswith("review"):
                 r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
             spec_text = Path(spec).read_text(encoding="utf-8")
@@ -467,7 +467,7 @@ class Loop:
                      {"TASK_TITLE": meta["TITLE"], "RESET_SHA": sha},
                      {"NOTE": note, "DECISIONS": r.task_file(t, "-decisions.md"),
                       "IMPLEMENT_SPEC": r.run_dir / "specs" / f"{t}-implement.txt"})
-        r.set(**{f"IMPLEMENT_SPEC_{t}": spec, f"PAIR_{t}": pair, f"ESC_PENDING_{t}": None,
+        r.set(**{f"IMPL_START_SHA_{t}": sha, f"IMPLEMENT_SPEC_{t}": spec, f"PAIR_{t}": pair, f"ESC_PENDING_{t}": None,
                  f"IMPL_CONVERSATION_ID_{t}": None,
                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,

@@ -112,6 +112,18 @@ class InstallTests(unittest.TestCase):
             self.install()
         self.assertEqual(len(list((self.backups / 'custom').iterdir())), 5)
 
+    def test_empty_existing_backup_dirs_do_not_abort_fresh_install(self):
+        (self.backups / "custom").mkdir(parents=True)
+        (self.backups / "antigravity").mkdir(parents=True)
+
+        rc, out = self.install()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("INSTALLED", out)
+
+        rc, out = self.harness_install("--harness", "antigravity")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("INSTALLED", out)
+
     def harness_install(self, *extra):
         r = sh("bash", str(INSTALL), "--home", str(self.d / "home"), "--harness-fixtures", str(FIXTURES),
                "--backups", str(self.backups), "--skip-tests", *extra)

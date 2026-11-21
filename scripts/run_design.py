@@ -42,8 +42,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, STOP, ERROR, HERE, AgyRunner, Done, Run, build, first_words, git, next_free,  # noqa: E402
-                    save_body, tool)
+from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build, bundled_skills_dir, first_words,  # noqa: E402
+                    git, next_free, save_body, tool)
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
 
@@ -146,10 +146,10 @@ class Design:
                        "--skill", skill_name)
         if rc == 0:
             skills_dir = str(Path(out).parent)
-        elif (HERE.parent / "skills" / skill_name / "SKILL.md").is_file():
-            skills_dir = str(HERE.parent / "skills")
         else:
-            raise Done(ERROR, f"ERROR EGM_SKILLS {out}")
+            skills_dir = bundled_skills_dir(skill_name)
+            if not skills_dir:
+                raise Done(ERROR, f"ERROR EGM_SKILLS {out}")
         if skill_name == "egm-review":
             r.set(EGM_SKILLS=skills_dir)
         return skills_dir

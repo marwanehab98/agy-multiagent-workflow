@@ -1,5 +1,6 @@
 """Tests for scripts/run_design.py against fake_agy.py. Run: bash tests/run_all.sh"""
 import json
+import shutil
 import unittest
 from pathlib import Path
 
@@ -248,6 +249,27 @@ class Egm(Design):
         self.assertEqual(last, f"ARCHITECT_JOB egm-done {self.run_dir / 'egm-1.md'}")
         self.assertEqual(self.st("EGM_SKILLS"), str(SKILL / "skills"))
         self.assertIn(str(SKILL / "skills" / "egm-review" / "SKILL.md"), self.calls()[0]["prompt"])
+
+    def test_egm_falls_back_to_flat_harness_sibling_skills_when_missing_from_catalog(self):
+        flat_root = self.tmp / "flat-skills"
+        pkg = flat_root / "agy-multiagent-workflow"
+        shutil.copytree(SKILL / "scripts", pkg / "scripts")
+        shutil.copytree(SKILL / "references", pkg / "references")
+        (flat_root / "egm-review").mkdir(parents=True)
+        (flat_root / "egm-review" / "SKILL.md").write_text("---\nname: egm-review\n---\n")
+
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["antigravity"]["skills"].pop("egm-review", None)
+        cat_path = self.tmp / "no-egm-cat.json"
+        cat_path.write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
+
+        self.SCRIPT = pkg / "scripts" / "run_design.py"
+        self.behave("write-output")
+        last, _ = self.egm_need()
+        self.assertEqual(last, f"ARCHITECT_JOB egm-done {self.run_dir / 'egm-1.md'}")
+        self.assertEqual(self.st("EGM_SKILLS"), str(flat_root))
+        self.assertIn(str(flat_root / "egm-review" / "SKILL.md"), self.calls()[0]["prompt"])
 
 
 class Lens(Design):

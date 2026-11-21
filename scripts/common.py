@@ -163,6 +163,15 @@ def next_free(folder, pattern):
     return folder / pattern.format(n=n)
 
 
+def bundled_skills_dir(skill_name):
+    """Return the bundled skills root containing `<skill_name>/SKILL.md`, or None."""
+    root = HERE.parent
+    for candidate in (root / "skills", root.parent):
+        if (candidate / skill_name / "SKILL.md").is_file():
+            return str(candidate)
+    return None
+
+
 # ---------------------------------------------------------------- headless agy runner
 
 MAX_INLINE_PROMPT_BYTES = 65536
