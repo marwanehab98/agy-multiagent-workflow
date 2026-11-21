@@ -83,6 +83,17 @@ WT_DET=$(bash "$SK/worktree.sh" create . T-det T-det "$BASE")
 git -C "$WT_DET" checkout -q --detach HEAD
 bash "$SK/worktree.sh" remove . "$WT_DET" --delete-branch >/dev/null; expect 0 $? "remove detached worktree with --delete-branch"
 [ ! -d "$WT_DET" ] && ok "detached worktree removed" || bad "detached worktree still exists"
+WT_AHEAD=$(bash "$SK/worktree.sh" create . T-ahead T-ahead "$BASE")
+git push -q origin T-ahead:T-ahead && git branch --set-upstream-to=origin/T-ahead T-ahead >/dev/null
+(cd "$WT_AHEAD" && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m ahead)
+AHEAD_SHA=$(git -C "$WT_AHEAD" rev-parse HEAD)
+git reset -q --hard "$AHEAD_SHA"
+bash "$SK/worktree.sh" remove . "$WT_AHEAD" --delete-branch >/dev/null 2>&1; expect 1 $? "refuses deleting branch merged to HEAD but ahead of upstream"
+[ -d "$WT_AHEAD" ] && ok "worktree preserved when branch ahead of upstream" || bad "worktree deleted despite branch ahead of upstream"
+git reset -q --hard "$BASE"
+git push -q origin T-ahead:T-ahead
+bash "$SK/worktree.sh" remove . "$WT_AHEAD" --delete-branch >/dev/null; expect 0 $? "remove worktree once upstream catches up"
+[ ! -d "$WT_AHEAD" ] && ok "caught-up worktree removed" || bad "caught-up worktree still exists"
 
 echo "--- gate"
 git worktree add -q ../impl -b impl2 "$H2"

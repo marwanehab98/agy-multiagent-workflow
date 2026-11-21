@@ -171,17 +171,24 @@ class Design:
                 build("plan-review.txt", spec, {"EGM_SKILLS": skills, "PLAN_FILE": args[0], "OUTPUT_FILE": out},
                       {"CONTEXT": args[1]})
         r.set(DESIGN_SPEC=spec, DESIGN_OUT=out, DESIGN_PAIR=pair)
+        self.set_phase("dispatching")
         result = self.runner.run(spec, pair=pair, worktree=self.docs_wt)
         r.log(f"design {kind} dispatched {pair}")
         self.handle_result(kind, result)
 
-    def _restore_tree(self, kind):
-        _, args = self.need()
-        allow = ["--allow", args[1]] if kind == "egm" else []
-        rc, why = tool("check-tree.sh", self.docs_wt, self.r.need("DOCS_HEAD"), *allow)
+    def _discard_or_error(self, head):
+        rc, out = tool("discard-changes.sh", self.docs_wt, head)
         if rc != 0:
-            rc2, out2 = tool("discard-changes.sh", self.docs_wt, self.r.need("DOCS_HEAD"))
-            self.r.log(f"design {kind} worker changed the docs worktree ({why}); discarded: {out2} (exit {rc2})")
+            raise Done(ERROR, f"ERROR RESET {out}")
+
+    def _restore_tree(self, kind, allow_egm_out=True):
+        _, args = self.need()
+        allow = ["--allow", args[1]] if kind == "egm" and allow_egm_out else []
+        head = self.r.need("DOCS_HEAD")
+        rc, why = tool("check-tree.sh", self.docs_wt, head, *allow)
+        if rc != 0:
+            self._discard_or_error(head)
+            self.r.log(f"design {kind} worker changed the docs worktree ({why}); discarded")
         return rc == 0
 
     def handle_result(self, kind, result):
@@ -207,12 +214,13 @@ class Design:
         pair = r.need("DESIGN_PAIR")
         conv = r.get("DESIGN_ASK_CONV", "")
         ans = p.read_text(encoding="utf-8")
+        r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None)
+        self.set_phase("dispatching", WAITING_ON=None)
         result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, self.docs_wt, conv)
         if result is None:
             spec_text = Path(r.need("DESIGN_SPEC")).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
                                      pair=pair, worktree=self.docs_wt)
-        r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None)
         self.handle_result(kind, result)
 
     def settle(self, kind, result):
@@ -225,13 +233,13 @@ class Design:
             save_body(result[2], saved)
         else:
             saved.write_text(f"{result[0]}: {result[1]}\n", encoding="utf-8")
-        if kind == "egm":
+        if not failed and kind == "egm":
             src = Path(self.docs_wt) / args[1]
             if src.is_file():
                 shutil.copyfile(src, out)
-        self._restore_tree(kind)
         if not failed and not (out.is_file() and out.read_text(encoding="utf-8").strip()):
             failed = True
+        self._restore_tree(kind, allow_egm_out=not failed)
         if failed:
             r.log(f"design {kind} failed: {saved}")
             if r.incr(f"RETRY_{kind}") < 2:
@@ -262,6 +270,10 @@ class Design:
                 raise Done(ESCALATE, self.r.need("DESIGN_LINE"))
             if phase == "consult":
                 raise Done(CONSULT, f"CONSULT {self.r.need('DESIGN_ASK_FILE')}")
+            if phase == "dispatching":
+                self._restore_tree(self.need()[0], allow_egm_out=False)
+                self.set_phase("start")
+                continue
             {"start": self.do_start, "probe": self.do_probe, "dispatch": self.dispatch}[phase]()
         raise Done(ERROR, "ERROR LOOP_LIMIT")
 

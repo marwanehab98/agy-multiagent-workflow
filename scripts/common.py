@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -182,11 +183,15 @@ def _read_spec_or_text(spec_or_text):
     return str(spec_or_text), None
 
 
-ENVELOPE_KEYS = {"status", "response", "error", "conversation_id"}
+ENVELOPE_PAYLOAD_KEYS = {"response", "error", "conversation_id"}
 
 
 def _is_envelope(data):
-    return isinstance(data, dict) and bool(ENVELOPE_KEYS & data.keys())
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("status"), str)
+        and bool(ENVELOPE_PAYLOAD_KEYS & data.keys())
+    )
 
 
 def _parse_json_envelope(raw_out):
@@ -249,7 +254,7 @@ class AgyRunner:
         if spec_path is not None and spec_path.is_file():
             target = spec_path.resolve()
         else:
-            target = next_free(self.r.run_dir / "specs", "large-prompt-{n}.txt")
+            target = next_free(self.r.run_dir / "specs", "large-prompt-{n}.txt").resolve()
             target.write_text(prompt_text, encoding="utf-8")
         return f"Read and follow all instructions in {target} exactly."
 
@@ -281,22 +286,33 @@ class AgyRunner:
             cmd += ["--conversation", conversation_id]
         timeout = self._timeout()
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
                 cwd=worktree,
                 stdin=subprocess.DEVNULL,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 errors="replace",
-                timeout=timeout,
+                start_new_session=True,
             )
-        except subprocess.TimeoutExpired:
-            return ("stopped", f"{self.exe} timed out after {timeout}s", "", conversation_id or "")
+            try:
+                stdout_s, stderr_s = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                return ("stopped", f"{self.exe} timed out after {timeout}s", "", conversation_id or "")
         except OSError as e:
             return ("stopped", f"failed to launch {self.exe}: {e}", "", "")
 
-        raw_out = (proc.stdout or "").strip()
-        raw_err = (proc.stderr or "").strip()
+        raw_out = (stdout_s or "").strip()
+        raw_err = (stderr_s or "").strip()
         data = _parse_json_envelope(raw_out)
 
         if not isinstance(data, dict):

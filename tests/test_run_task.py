@@ -252,18 +252,55 @@ class TreeAndWorkers(Base):
         self.assertIn("usageLimitReached", Path(last.split()[1]).read_text())
         self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
 
+    def test_non_json_error_with_trailing_status_or_error_json_not_misparsed(self):
+        self.behave(
+            {"do": "response", "raw_stdout": "Fatal: usageLimitReached\n{\"status\": 500}", "rc": 1},
+            "commit", "pass", "pass",
+        )
+        last, _ = self.expect(30, "PROMPT")
+        self.assertIn("usageLimitReached", Path(last.split()[1]).read_text())
+        self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+
+        self.behave(
+            {"do": "response", "raw_stdout": "Fatal: usageLimitReached\n{\"error\": \"bad request\"}", "rc": 1},
+            "commit", "pass", "pass",
+        )
+        (self.run_dir / "queue.txt").write_text("02\n")
+        last, _ = self.expect(30, "PROMPT")
+        self.assertIn("usageLimitReached", Path(last.split()[1]).read_text())
+        self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+
     def test_structured_error_dict_does_not_crash(self):
         self.behave({"do": "response", "status": "ERROR", "rc": 1, "error": {"code": 500, "msg": "boom"}})
         self.expect(20, "ESCALATE")
         self.assertIn("boom", (self.run_dir / "verdicts" / "01-history.md").read_text())
 
     def test_agy_timeout_triggers_stopped_and_escalates(self):
+        import time as _time
         s = self.st()
         s["AGY_TIMEOUT"] = "1"
         self.state.write_text(json.dumps(s))
-        self.behave({"do": "response", "sleep": 3, "text": "late\n"})
+        self.behave({"do": "response", "spawn_child_sleep": 10, "sleep": 10, "text": "late\n"})
+        t0 = _time.monotonic()
         self.expect(20, "ESCALATE")
+        self.assertLess(_time.monotonic() - t0, 4.0)
         self.assertIn("timed out after 1s", (self.run_dir / "verdicts" / "01-history.md").read_text())
+
+    def test_take_answer_transitions_out_of_consult_before_resuming(self):
+        self.behave("ask", "commit", "pass", "pass")
+        self.expect(22, "CONSULT")
+        snap = self.tmp / "mid-state.json"
+        orig_agy = self.st("AGY")
+        wrapper = self.tmp / "check-agy"
+        wrapper.write_text(f"#!/bin/sh\n[ -e {snap} ] || cp {self.state} {snap}\nexec {orig_agy} \"$@\"\n")
+        wrapper.chmod(0o755)
+        self.state.write_text(json.dumps({**self.st(), "AGY": str(wrapper)}))
+        ans = self.tmp / "ans.md"
+        ans.write_text("Return 42.\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+        mid = json.loads(snap.read_text())
+        self.assertEqual(mid["LOOP_01"], "impl")
+        self.assertNotIn("TASK_ASK_FILE_01", mid)
 
 
 class Prompts(Base):

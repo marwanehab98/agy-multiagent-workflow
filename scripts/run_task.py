@@ -312,16 +312,22 @@ class Loop:
         conv = r.get(f"TASK_ASK_CONV_{t}", "")
         stage = r.get(f"TASK_ASK_STAGE_{t}")
         ans = p.read_text(encoding="utf-8")
+        r.set(**{f"TASK_ASK_CONV_{t}": None, f"TASK_ASK_KIND_{t}": None,
+                 f"TASK_ASK_PAIR_{t}": None, f"TASK_ASK_SPEC_{t}": None,
+                 f"TASK_ASK_FILE_{t}": None, f"TASK_ASK_STAGE_{t}": None})
+        if kind.startswith("review"):
+            review_stage = int(stage or kind[-1])
+            self.set_phase(t, f"reviewing:{review_stage}", WAITING_ON=None)
+        else:
+            in_flight = "committing" if kind == "commit" else ("fixing" if kind == "fix" else "impl")
+            self.set_phase(t, in_flight, WAITING_ON=None)
         result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
             spec_text = Path(spec).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)
-        r.set(**{f"TASK_ASK_CONV_{t}": None, f"TASK_ASK_KIND_{t}": None,
-                 f"TASK_ASK_PAIR_{t}": None, f"TASK_ASK_SPEC_{t}": None,
-                 f"TASK_ASK_FILE_{t}": None, f"TASK_ASK_STAGE_{t}": None})
         if kind.startswith("review"):
-            self.after_review(t, int(stage or kind[-1]), result)
+            self.after_review(t, review_stage, result)
         else:
             if result[3]:
                 r.set(**{f"IMPL_CONVERSATION_ID_{t}": result[3]})

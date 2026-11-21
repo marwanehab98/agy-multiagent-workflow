@@ -200,6 +200,27 @@ class Egm(Design):
         self.egm_need()
         self.assertEqual(self.st("EGM_RUNS"), "1")
 
+    def test_failed_egm_with_partial_output_is_cleaned_before_retry(self):
+        partial = self.docs_wt / FINDINGS
+        self.behave({"do": "response", "status": "ERROR", "rc": 1, "edit": str(partial), "edit_text": "partial\n"},
+                    "write-output")
+        last, _ = self.egm_need()
+        self.assertEqual(last, f"ARCHITECT_JOB egm-done {self.run_dir / 'egm-1.md'}")
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_resume_interrupted_dispatching_cleans_docs_worktree_and_restarts(self):
+        self.state.write_text(json.dumps({
+            **self.st(),
+            "DESIGN_PHASE": "dispatching",
+            "DESIGN_NEED": f"builder-check design.md antigravity:small@high",
+            "DOCS_HEAD": self.docs_head,
+        }))
+        (self.docs_wt / "stray_design.txt").write_text("partial\n")
+        self.behave("write-output")
+        last, _ = self.expect(20, "ARCHITECT_JOB")
+        self.assertFalse((self.docs_wt / "stray_design.txt").exists())
+        self.assertIn("builder-check-done", last)
+
 
 class Lens(Design):
     def lens_need(self, expect=(20, "ARCHITECT_JOB")):

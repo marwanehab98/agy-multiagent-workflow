@@ -20,6 +20,7 @@ Exit 2: the worktree could not be restored to <head> (prints why).  Exit 64: bad
 import argparse
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -56,6 +57,34 @@ def commands_all(run_values, prefix):
 
 def git(wt, *args):
     return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True, errors="replace")
+
+
+def _run_cmd(cmd, cwd, timeout):
+    proc = subprocess.Popen(
+        cmd,
+        shell=True,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+    )
+    try:
+        out_s, err_s = proc.communicate(timeout=timeout)
+        return proc.returncode, out_s, err_s
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            out_s, err_s = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out_s, err_s = "", ""
+        return None, out_s or "", err_s or ""
 
 
 def main():
@@ -104,19 +133,16 @@ def main():
                 f.write(f"\n=== {name} skipped (BASELINE_SKIP): {cmd}\n")
                 print(f"{name} skipped")
                 continue
-            try:
-                r = subprocess.run(cmd, shell=True, cwd=a.worktree, stdin=subprocess.DEVNULL,
-                                   capture_output=True, text=True, errors="replace", timeout=timeout)
-                f.write(f"\n=== {name}: {cmd}\n{r.stdout}{r.stderr}\n=== {name} exit={r.returncode}\n")
-                print(f"{name} exit={r.returncode}")
-                if r.returncode != 0:
-                    failed.append(name)
-            except subprocess.TimeoutExpired as e:
-                out_s = (e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-                err_s = (e.stderr or b"").decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+            rc, out_s, err_s = _run_cmd(cmd, a.worktree, timeout)
+            if rc is None:
                 f.write(f"\n=== {name}: {cmd}\n{out_s}{err_s}\n=== {name} timed out after {timeout}s\n")
                 print(f"{name} timed out")
                 failed.append(name)
+            else:
+                f.write(f"\n=== {name}: {cmd}\n{out_s}{err_s}\n=== {name} exit={rc}\n")
+                print(f"{name} exit={rc}")
+                if rc != 0:
+                    failed.append(name)
 
     # Build and test output that is not gitignored would look like a reviewer's edit later.
     git(a.worktree, "reset", "--hard", want)

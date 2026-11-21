@@ -110,10 +110,19 @@ class Review(Finish):
         self.behave("ask", "pass")
         last, _ = self.expect(22, "CONSULT")
         self.assertIn("Which edge case", Path(last.split()[1]).read_text())
+        snap = self.tmp / "mid-finish-state.json"
+        orig_agy = self.st("AGY")
+        wrapper = self.tmp / "check-finish-agy"
+        wrapper.write_text(f"#!/bin/sh\n[ -e {snap} ] || cp {self.state} {snap}\nexec {orig_agy} \"$@\"\n")
+        wrapper.chmod(0o755)
+        self.state.write_text(json.dumps({**self.st(), "AGY": str(wrapper)}))
         ans = self.tmp / "ans.md"
         ans.write_text("Approved.\n")
         self.expect(0, "VERIFIED", "--answer", str(ans))
         self.assertEqual(self.calls()[1]["conversation"], "conv_1")
+        mid = json.loads(snap.read_text())
+        self.assertEqual(mid["FIN_PHASE"], "reviewing")
+        self.assertNotIn("FIN_ASK_FILE", mid)
 
     def test_consult_expired_conversation_falls_back_cleanly(self):
         self.behave("ask", "pass")

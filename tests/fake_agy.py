@@ -129,6 +129,8 @@ def main():
         return emit(0, {"conversation_id": conv_id, "status": "SUCCESS", "response": text})
 
     if do == "response":
+        if isinstance(beh, dict) and beh.get("spawn_child_sleep"):
+            subprocess.Popen([sys.executable, "-c", f"import time; time.sleep({float(beh['spawn_child_sleep'])})"])
         if isinstance(beh, dict) and beh.get("sleep"):
             save_world()
             time.sleep(float(beh["sleep"]))

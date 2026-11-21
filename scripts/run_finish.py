@@ -251,12 +251,13 @@ class Finish:
         spec = r.need("FIN_ASK_SPEC")
         conv = r.get("FIN_ASK_CONV", "")
         ans = p.read_text(encoding="utf-8")
+        r.set(FIN_ASK_CONV=None, FIN_ASK_KIND=None, FIN_ASK_PAIR=None, FIN_ASK_SPEC=None, FIN_ASK_FILE=None)
+        self.set_phase("drifting" if kind == "drift" else "reviewing", WAITING_ON=None)
         result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
             spec_text = Path(spec).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)
-        r.set(FIN_ASK_CONV=None, FIN_ASK_KIND=None, FIN_ASK_PAIR=None, FIN_ASK_SPEC=None, FIN_ASK_FILE=None)
         if kind == "drift":
             self.settle_drift(result)
         else:

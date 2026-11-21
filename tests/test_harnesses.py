@@ -102,6 +102,22 @@ class DetectTests(unittest.TestCase):
         self.assertIn("egm", h["antigravity"]["plugins"])
         self.assertIn("explainer", h["antigravity"]["skills"])
 
+    def test_cli_skill_dirs_scanned_with_priority(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            cli_skill = home / ".gemini" / "antigravity-cli" / "skills" / "cli-only"
+            shared_skill = home / ".gemini" / "skills" / "shared-only"
+            override_cli = home / ".gemini" / "antigravity-cli" / "skills" / "egm-review"
+            override_cfg = home / ".gemini" / "config" / "skills" / "egm-review"
+            for d in (cli_skill, shared_skill, override_cli, override_cfg):
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text("---\nname: test\n---\n")
+            h = detect(fixture_runner(), home, env={})["harnesses"]["antigravity"]
+            self.assertEqual(h["skills"]["cli-only"], str(cli_skill))
+            self.assertEqual(h["skills"]["shared-only"], str(shared_skill))
+            self.assertEqual(h["skills"]["egm-review"], str(override_cli))
+            self.assertEqual(h["skill_dirs"], [str(home / ".gemini" / "config" / "skills")])
+
     def test_launch_args_styles(self):
         cat = detect_fixture()
         p = parse_pair("antigravity:gemini-4-hydrogen@xhigh")

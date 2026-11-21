@@ -98,6 +98,23 @@ class GateTests(unittest.TestCase):
         log = (self.d / "gates" / "baseline-1.log").read_text()
         self.assertIn("timed out after 1s", log)
 
+    def test_gate_timeout_kills_child_process_holding_stdout(self):
+        import time as _time
+        child_cmd = (
+            f"{sys.executable} -c \"import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)']); "
+            "time.sleep(10)\""
+        )
+        self.rv.write_text(f"VERIFY_1={child_cmd}\n")
+        t0 = _time.monotonic()
+        rc, out = py(GATE, "--run-values", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
+                     "--log", str(self.d / "gates" / "baseline-{n}.log"), "--prefix", "VERIFY",
+                     env={"GATE_TIMEOUT": "1"})
+        elapsed = _time.monotonic() - t0
+        self.assertEqual(rc, 1, out)
+        self.assertLess(elapsed, 4.0)
+        self.assertIn("VERIFY_1 timed out", out)
+
 
 class MergeLocalTests(unittest.TestCase):
     """The user's "merge locally" choice at the end of a run: fast-forward only, never losing their work."""

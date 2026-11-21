@@ -154,7 +154,8 @@ class AntigravityAdapter(Adapter):
 
     def skill_roots(self):
         base = self.home / ".gemini" / "config"
-        return self.user_skill_dirs() + [base / "plugins" / p / "skills" for p in self.plugins()]
+        cli_dirs = [self.home / ".gemini" / "antigravity-cli" / "skills", self.home / ".gemini" / "skills"]
+        return cli_dirs + self.user_skill_dirs() + [base / "plugins" / p / "skills" for p in self.plugins()]
 
 
 ADAPTERS = {"antigravity": AntigravityAdapter}
