@@ -454,6 +454,16 @@ class Drift(Finish):
         self.assertFalse((self.impl / "stray_drift.txt").exists())
         self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-2.md'}")
 
+    def test_drift_falls_back_to_bundled_skills_when_missing_from_catalog(self):
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["antigravity"]["skills"].pop("egm-drift-report", None)
+        cat_path = self.tmp / "no-drift-cat.json"
+        cat_path.write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
+        last, _ = self.to_drift_job()
+        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
+        self.assertIn(str(SKILL / "skills" / "egm-drift-report" / "SKILL.md"), self.calls()[-1]["prompt"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

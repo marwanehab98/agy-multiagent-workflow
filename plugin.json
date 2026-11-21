@@ -1,0 +1,23 @@
+{
+  "name": "agy-multiagent-workflow",
+  "displayName": "Agy Multi-Agent Workflow",
+  "version": "1.0.0",
+  "description": "Self-contained multi-agent workflow suite for Antigravity: standalone brainstorming, planning, TDD, EGM reviews, verification, branch finishing, plan execution, and full end-to-end orchestration via headless agy -p workers.",
+  "logo": "assets/logo.svg",
+  "category": "Developer Tools",
+  "keywords": [
+    "multi-agent",
+    "workflow",
+    "brainstorming",
+    "planning",
+    "tdd",
+    "code-review",
+    "egm",
+    "headless"
+  ],
+  "author": {
+    "name": "Marwan Ehab"
+  },
+  "repository": "https://github.com/marwanehab98/agy-multiagent-workflow",
+  "license": "MIT"
+}

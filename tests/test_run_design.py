@@ -237,6 +237,18 @@ class Egm(Design):
         self.assertEqual(self.calls()[2]["conversation"], "")
         self.assertIn("Clarified.", self.calls()[2]["prompt"])
 
+    def test_egm_falls_back_to_bundled_skills_when_missing_from_catalog(self):
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["antigravity"]["skills"].pop("egm-review", None)
+        cat_path = self.tmp / "no-egm-cat.json"
+        cat_path.write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
+        self.behave("write-output")
+        last, _ = self.egm_need()
+        self.assertEqual(last, f"ARCHITECT_JOB egm-done {self.run_dir / 'egm-1.md'}")
+        self.assertEqual(self.st("EGM_SKILLS"), str(SKILL / "skills"))
+        self.assertIn(str(SKILL / "skills" / "egm-review" / "SKILL.md"), self.calls()[0]["prompt"])
+
 
 class Lens(Design):
     def lens_need(self, expect=(20, "ARCHITECT_JOB")):

@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, AgyRunner, Done, Run, build, first_words, next_free,  # noqa: E402
+from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, HERE, AgyRunner, Done, Run, build, first_words, next_free,  # noqa: E402
                     pick_verdict, save_body, tool, verdict_line)
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 from pairs import parse_pair  # noqa: E402
@@ -186,7 +186,12 @@ class Finish:
         harness = parse_pair(r.need("ROLE_EGM")).harness
         rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
                        "--skill", "egm-drift-report")
-        return str(Path(out).parent) if rc == 0 else None
+        if rc == 0:
+            return str(Path(out).parent)
+        bundled = HERE.parent / "skills"
+        if (bundled / "egm-drift-report" / "SKILL.md").is_file():
+            return str(bundled)
+        return None
 
     def do_drift(self):
         r = self.r

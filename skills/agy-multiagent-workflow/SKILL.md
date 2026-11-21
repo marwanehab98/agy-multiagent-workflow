@@ -1,11 +1,11 @@
 ---
 name: agy-multiagent-workflow
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names agy-multiagent-workflow. Not for ordinary tasks, where standard skills apply.
+description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names agy-multiagent-workflow. For individual stages (brainstorming, writing-plans, execute-plan, egm-review, etc.), invoke those bundled skills directly.
 ---
 
 # Agy multi-agent workflow
 
-**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full and `references/coordinator.md`, then pick up from the run's state file. A summary of the rules is not the rules.
+**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full and `<SKILL_DIR>/references/coordinator.md`, then pick up from the run's state file. A summary of the rules is not the rules.
 
 ## Overview
 
@@ -23,9 +23,10 @@ A pair is written `<harness>:<model>@<effort>`. Only `scripts/harnesses.py` know
 The session that loads this skill **is the coordinator**:
 
 - **The user asks to continue or resume an earlier run:** go to "Continue a run" below.
+- **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`brainstorming`, `writing-plans`, `execute-plan`, `egm-brainstorm`, `egm-review`, `egm-review-loop`, `egm-drift-report`, `test-driven-development`, `verification-before-completion`, `finishing-a-development-branch`) directly.
 - **Otherwise:** run Setup below, then go straight to `references/coordinator.md` Step 1 in this same session.
 
-`SKILL_DIR` is this skill's base directory. `CFG` is `$HOME/.config/agy-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
+`SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/` (two directories above this `SKILL.md` in a plugin or repo checkout, or this skill's folder in a flat `install.sh --harness` install). `CFG` is `$HOME/.config/agy-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
 
 ### Setup
 
@@ -59,6 +60,7 @@ The session that loads this skill **is the coordinator**:
 2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
 3. Read `<SKILL_DIR>/references/coordinator.md` in full and run "Resume a run" with that state file in this same session.
 
+All required skills (`brainstorming`, `writing-plans`, `test-driven-development`, `verification-before-completion`, `finishing-a-development-branch`, `egm-brainstorm`, `egm-review`, `egm-review-loop`, `egm-drift-report`, `execute-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
 The architect worker reads `references/architect.md`; its spec tells it to. Confirmed headless `agy -p` behavior is in `references/agy-facts.md`.
 
 ## Roles

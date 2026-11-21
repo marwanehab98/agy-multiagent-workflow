@@ -37,6 +37,12 @@ REQUIRES = {
     "egm": ["egm-brainstorm", "egm-review", "egm-review-loop"],
     "base": ["test-driven-development", "verification-before-completion"],
 }
+EXECUTE_SESSION_REQUIRES = ["execute-plan", "verification-before-completion", "finishing-a-development-branch"]
+EXECUTE_REQUIRES = {
+    "architect": [],
+    "egm": [],
+    "base": ["test-driven-development", "verification-before-completion"],
+}
 
 
 def load_catalog(path):
@@ -81,7 +87,9 @@ def session_harness_name(catalog):
     return "antigravity"
 
 
-def check(catalog, jira, picks):
+def check(catalog, jira, picks, mode="full"):
+    session_req = EXECUTE_SESSION_REQUIRES if mode == "execute-plan" else SESSION_REQUIRES
+    role_reqs = EXECUTE_REQUIRES if mode == "execute-plan" else REQUIRES
     lines, bad = [], False
     sess_name = session_harness_name(catalog)
     sess_h = catalog["harnesses"].get(sess_name)
@@ -92,7 +100,7 @@ def check(catalog, jira, picks):
         lines.append(f"UNKNOWN session {sess_name} harness {sess_name} is broken: {sess_h['broken']}")
         bad = True
     else:
-        missing_sess = [s for s in SESSION_REQUIRES if s not in sess_h["skills"]]
+        missing_sess = [s for s in session_req if s not in sess_h["skills"]]
         for item in missing_sess:
             lines.append(f"MISSING session {sess_name} {item} in {sess_name}{where(sess_h, item)}")
         bad = bad or bool(missing_sess)
@@ -116,7 +124,7 @@ def check(catalog, jira, picks):
             bad = True
             continue
         h = catalog["harnesses"][pair.harness]
-        missing = [s for s in REQUIRES[role] if s not in h["skills"]]
+        missing = [s for s in role_reqs[role] if s not in h["skills"]]
         if role == "architect" and jira and not has_atlassian(h):
             missing.append("atlassian-mcp")
         for item in missing:
@@ -184,6 +192,7 @@ def main(argv=None):
     c = sub.add_parser("check")
     c.add_argument("--catalog", required=True)
     c.add_argument("--jira", required=True, choices=["yes", "no"])
+    c.add_argument("--mode", choices=["full", "execute-plan"], default="full")
     add_picks(c)
     r = sub.add_parser("remembered")
     r.add_argument("--roles", required=True)
@@ -210,7 +219,7 @@ def main(argv=None):
                 print(e)
                 return 1
         elif a.cmd == "check":
-            lines, bad = check(load_catalog(a.catalog), a.jira == "yes", {x: getattr(a, x) for x in ROLES})
+            lines, bad = check(load_catalog(a.catalog), a.jira == "yes", {x: getattr(a, x) for x in ROLES}, mode=a.mode)
             print("\n".join(lines))
             return 1 if bad else 0
         elif a.cmd == "remembered":

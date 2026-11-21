@@ -1,6 +1,6 @@
 # Coordinator: the whole run
 
-Part of agy-multiagent-workflow. The Rules in SKILL.md hold throughout.
+Part of agy-multiagent-workflow. The Rules in `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) hold throughout.
 
 ## How you work
 
@@ -54,7 +54,7 @@ Part of agy-multiagent-workflow. The Rules in SKILL.md hold throughout.
    - `JIRA_KEY`, or `none`. `EGM_REQUESTED`: `yes` only if the user asked for EGM or a spec review.
    - **Run notes:** the sentences of the request that say how to run the work rather than what to build (which reviews to run or skip, how to split it, what to ask about), copied exactly. Item 9 saves them.
    - `TOPIC`: `JIRA_KEY`, or a 2–4 word kebab-case slug of the requirements. `DATE`: today, `YYYY-MM-DD`.
-   - `SKILL_DIR`: this skill's folder. `ROLES_FILE` and `SETUP_CATALOG`: the picks file and setup catalog from Setup.
+   - `SKILL_DIR`: the bundle/plugin root containing `scripts/` and `references/`. `ROLES_FILE` and `SETUP_CATALOG`: the picks file and setup catalog from Setup.
    - `AGY`: `agy` (or `command -v agy`).
 
    Keep them for item 6, where the state file is created.
@@ -96,6 +96,8 @@ Handle `run_architect.py`'s `RESULT` file (`<saved>`) by branching on its first 
 `run_design.py` checks the docs worktree, test-launches the builder-check pair, runs each worker synchronously via `agy -p`, retries a failed one once, counts runs, and writes the `-done` job's input, including `failed: <file>` after a second failure. You never do any of that in this step, and never read a design worker's output.
 
 ## Step 3: Set up execution
+
+Entered on `RESULT: PLAN_APPROVED <run-values>` from Step 2 (or from `execute-plan` once `<DOCS_DIR>/run-values.txt` and `tasks/` are committed).
 
 1. **Close the design architect conversation:** `STATE unset ARCHITECT_CONVERSATION_ID ARCHITECT_KEEP_OPEN` and `STATE set PHASE=execution STEP="3 setup"`. From now on every architect job starts a fresh `agy -p` run.
 2. **Read `<run-values>`** and `STATE set` each of `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS` and `CLERICAL_PAIR`, plus `RUN_VALUES=<run-values path>`, `BASELINE_SKIP` (empty when the file has none) and `DRIFT_CHECK` (`no` when the file has none). The `VERIFY_<n>` and `GATE_<n>` commands stay in that file; `gate.py` reads them from there.
@@ -164,7 +166,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 
 ## Resume a run
 
-Use this when the user asks to continue a run or after a context compaction in the same session (first re-read `<SKILL_DIR>/SKILL.md` and this file in full).
+Use this when the user asks to continue a run or after a context compaction in the same session (first re-read `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md` — or `<SKILL_DIR>/SKILL.md` in a flat install — and this file in full).
 
 1. Find `<RUN_DIR>/state.json` (for a topic, in the worktree on `refs/heads/<TOPIC>-docs`) and run `STATE show`.
    - **No state file, or no `ROLE_ARCHITECT` in it:** say exactly "ERROR OLD_FORMAT_RUN remove <RUN_DIR> and start a new run" and stop.

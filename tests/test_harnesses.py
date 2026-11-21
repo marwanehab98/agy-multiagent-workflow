@@ -118,6 +118,30 @@ class DetectTests(unittest.TestCase):
             self.assertEqual(h["skills"]["egm-review"], str(override_cli))
             self.assertEqual(h["skill_dirs"], [str(home / ".gemini" / "config" / "skills")])
 
+    def test_live_detect_discovers_bundled_skills_as_fallback(self):
+        base = fixture_runner()
+        def live_like_runner(cmd):
+            return base(cmd)
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            override = home / ".gemini" / "config" / "skills" / "egm-review"
+            override.mkdir(parents=True)
+            (override / "SKILL.md").write_text("---\nname: egm-review\n---\n")
+            h = detect(live_like_runner, home, env={})["harnesses"]["antigravity"]
+            self.assertEqual(h["skills"]["egm-review"], str(override))
+            self.assertEqual(h["skills"]["brainstorming"], str(SKILL / "skills" / "brainstorming"))
+            self.assertEqual(h["skills"]["execute-plan"], str(SKILL / "skills" / "execute-plan"))
+            self.assertEqual(h["skills"]["egm-drift-report"], str(SKILL / "skills" / "egm-drift-report"))
+
+    def test_antigravity_cli_plugins_dir_scanned(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            cli_plug = home / ".gemini" / "antigravity-cli" / "plugins" / "egm" / "skills" / "custom-cli-plug"
+            cli_plug.mkdir(parents=True)
+            (cli_plug / "SKILL.md").write_text("---\nname: custom-cli-plug\n---\n")
+            h = detect(fixture_runner(), home, env={})["harnesses"]["antigravity"]
+            self.assertEqual(h["skills"]["custom-cli-plug"], str(cli_plug))
+
     def test_launch_args_styles(self):
         cat = detect_fixture()
         p = parse_pair("antigravity:gemini-4-hydrogen@xhigh")

@@ -10,8 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|flash|hydrogen|argon|gemini|claude)\b")
 EXEMPT = re.compile(r"\bCLAUDE\.md\b")  # the project instructions file, exactly as spelled; not a model/harness name
-CHECKED = ["SKILL.md", "references/coordinator.md", "references/architect.md", "references/templates", "scripts"]
+CHECKED = ["skills", "agents", "resources", "references/coordinator.md", "references/architect.md", "references/templates", "scripts"]
 ALLOWED = {"scripts/harnesses.py"}
+TRIGGER_SKILLS = {"skills/agy-multiagent-workflow/SKILL.md", "skills/execute-plan/SKILL.md"}
 
 
 def files():
@@ -48,7 +49,7 @@ class NoHardcodedModels(unittest.TestCase):
     def test_no_model_names(self):
         hits = []
         for rel, p in files():
-            exempt = description_line(p) if rel == "SKILL.md" else None
+            exempt = description_line(p) if rel in TRIGGER_SKILLS else None
             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
                 if n != exempt and NAMES.search(EXEMPT.sub("", line)):
                     hits.append(f"{rel}:{n}: {line.strip()[:120]}")
@@ -56,10 +57,12 @@ class NoHardcodedModels(unittest.TestCase):
             self.fail("model names found:\n" + "\n".join(hits))
 
     def test_description_keeps_harness_trigger_words(self):
-        n = description_line(ROOT / "SKILL.md")
-        line = (ROOT / "SKILL.md").read_text(encoding="utf-8").splitlines()[n - 1]
-        for word in ("Antigravity", "Gemini", "agy"):
-            self.assertIn(word, line)
+        for rel in sorted(TRIGGER_SKILLS):
+            p = ROOT / rel
+            n = description_line(p)
+            line = p.read_text(encoding="utf-8").splitlines()[n - 1]
+            for word in ("Antigravity", "Gemini", "agy"):
+                self.assertIn(word, line, rel)
 
     def test_checked_paths_exist(self):
         for entry in CHECKED + sorted(ALLOWED):

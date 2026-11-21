@@ -30,7 +30,14 @@ class InstallTests(unittest.TestCase):
     def test_installs_runtime_files_and_version_only(self):
         rc, out = self.install()
         self.assertEqual(rc, 0, out)
-        self.assertTrue((self.target / "SKILL.md").is_file())
+        self.assertTrue((self.target / "plugin.json").is_file())
+        self.assertTrue((self.target / "THIRD_PARTY_NOTICES.md").is_file())
+        self.assertTrue((self.target / "skills" / "agy-multiagent-workflow" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "execute-plan" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "brainstorming" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "egm-review" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "agents" / "zoom_out.md").is_file())
+        self.assertTrue((self.target / "resources" / "document_standards" / "feature-spec-standard.md").is_file())
         self.assertTrue((self.target / "scripts" / "run_task.py").is_file())
         self.assertTrue((self.target / "references" / "coordinator.md").is_file())
         self.assertFalse((self.target / "tests").exists())
@@ -68,15 +75,31 @@ class InstallTests(unittest.TestCase):
     def test_harness_option_installs_into_antigravity_skills_folder(self):
         rc, out = self.harness_install("--harness", "antigravity")
         self.assertEqual(rc, 0, out)
-        dest = self.d / "home" / ".gemini" / "config" / "skills" / "agy-multiagent-workflow"
+        skills_root = self.d / "home" / ".gemini" / "config" / "skills"
+        dest = skills_root / "agy-multiagent-workflow"
         self.assertTrue((dest / "SKILL.md").is_file())
+        self.assertTrue((dest / "scripts" / "run_task.py").is_file())
+        self.assertTrue((dest / "references" / "coordinator.md").is_file())
+        self.assertTrue((dest / "agents" / "zoom_out.md").is_file())
+        for name in (
+            "execute-plan", "brainstorming", "writing-plans", "test-driven-development",
+            "verification-before-completion", "finishing-a-development-branch",
+            "egm-brainstorm", "egm-review", "egm-review-loop", "egm-drift-report",
+        ):
+            self.assertTrue((skills_root / name / "SKILL.md").is_file(), name)
 
     def test_no_option_updates_existing_antigravity_install(self):
         self.harness_install("--harness", "antigravity")
+        skills_root = self.d / "home" / ".gemini" / "config" / "skills"
+        (skills_root / "brainstorming" / "marker").write_text("old\n")
         rc, out = self.harness_install()
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.count("INSTALLED"), 1)
         self.assertIn(".gemini/config/skills/agy-multiagent-workflow", out)
+        kept = list((self.backups / "antigravity").iterdir())
+        self.assertEqual(len(kept), 1)
+        self.assertTrue((kept[0] / "brainstorming" / "marker").is_file())
+        self.assertFalse((skills_root / "brainstorming" / "marker").exists())
 
     def test_no_option_and_no_existing_install_asks_for_a_harness(self):
         rc, out = self.harness_install()

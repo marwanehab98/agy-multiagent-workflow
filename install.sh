@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# Release a committed version of this skill into a skills folder (the buffer between work in progress and
-# what runs load). Never installs uncommitted changes.
+# Release a committed version of this self-contained multi-skill plugin (either into a plugin
+# directory with --target, or as individual skills into a harness's skills folder with --harness).
+# Never installs uncommitted changes.
 #
 # Usage: bash install.sh [--ref REF] [--harness NAME]... [--target DIR] [--backups DIR] [--skip-tests]
 #   --ref      the commit, tag or branch to release (default HEAD); an older ref is a rollback
-#   --harness  install into that harness's skills folder (repeatable; names from
-#              `python3 scripts/harnesses.py install-dirs`). Without --harness or --target, every harness that
-#              already has the skill is updated, so a release never adds it to a new harness by itself.
-#   --target   install into this exact folder instead
+#   --harness  install every bundled skill into that harness's skills folder (repeatable; names from
+#              `python3 scripts/harnesses.py install-dirs`). Without --harness or --target, every harness
+#              that already has agy-multiagent-workflow installed is updated.
+#   --target   install the full plugin bundle into this exact folder instead
 #   --backups  where replaced installs are kept, per harness (default ~/.local/share/agy-multiagent-workflow/backups);
 #              the newest 5 of each are kept
 #   --skip-tests  install without running that ref's test suite first
 #   --home, --harness-fixtures  for tests: the home folder and captured CLI output harnesses.py uses
 #
-# What gets installed: SKILL.md, references/, scripts/, docs/, and a VERSION file. Not tests/ or this script.
-# Exit 0: INSTALLED <sha> to <target>.  Exit 1: tests failed or the ref is unknown; nothing changed.
+# What gets installed:
+#   --target: plugin.json, THIRD_PARTY_NOTICES.md, assets/, skills/, scripts/, references/, agents/, resources/, docs/, VERSION.
+#   --harness / update: each skill under skills/<name>/ into <skills_dir>/<name>/, plus shared runtime
+#             (scripts/, references/, agents/, resources/, assets/, docs/, plugin.json, THIRD_PARTY_NOTICES.md, VERSION)
+#             inside <skills_dir>/agy-multiagent-workflow/.
+# Exit 0: INSTALLED <sha> ... .  Exit 1: tests failed or the ref is unknown; nothing changed.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")" && pwd)
@@ -39,6 +44,7 @@ while [ $# -gt 0 ]; do
 done
 
 # Where to install: (label, folder) pairs.
+# For --target, folder is the plugin destination; for harnesses, folder is the harness skills root.
 labels=(); targets=()
 if [ -n "$target" ]; then
   labels+=(custom); targets+=("$target")
@@ -46,7 +52,7 @@ else
   table=$(python3 -I "$repo/scripts/harnesses.py" install-dirs "${dirs_args[@]}")
   if [ ${#harnesses[@]} -eq 0 ]; then
     while IFS=$'\t' read -r h dir found; do
-      [ -e "$dir/$name" ] && { labels+=("$h"); targets+=("$dir/$name"); }
+      [ -e "$dir/$name" ] && { labels+=("$h"); targets+=("$dir"); }
     done <<< "$table"
     if [ ${#targets[@]} -eq 0 ]; then
       echo "ERROR $name isn't installed in any harness yet; pass --harness NAME (one of: $(cut -f1 <<< "$table" | paste -sd' '))"
@@ -57,7 +63,7 @@ else
       row=$(awk -F'\t' -v h="$h" '$1==h' <<< "$table")
       [ -n "$row" ] || { echo "ERROR unknown harness $h (one of: $(cut -f1 <<< "$table" | paste -sd' '))"; exit 1; }
       [ "$(cut -f3 <<< "$row")" = found ] || { echo "ERROR harness $h isn't installed on this machine"; exit 1; }
-      labels+=("$h"); targets+=("$(cut -f2 <<< "$row")/$name")
+      labels+=("$h"); targets+=("$(cut -f2 <<< "$row")")
     done
   fi
 fi
@@ -81,7 +87,7 @@ fi
 
 release="$work/release"
 mkdir -p "$release"
-for part in SKILL.md references scripts docs; do
+for part in plugin.json THIRD_PARTY_NOTICES.md assets skills references scripts agents resources docs; do
   [ -e "$work/$part" ] && cp -a "$work/$part" "$release/"
 done
 find "$release" -name __pycache__ -prune -exec rm -rf {} +
@@ -92,17 +98,50 @@ find "$release" -name __pycache__ -prune -exec rm -rf {} +
 } > "$release/VERSION"
 
 for i in "${!targets[@]}"; do
-  dest=${targets[$i]}; keep="$backups/${labels[$i]}"
-  mkdir -p "$(dirname "$dest")"
+  label=${labels[$i]}; dest=${targets[$i]}; keep="$backups/$label"
   backup=""
-  if [ -e "$dest" ]; then
-    mkdir -p "$keep"
-    backup="$keep/$(date +%Y%m%d-%H%M%S)-$$"
-    mv "$dest" "$backup"
+  if [ "$label" = "custom" ]; then
+    mkdir -p "$(dirname "$dest")"
+    if [ -e "$dest" ]; then
+      mkdir -p "$keep"
+      backup="$keep/$(date +%Y%m%d-%H%M%S)-$$"
+      mv "$dest" "$backup"
+    fi
+    cp -a "$release" "$dest"
+    if [ -d "$keep" ]; then
+      ls -1dt "$keep"/* | tail -n +6 | while read -r old; do rm -rf "$old"; done
+    fi
+    echo "INSTALLED ${sha:0:12} to $dest ($label)${backup:+, previous kept at $backup}"
+  else
+    mkdir -p "$dest"
+    snap="$keep/$(date +%Y%m%d-%H%M%S)-$$"
+    count=0
+    for sdir in "$release"/skills/*; do
+      [ -d "$sdir" ] || continue
+      sname=$(basename "$sdir")
+      count=$((count + 1))
+      if [ -e "$dest/$sname" ]; then
+        mkdir -p "$snap"
+        mv "$dest/$sname" "$snap/$sname"
+        backup="$snap"
+      fi
+    done
+    # Install main orchestrator + shared runtime into $dest/$name
+    mkdir -p "$dest/$name"
+    cp -a "$release/skills/$name/." "$dest/$name/"
+    for part in plugin.json THIRD_PARTY_NOTICES.md assets references scripts agents resources docs VERSION; do
+      [ -e "$release/$part" ] && cp -a "$release/$part" "$dest/$name/"
+    done
+    # Install each standalone skill directly into $dest/<skill_name>
+    for sdir in "$release"/skills/*; do
+      [ -d "$sdir" ] || continue
+      sname=$(basename "$sdir")
+      [ "$sname" = "$name" ] && continue
+      cp -a "$sdir" "$dest/$sname"
+    done
+    if [ -d "$keep" ]; then
+      ls -1dt "$keep"/* | tail -n +6 | while read -r old; do rm -rf "$old"; done
+    fi
+    echo "INSTALLED ${sha:0:12} to $dest/$name ($count skills in $dest) ($label)${backup:+, previous kept at $backup}"
   fi
-  cp -a "$release" "$dest"
-  if [ -d "$keep" ]; then
-    ls -1dt "$keep"/* | tail -n +6 | while read -r old; do rm -rf "$old"; done
-  fi
-  echo "INSTALLED ${sha:0:12} to $dest (${labels[$i]})${backup:+, previous kept at $backup}"
 done

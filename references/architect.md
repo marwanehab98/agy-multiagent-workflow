@@ -151,8 +151,8 @@ You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and
 2. **Explore** `DOCS_WORKTREE`: structure, the files the requirements touch, related tests, and recent commits on those areas. If `START_HOW` is `local-ahead` or `fetch-failed`, tell the user in a `NOTIFY` that the run starts from their local `DEFAULT_BRANCH`, which may not match the remote.
 3. **Find the conventions** (project skills, `CLAUDE.md`, `AGENTS.md`, contributing docs, lint, format and type-check configs, PR template, commit and branch conventions). Sort them as in "How you work".
 4. **Check the scope.** If the work needs changes in another git repo or a submodule, ask the user in a relay, recommending one run per repo.
-5. **Clarify** with `superpowers:brainstorming`, talking to the user through relays. Ask only about real gaps, contradictions, or risky edge cases the requirements don't settle.
-   - Its defaults give way to this workflow: the design goes to `DOCS_DIR/DATE-TOPIC-design.md`, the builder check is a `NEED`, and you don't move on to writing-plans.
+5. **Clarify** with `brainstorming`, talking to the user through relays. Ask only about real gaps, contradictions, or risky edge cases the requirements don't settle.
+   - Its defaults give way to this workflow: the design goes to `DOCS_DIR/DATE-TOPIC-design.md`, the builder check is a `NEED`, and you don't move on to `writing-plans`.
 6. **Write the concepts brief** to `DOCS_DIR/DATE-TOPIC-concepts.md` once the problem is clear, and before you propose approaches. It is 3–6 sentences, written as one anchored hypothesis: what the feature does, for whom, its hard constraints, and the parts of the current code it changes, by path. Commit it.
    - **Full design:** settle `RESULT: NEED lens <concepts file>`. The coordinator runs EGM's Goldfish lenses on the brief, and the findings come back as job `lens-done`.
    - **Small change** (brainstorming's short design, which skips the builder check), unless `RUN_NOTES` asks for every review pass: skip the lens pass and go on to item 7 in this job.
@@ -212,7 +212,7 @@ Ask for sign-off once per design, in one relay that also settles EGM:
 
 The input is the findings file.
 
-1. **Triage** instead of running `/egm-resolve`:
+1. **Triage** directly:
    - apply clear fixes to the design;
    - take findings that need a product decision to the user in a relay;
    - give each dismissed finding a one-line reason in the findings file.
@@ -225,9 +225,9 @@ EGM has already run twice. Finish triage with the findings you have, then go on 
 
 ## Plan (the end of whichever job finishes the design)
 
-1. **Write the plan** at `DOCS_DIR/DATE-TOPIC-plan.md` with `superpowers:writing-plans`. Where its defaults differ, this workflow wins:
+1. **Write the plan** at `DOCS_DIR/DATE-TOPIC-plan.md` with `writing-plans`. Where its defaults differ, this workflow wins:
    - use this path, not the skill's default;
-   - leave out its "REQUIRED SUB-SKILL" header and its execution-handoff choice, since this workflow already decides how tasks run;
+   - leave out its execution-handoff choice, since this workflow already decides how tasks run;
    - put its Global Constraints and Review Focus into each task file they apply to, because implementers and reviewers see only task files;
    - a "step" below is one red-green cycle (failing test, then minimal code), not one of its single actions.
    - Break the design into TDD steps of 2–5 minutes each.
@@ -360,6 +360,15 @@ Commit, then settle `RESULT: NOTED`. An uncommitted record can be wiped when a r
 
 An earlier design-phase architect was lost, and you replace it. Read every file in `DOCS_DIR` and the run log in `RUN_DIR`. Settle `RESULT: RESUMED`, then handle the jobs that follow as normal.
 
+## JOB: prepare-plan
+
+Started by `execute-plan` when the user already has a markdown plan without per-task `.meta` files or `run-values.txt`. Input names the plan file path (and optionally a design/spec file path).
+1. **Read** the input plan (and design/spec file, if provided) and explore `DOCS_WORKTREE` plus project conventions (`CLAUDE.md`, `AGENTS.md`, test/build config).
+2. **Write the design & decisions baseline:** copy or synthesize `DOCS_DIR/DATE-TOPIC-design.md` with explicit numbered acceptance criteria (`AC-1`, `AC-2`, ...) matching the plan's requirements, and create `DOCS_DIR/DATE-TOPIC-decisions.md`.
+3. **Break into coordinator task files and `run-values.txt`** per "Files the coordinator reads" and "Model choices" (`tasks/<id>.{md,meta,-summary.md,-decisions.md}`, `DOCS_DIR/DATE-TOPIC-plan.md`, `DOCS_DIR/run-values.txt` with `EGM_OUTCOME=declined`).
+4. **If `VERIFY_*`, `PR_TARGET`, or `DRIFT_CHECK` is ambiguous** (or to confirm the task breakdown and drift check), ask the user in a single relay ending with the drift-check `CHOICE:` from "Plan, continued" item 4 (`Build with the drift check` / `Build, skip the drift check` / `I want changes`). Set `DRIFT_CHECK` in `run-values.txt`.
+5. **Commit** all files in `DOCS_DIR` and settle `RESULT: PLAN_APPROVED <run-values path>`.
+
 ## JOB: commit-docs
 
 This job comes in the design phase. The coordinator won't start a read-only worker on a docs worktree with uncommitted files, because afterwards it discards anything that changed. The input is `check-tree.sh` output listing those files.
@@ -370,7 +379,7 @@ Never touch `RUN_DIR`. Commit, then settle `RESULT: COMMITTED`.
 
 ## Context for a fresh job
 
-This applies when your first job is anything other than `start` or `resume`: you were started for that one job, after plan approval. A job that arrives as a follow-up to an open design architect skips this section. Before your job's section, read:
+This applies when your first job is anything other than `start`, `resume`, or `prepare-plan`: you were started for that one job, after plan approval. A job that arrives as a follow-up to an open design architect skips this section. Before your job's section, read:
 - `DOCS_DIR/run-values.txt`;
 - the design (`DESIGN_FILE` in run-values) and `DECISIONS_LOG`;
 - the plan file `DOCS_DIR/DATE-TOPIC-plan.md`;

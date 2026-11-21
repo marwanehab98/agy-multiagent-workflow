@@ -44,6 +44,7 @@
    ],
    "skills": {
     "agy-multiagent-workflow": "/skills/agy-multiagent-workflow",
+    "execute-plan": "/skills/execute-plan",
     "verification-before-completion": "/skills/verification-before-completion",
     "finishing-a-development-branch": "/skills/finishing-a-development-branch",
     "brainstorming": "/skills/brainstorming",

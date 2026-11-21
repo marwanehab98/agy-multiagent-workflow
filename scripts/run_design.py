@@ -42,7 +42,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build, first_words, git, next_free,  # noqa: E402
+from common import (CONSULT, ESCALATE, STOP, ERROR, HERE, AgyRunner, Done, Run, build, first_words, git, next_free,  # noqa: E402
                     save_body, tool)
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
@@ -145,9 +145,12 @@ class Design:
             harness = parse_pair(r.need("ROLE_EGM")).harness
             rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
                            "--skill", "egm-review")
-            if rc != 0:
+            if rc == 0:
+                r.set(EGM_SKILLS=str(Path(out).parent))
+            elif (HERE.parent / "skills" / "egm-review" / "SKILL.md").is_file():
+                r.set(EGM_SKILLS=str(HERE.parent / "skills"))
+            else:
                 raise Done(ERROR, f"ERROR EGM_SKILLS {out}")
-            r.set(EGM_SKILLS=str(Path(out).parent))
         return r.need("EGM_SKILLS")
 
     def dispatch(self):

@@ -176,6 +176,19 @@ class RolesTests(unittest.TestCase):
                          ("antigravity:big@max", "antigravity:g@high", "antigravity:g@high"))
         self.assertEqual((s["BASE_TOP"], s["CATALOG"], s["KEEP"]), ("xhigh", str(self.catalog), "1"))
 
+    def test_execute_plan_mode_requires_execution_skills_only(self):
+        def strip_design(c):
+            for s in ("agy-multiagent-workflow", "brainstorming", "writing-plans", "egm-brainstorm", "egm-review", "egm-review-loop"):
+                c["harnesses"]["antigravity"]["skills"].pop(s, None)
+        self.edit_catalog(strip_design)
+        self.assertEqual(self.roles("check")[0], 1)
+        rc, out = self.roles("check", "--mode", "execute-plan")
+        self.assertEqual(rc, 0, out)
+        self.edit_catalog(lambda c: (strip_design(c), c["harnesses"]["antigravity"]["skills"].pop("execute-plan")))
+        rc, out = self.roles("check", "--mode", "execute-plan")
+        self.assertEqual(rc, 1)
+        self.assertIn("MISSING session antigravity execute-plan", out)
+
 
 if __name__ == "__main__":
     unittest.main()

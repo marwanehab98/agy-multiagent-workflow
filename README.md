@@ -1,19 +1,52 @@
 # agy-multiagent-workflow
 
-An Antigravity skill that takes a JIRA story or written requirements to a reviewed PR in the invoking session as coordinator, dispatching headless `agy -p` workers through deterministic Python and shell scripts. Start with `SKILL.md`.
+A self-contained, multi-skill Antigravity plugin for spec-driven development and multi-agent execution via headless `agy -p` workers. Zero external Superpowers or EGM plugin dependencies are required.
 
-## Release
+Each workflow stage is exposed as its own independently invocable skill, alongside the full end-to-end `agy-multiagent-workflow` orchestrator and `execute-plan`.
 
-Changes here don't reach running sessions until you install them. `install.sh` tests the commit in a clean copy first, and never installs uncommitted work.
+## Bundled Skills
+
+| Skill | When to use | Execution style |
+| --- | --- | --- |
+| `agy-multiagent-workflow` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Coordinator + headless `agy -p` workers |
+| `execute-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through Steps 3–8 | Coordinator + headless `agy -p` workers |
+| `brainstorming` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
+| `writing-plans` | Break a spec or design doc into TDD tasks and verification steps | Interactive in-session |
+| `egm-brainstorm` | Ideation + 7-lens Goldfish stress-testing (`concepts_brief.md`) | Fresh-context subagent lenses |
+| `egm-review` | 5-stage design document review (zoom-out, comprehension, critique, readiness) | Fresh-context subagent reviewers |
+| `egm-review-loop` | Antagonistic multi-reviewer audit loop on specs, plans, or docs | Fresh-context subagent reviewers |
+| `egm-drift-report` | Compare finished source code against design docs | In-session / drift check |
+| `test-driven-development` | Strict RED-GREEN-REFACTOR test-first workflow | In-session or worker |
+| `verification-before-completion` | Require fresh command output before claiming success | In-session or worker |
+| `finishing-a-development-branch` | Verify tests and complete via PR, fast-forward local merge, keep, or discard | In-session or coordinator Step 8 |
+
+## Installation
+
+### Option 1: Antigravity Plugin (recommended)
 
 ```sh
-bash install.sh --harness antigravity    # install into Antigravity's skills folder
-bash install.sh                          # update every harness that already has the skill
-bash install.sh --ref <commit>           # install an older version (rollback)
-python3 scripts/harnesses.py install-dirs   # detected harnesses and their skills folders
+agy plugin install https://github.com/marwanehab98/agy-multiagent-workflow
 ```
 
-Each install has a `VERSION` file naming its commit. Replaced versions are kept in `~/.local/share/agy-multiagent-workflow/backups/<harness>` (newest 5 each).
+Validate locally before installing:
+
+```sh
+agy plugin validate --strict .
+```
+
+### Option 2: Direct Skills-Folder Release (`install.sh`)
+
+`install.sh` tests the target git ref in a clean copy first and never installs uncommitted work.
+
+```sh
+bash install.sh --harness antigravity    # install all 11 skills into ~/.gemini/config/skills
+bash install.sh                          # update every harness that already has agy-multiagent-workflow
+bash install.sh --target <dir>           # install the full plugin bundle into a custom directory
+bash install.sh --ref <commit>           # install an older version (rollback)
+python3 scripts/harnesses.py install-dirs  # detected harnesses and their skills folders
+```
+
+Each install records a `VERSION` file naming its commit. Replaced versions are kept in `~/.local/share/agy-multiagent-workflow/backups/<harness>` (newest 5 each).
 
 ## Tests
 
