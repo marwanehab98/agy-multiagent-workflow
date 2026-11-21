@@ -136,6 +136,21 @@ class Review(Finish):
         self.assertEqual(self.calls()[2]["conversation"], "")
         self.assertIn("Approved.", self.calls()[2]["prompt"])
 
+    def test_consult_silent_new_conversation_cleans_and_falls_back(self):
+        stray = self.impl / "stray_finish.txt"
+        self.behave(
+            "ask",
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n", "edit": str(stray)},
+            "pass",
+        )
+        self.expect(22, "CONSULT")
+        ans = self.tmp / "ans.md"
+        ans.write_text("Approved.\n")
+        self.expect(0, "VERIFIED", "--answer", str(ans))
+        self.assertFalse(stray.exists())
+        self.assertEqual(self.calls()[2]["conversation"], "")
+        self.assertIn("Approved.", self.calls()[2]["prompt"])
+
     def test_starting_state_clears_impl_conversations_and_checks_tree(self):
         self.state.write_text(json.dumps({**self.st(), "IMPL_CONVERSATION_ID_01": "conv_9"}))
         self.behave("pass")

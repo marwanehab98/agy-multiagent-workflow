@@ -302,6 +302,23 @@ class TreeAndWorkers(Base):
         self.assertEqual(mid["LOOP_01"], "impl")
         self.assertNotIn("TASK_ASK_FILE_01", mid)
 
+    def test_reviewer_consult_silent_new_conversation_cleans_and_falls_back(self):
+        stray = self.impl / "stray_reviewer.txt"
+        self.behave(
+            "commit",
+            "ask",
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n", "edit": str(stray)},
+            "pass",
+            "pass",
+        )
+        self.expect(22, "CONSULT")
+        ans = self.tmp / "ans.md"
+        ans.write_text("Expected behavior.\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+        self.assertFalse(stray.exists())
+        self.assertEqual(self.calls()[3]["conversation"], "")
+        self.assertIn("Expected behavior.", self.calls()[3]["prompt"])
+
 
 class Prompts(Base):
     def test_usage_limit_prompts_then_retry_restarts(self):

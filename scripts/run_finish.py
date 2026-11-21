@@ -255,6 +255,7 @@ class Finish:
         self.set_phase("drifting" if kind == "drift" else "reviewing", WAITING_ON=None)
         result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
+            self._discard_or_error(r.need("LAST_MERGED") if kind == "drift" else r.need("FIN_HEAD"))
             spec_text = Path(spec).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)

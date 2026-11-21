@@ -148,6 +148,21 @@ class RunArchitectTests(Base):
         self.assertTrue(last.startswith("FAILED "), last)
         self.assertIn("requires a conversation_id", Path(last.split()[1]).read_text())
 
+    def test_send_silent_new_conversation_returns_lost_13(self):
+        self.behave(
+            {"do": "response", "text": "RESULT: RESUMED\n", "conv_id": "arch_orig"},
+            {"do": "response", "text": "RESULT: OK\n", "conv_id": "arch_fresh"},
+        )
+        rc, _ = self.arch("start", "--state", str(self.state), "--spec", str(self.spec),
+                          "--pair", "antigravity:big@high", "--keep-open")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.st("ARCHITECT_CONVERSATION_ID"), "arch_orig")
+        rc, last = self.arch("send", "--state", str(self.state), "--spec", str(self.spec),
+                             "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 13)
+        self.assertTrue(last.startswith("LOST "), last)
+        self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
+
 
 if __name__ == "__main__":
     unittest.main()

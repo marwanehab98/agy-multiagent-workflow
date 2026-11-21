@@ -323,7 +323,8 @@ class AgyRunner:
                 return ("resume_failed", combined[:800], "", "")
             return ("stopped", f"{self.exe} exited {proc.returncode}: {combined[:800]}", "", "")
 
-        conv_id = _as_text(data.get("conversation_id")).strip() or conversation_id or ""
+        returned_conv_id = _as_text(data.get("conversation_id")).strip()
+        conv_id = returned_conv_id or conversation_id or ""
         status = _as_text(data.get("status")).strip()
         resp = _as_text(data.get("response"))
         err = _as_text(data.get("error"))
@@ -335,6 +336,14 @@ class AgyRunner:
             if conversation_id and RESUME_ERR_RE.search(detail):
                 return ("resume_failed", detail, "", "")
             return ("stopped", detail, "", conv_id)
+
+        if conversation_id and returned_conv_id and returned_conv_id != conversation_id:
+            return (
+                "resume_failed",
+                f"conversation {conversation_id} was not resumed (started {returned_conv_id})",
+                "",
+                "",
+            )
 
         first = _strip_marker_formatting(first_nonempty_line(resp))
         if first.startswith("ASK:"):

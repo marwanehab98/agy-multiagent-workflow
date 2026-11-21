@@ -218,6 +218,7 @@ class Design:
         self.set_phase("dispatching", WAITING_ON=None)
         result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, self.docs_wt, conv)
         if result is None:
+            self._restore_tree(kind, allow_egm_out=False)
             spec_text = Path(r.need("DESIGN_SPEC")).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
                                      pair=pair, worktree=self.docs_wt)

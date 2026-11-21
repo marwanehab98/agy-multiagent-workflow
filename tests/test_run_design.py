@@ -221,6 +221,22 @@ class Egm(Design):
         self.assertFalse((self.docs_wt / "stray_design.txt").exists())
         self.assertIn("builder-check-done", last)
 
+    def test_consult_silent_new_conversation_cleans_and_falls_back(self):
+        stray = self.docs_wt / "stray_unresumed.txt"
+        self.behave(
+            "ask",
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n", "edit": str(stray)},
+            "write-output",
+        )
+        self.egm_need(expect=(22, "CONSULT"))
+        ans = self.tmp / "ans.md"
+        ans.write_text("Clarified.\n")
+        last, _ = self.expect(20, "ARCHITECT_JOB", "--answer", str(ans))
+        self.assertEqual(last, f"ARCHITECT_JOB egm-done {self.run_dir / 'egm-1.md'}")
+        self.assertFalse(stray.exists())
+        self.assertEqual(self.calls()[2]["conversation"], "")
+        self.assertIn("Clarified.", self.calls()[2]["prompt"])
+
 
 class Lens(Design):
     def lens_need(self, expect=(20, "ARCHITECT_JOB")):

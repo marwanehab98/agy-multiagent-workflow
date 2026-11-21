@@ -323,6 +323,8 @@ class Loop:
             self.set_phase(t, in_flight, WAITING_ON=None)
         result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
+            if kind.startswith("review"):
+                self._discard_or_error(r.need(f"WORKER_HEAD_{t}"))
             spec_text = Path(spec).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)
