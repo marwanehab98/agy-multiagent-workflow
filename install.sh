@@ -52,7 +52,9 @@ else
   table=$(python3 -I "$repo/scripts/harnesses.py" install-dirs "${dirs_args[@]}")
   if [ ${#harnesses[@]} -eq 0 ]; then
     while IFS=$'\t' read -r h dir found; do
-      [ -e "$dir/$name" ] && { labels+=("$h"); targets+=("$dir"); }
+      if [ -e "$dir/mission" ] || [ -e "$dir/$name" ]; then
+        labels+=("$h"); targets+=("$dir")
+      fi
     done <<< "$table"
     if [ ${#targets[@]} -eq 0 ]; then
       echo "ERROR $name isn't installed in any harness yet; pass --harness NAME (one of: $(cut -f1 <<< "$table" | paste -sd' '))"
