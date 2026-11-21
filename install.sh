@@ -115,6 +115,12 @@ for i in "${!targets[@]}"; do
   else
     mkdir -p "$dest"
     snap="$keep/$(date +%Y%m%d-%H%M%S)-$$"
+    prev_managed=()
+    if [ -f "$dest/$name/.managed-skills" ]; then
+      while IFS= read -r mname; do
+        [ -n "$mname" ] && prev_managed+=("$mname")
+      done < "$dest/$name/.managed-skills"
+    fi
     count=0
     has_bundled_skills=0
     for sdir in "$release"/skills/*; do
@@ -128,6 +134,16 @@ for i in "${!targets[@]}"; do
         backup="$snap"
       fi
     done
+    if [ ${#prev_managed[@]} -gt 0 ]; then
+      for sname in "${prev_managed[@]}"; do
+        [ "$sname" = "$name" ] && continue
+        if [ -e "$dest/$sname" ]; then
+          mkdir -p "$snap"
+          mv "$dest/$sname" "$snap/$sname"
+          backup="$snap"
+        fi
+      done
+    fi
     if [ "$has_bundled_skills" -eq 0 ] && [ -e "$dest/$name" ]; then
       mkdir -p "$snap"
       mv "$dest/$name" "$snap/$name"
@@ -145,12 +161,17 @@ for i in "${!targets[@]}"; do
       [ -e "$release/$part" ] && cp -a "$release/$part" "$dest/$name/"
     done
     # Install each standalone skill directly into $dest/<skill_name>
+    managed=()
     for sdir in "$release"/skills/*; do
       [ -d "$sdir" ] || continue
       sname=$(basename "$sdir")
       [ "$sname" = "$name" ] && continue
       cp -a "$sdir" "$dest/$sname"
+      managed+=("$sname")
     done
+    if [ ${#managed[@]} -gt 0 ]; then
+      printf '%s\n' "${managed[@]}" > "$dest/$name/.managed-skills"
+    fi
     if [ -d "$keep" ]; then
       ls -1dt "$keep"/* | tail -n +6 | while read -r old; do rm -rf "$old"; done
     fi

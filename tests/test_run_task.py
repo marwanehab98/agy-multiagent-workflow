@@ -337,6 +337,66 @@ class TreeAndWorkers(Base):
         self.assertEqual(self.calls()[3]["conversation"], "")
         self.assertIn("Expected behavior.", self.calls()[3]["prompt"])
 
+    def test_impl_consult_silent_new_conversation_cleans_and_falls_back(self):
+        stray = self.impl / "stray_impl.txt"
+        self.behave(
+            {"do": "ask", "conv_id": "conv_impl_1"},
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n", "edit": str(stray)},
+            "commit",
+            "pass",
+            "pass",
+        )
+        self.expect(22, "CONSULT")
+        ans = self.tmp / "ans.md"
+        ans.write_text("Return 42.\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+        self.assertFalse(stray.exists())
+        calls = self.calls()
+        self.assertEqual(calls[1]["conversation"], "conv_impl_1")
+        self.assertEqual(calls[2]["conversation"], "")
+        self.assertIn("Return 42.", calls[2]["prompt"])
+        changed = sh("git", "-C", str(self.impl), "show", "--stat", "--format=", self.st("LAST_MERGED"))
+        self.assertNotIn("stray_impl.txt", changed)
+
+    def test_fix_consult_silent_new_conversation_cleans_and_falls_back(self):
+        stray = self.impl / "stray_fix_ask.txt"
+        self.behave(
+            {"do": "commit", "conv_id": "conv_impl_1"},
+            "fix",
+            {"do": "ask", "conv_id": "conv_impl_1"},
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n", "edit": str(stray)},
+            "commit",
+            "pass",
+            "pass",
+        )
+        self.expect(22, "CONSULT")
+        ans = self.tmp / "ans.md"
+        ans.write_text("Fix module X.\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+        self.assertFalse(stray.exists())
+        calls = self.calls()
+        self.assertEqual(calls[3]["conversation"], "conv_impl_1")
+        self.assertEqual(calls[4]["conversation"], "")
+        self.assertIn("Fix module X.", calls[4]["prompt"])
+        changed = sh("git", "-C", str(self.impl), "diff", "--stat", f"{self.base}..{self.st('LAST_MERGED')}")
+        self.assertIn("work_1.txt", changed)
+        self.assertIn("work_5.txt", changed)
+        self.assertNotIn("stray_fix_ask.txt", changed)
+
+    def test_commit_resume_failure_clears_stale_conversation_id_before_fallback(self):
+        self.behave(
+            {"do": "dirty", "conv_id": "conv_impl_1"},
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n"},
+            {"do": "response", "raw_stderr": "usageLimitReached: 5-hour limit", "rc": 1},
+            "commit-all",
+            "pass",
+            "pass",
+        )
+        self.expect(30, "PROMPT")
+        self.assertIsNone(self.st().get("IMPL_CONVERSATION_ID_01"))
+        self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+        self.assertEqual(self.calls()[3]["conversation"], "")
+
 
 class Prompts(Base):
     def test_usage_limit_prompts_then_retry_restarts(self):

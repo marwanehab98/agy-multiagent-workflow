@@ -80,20 +80,32 @@ class InstallTests(unittest.TestCase):
         self.assertIn(legacy, (self.target / "VERSION").read_text())
         self.assertTrue((self.target / "SKILL.md").is_file())
 
-        # --harness antigravity rollback to legacy single-skill layout preserves backup and installs SKILL.md
+        # --harness antigravity rollback to legacy single-skill layout preserves backup, cleans managed siblings, and keeps custom skills
         rc, out = self.harness_install("--harness", "antigravity")
         self.assertEqual(rc, 0, out)
         skills_root = self.d / "home" / ".gemini" / "config" / "skills"
         dest = skills_root / "agy-multiagent-workflow"
         (dest / "marker").write_text("new\n")
+        custom = skills_root / "my-custom-skill"
+        custom.mkdir()
+        (custom / "SKILL.md").write_text("---\nname: my-custom-skill\n---\n")
         rc, out = self.harness_install("--ref", legacy, "--harness", "antigravity")
         self.assertEqual(rc, 0, out)
         self.assertIn(legacy, (dest / "VERSION").read_text())
         self.assertTrue((dest / "SKILL.md").is_file())
         self.assertFalse((dest / "marker").exists())
+        self.assertFalse((dest / ".managed-skills").exists())
+        self.assertTrue((custom / "SKILL.md").is_file())
         kept = list((self.backups / "antigravity").iterdir())
         self.assertEqual(len(kept), 1)
         self.assertTrue((kept[0] / "agy-multiagent-workflow" / "marker").is_file())
+        for name in (
+            "execute-plan", "brainstorming", "writing-plans", "test-driven-development",
+            "verification-before-completion", "finishing-a-development-branch",
+            "egm-brainstorm", "egm-review", "egm-review-loop", "egm-drift-report",
+        ):
+            self.assertFalse((skills_root / name).exists(), name)
+            self.assertTrue((kept[0] / name / "SKILL.md").is_file(), name)
 
     def test_backups_are_capped_at_five(self):
         for _ in range(7):

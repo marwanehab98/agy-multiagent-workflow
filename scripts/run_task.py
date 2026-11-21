@@ -104,8 +104,10 @@ class Loop:
                 result = self.runner.try_resume(spec, pair, self.r.impl, conv)
                 if result is not None:
                     reused = True
-                elif kind == "fix":
-                    self._discard_or_error(self.r.need(f"WORKER_HEAD_{t}"))
+                else:
+                    self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
+                    if kind == "fix":
+                        self._discard_or_error(self.r.need(f"WORKER_HEAD_{t}"))
         if result is None:
             result = self.runner.run(spec, pair=pair, worktree=self.r.impl)
         if result[3]:
@@ -325,8 +327,12 @@ class Loop:
             self.set_phase(t, in_flight, WAITING_ON=None)
         result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
-            if kind.startswith("review"):
+            if kind.startswith("review") or kind == "fix":
                 self._discard_or_error(r.need(f"WORKER_HEAD_{t}"))
+            elif kind == "impl":
+                self._discard_or_error(r.need(f"BASE_SHA_{t}"))
+            if not kind.startswith("review"):
+                r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
             spec_text = Path(spec).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)
