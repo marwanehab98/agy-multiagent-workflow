@@ -1,27 +1,27 @@
 ---
-name: execute-plan
-description: Use when you already have an implementation plan (a markdown plan file, or tasks/*.meta and run-values.txt) and want to execute it via Antigravity / Gemini headless agy -p workers, gates, two-stage reviews, final verification, and PR or local merge without running brainstorming or design steps.
+name: launch-plan
+description: Use when you already have an implementation plan (a markdown plan file, or tasks/*.meta and run-values.txt) and want to execute it via Antigravity / Gemini headless agy -p workers, gates, two-stage reviews, final verification, and PR or local merge without running draft-spec or design steps.
 ---
 
 # Execute Plan (Multi-Agent Execution Pipeline)
 
-**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full, `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install, for all Coordinator Rules 1–21), and `<SKILL_DIR>/references/coordinator.md`, then pick up from `<RUN_DIR>/state.json`. A summary of the rules is not the rules.
+**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full, `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install, for all Coordinator Rules 1–21), and `<SKILL_DIR>/references/coordinator.md`, then pick up from `<RUN_DIR>/state.json`. A summary of the rules is not the rules.
 
 ## Overview
 
-This skill runs the **execution, review, verification, and finishing stages** (Coordinator Steps 3–8) starting from an existing plan, without running brainstorming or design reviews.
+This skill runs the **execution, review, verification, and finishing stages** (Coordinator Steps 3–8) starting from an existing plan, without running draft-spec or design reviews.
 
-The invoking Antigravity session acts as the **coordinator** and delegates every step to the bundled deterministic scripts (`run_architect.py`, `probe.py`, `run_task.py`, `run_finish.py`), which run synchronous headless `agy -p` workers. All Coordinator Rules (Rules 1–21 in `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md`, or `<SKILL_DIR>/SKILL.md` in a flat install) apply throughout.
+The invoking Antigravity session acts as the **coordinator** and delegates every step to the bundled deterministic scripts (`run_architect.py`, `probe.py`, `run_task.py`, `run_finish.py`), which run synchronous headless `agy -p` workers. All Coordinator Rules (Rules 1–21 in `<SKILL_DIR>/skills/mission/SKILL.md`, or `<SKILL_DIR>/SKILL.md` in a flat install) apply throughout.
 
 `SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/`:
-- In a plugin or repo checkout (`.../skills/execute-plan/SKILL.md`): two directories above this file (the parent of `skills/`).
-- In a flat `install.sh --harness` install (`<skills_dir>/execute-plan/SKILL.md`): the sibling `<skills_dir>/agy-multiagent-workflow` folder.
+- In a plugin or repo checkout (`.../skills/launch-plan/SKILL.md`): two directories above this file (the parent of `skills/`).
+- In a flat `install.sh --harness` install (`<skills_dir>/launch-plan/SKILL.md`): the sibling `<skills_dir>/mission` folder.
 
 `CFG` is `$HOME/.config/agy-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
 
 ## Start here
 
-- **The user asks to continue or resume an earlier run:** follow "Continue a run" in `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) -> `<SKILL_DIR>/references/coordinator.md` "Resume a run".
+- **The user asks to continue or resume an earlier run:** follow "Continue a run" in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) -> `<SKILL_DIR>/references/coordinator.md` "Resume a run".
 - **Otherwise:** follow Steps 1–4 below in this same session.
 
 ### Step 1: Identify the Plan
@@ -34,9 +34,9 @@ The invoking Antigravity session acts as the **coordinator** and delegates every
 
 ### Step 2: Setup (Role Picks)
 
-Run the same Setup flow as Setup items 1–5 in `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install), with one change:
-- In Setup item 4 (`roles.py check`), pass `--mode execute-plan`:
-  `python3 -I <SKILL_DIR>/scripts/roles.py check --mode execute-plan --catalog <CATALOG> --jira no --architect <pair> --egm <pair> --base <pair>`
+Run the same Setup flow as Setup items 1–5 in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install), with one change:
+- In Setup item 4 (`roles.py check`), pass `--mode launch-plan`:
+  `python3 -I <SKILL_DIR>/scripts/roles.py check --mode launch-plan --catalog <CATALOG> --jira no --architect <pair> --egm <pair> --base <pair>`
 
 ### Step 3: Initialize Docs Worktree & State
 
@@ -47,8 +47,8 @@ Read `<SKILL_DIR>/references/coordinator.md` in full, then run Step 1 items 2–
 - `RUN_NOTES=none`
 - `EGM_REQUESTED=no`
 - `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, `AGY=agy` (or `command -v agy`)
-- In item 6, set `PHASE=design` and `RUN_MODE=execute-plan` (Step 4 updates `PHASE` to `execution` once plan artifacts are ready).
-- In item 7, pass `--mode execute-plan` to `roles.py check`, then run `roles.py to-state` as normal.
+- In item 6, set `PHASE=design` and `RUN_MODE=launch-plan` (Step 4 updates `PHASE` to `execution` once plan artifacts are ready).
+- In item 7, pass `--mode launch-plan` to `roles.py check`, then run `roles.py to-state` as normal.
 - In item 8, run `PROBE --set step1` as normal.
 
 ### Step 4: Prepare Plan Artifacts and Enter Execution

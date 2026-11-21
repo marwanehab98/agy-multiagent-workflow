@@ -1,4 +1,4 @@
-Run the EGM design review on {{DESIGN_FILE}}. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/egm-review/SKILL.md and follow it, with these inputs, all provided:
+Run the EGM design review on {{DESIGN_FILE}}. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/gauntlet/SKILL.md and follow it, with these inputs, all provided:
 - TargetFile: {{DESIGN_FILE}}
 - GoldfishContext: an empty list (linked files inside this repository are added by the skill itself)
 - Step: uninterrupted (the Consolidated report flow; do not show the preset gate)

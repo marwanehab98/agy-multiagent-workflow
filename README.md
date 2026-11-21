@@ -2,23 +2,23 @@
 
 A self-contained, multi-skill Antigravity plugin for spec-driven development and multi-agent execution via headless `agy -p` workers. Zero external Superpowers or EGM plugin dependencies are required.
 
-Each workflow stage is exposed as its own independently invocable skill, alongside the full end-to-end `agy-multiagent-workflow` orchestrator and `execute-plan`.
+Each workflow stage is exposed as its own independently invocable skill, alongside the full end-to-end `mission` orchestrator and `launch-plan`.
 
 ## Bundled Skills
 
 | Skill | When to use | Execution style |
 | --- | --- | --- |
-| `agy-multiagent-workflow` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Coordinator + headless `agy -p` workers |
-| `execute-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through Steps 3–8 | Coordinator + headless `agy -p` workers |
-| `brainstorming` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
-| `writing-plans` | Break a spec or design doc into TDD tasks and verification steps | Interactive in-session |
-| `egm-brainstorm` | Ideation + 7-lens Goldfish stress-testing (`concepts_brief.md`) | Fresh-context subagent lenses |
-| `egm-review` | 5-stage design document review (zoom-out, comprehension, critique, readiness) | Fresh-context subagent reviewers |
-| `egm-review-loop` | Antagonistic multi-reviewer audit loop on specs, plans, or docs | Fresh-context subagent reviewers |
-| `egm-drift-report` | Compare finished source code against design docs | In-session / drift check |
-| `test-driven-development` | Strict RED-GREEN-REFACTOR test-first workflow | In-session or worker |
-| `verification-before-completion` | Require fresh command output before claiming success | In-session or worker |
-| `finishing-a-development-branch` | Verify tests and complete via PR, fast-forward local merge, keep, or discard | In-session or coordinator Step 8 |
+| `mission` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Coordinator + headless `agy -p` workers |
+| `launch-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through Steps 3–8 | Coordinator + headless `agy -p` workers |
+| `draft-spec` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
+| `flight-plan` | Break a spec or design doc into TDD tasks and verification steps | Interactive in-session |
+| `crucible` | Ideation + 7-lens Goldfish stress-testing (`concepts_brief.md`) | Fresh-context subagent lenses |
+| `gauntlet` | 5-stage design document review (zoom-out, comprehension, critique, readiness) | Fresh-context subagent reviewers |
+| `crossfire` | Antagonistic multi-reviewer audit loop on specs, plans, or docs | Fresh-context subagent reviewers |
+| `spec-drift` | Compare finished source code against design docs | In-session / drift check |
+| `red-green` | Strict RED-GREEN-REFACTOR test-first workflow | In-session or worker |
+| `gatecheck` | Require fresh command output before claiming success | In-session or worker |
+| `touchdown` | Verify tests and complete via PR, fast-forward local merge, keep, or discard | In-session or coordinator Step 8 |
 
 ## Installation
 

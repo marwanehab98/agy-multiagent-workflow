@@ -1,5 +1,5 @@
 ---
-name: finishing-a-development-branch
+name: touchdown
 description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work
 ---
 
@@ -9,7 +9,7 @@ description: Use when implementation is complete, all tests pass, and you need t
 
 **Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.
 
-**Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
+**Announce at start:** "I'm using the touchdown skill to complete this work."
 
 ## Step 1: Verify Tests
 
@@ -96,7 +96,7 @@ is theirs.
 
 ### Option 1: Merge Locally
 
-> If running inside an `agy-multiagent-workflow` or `execute-plan` run (or when `scripts/merge-local.sh` is provided by the coordinator), run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a fast-forward-only merge without touching checkouts. Otherwise:
+> If running inside an `mission` or `launch-plan` run (or when `scripts/merge-local.sh` is provided by the coordinator), run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a fast-forward-only merge without touching checkouts. Otherwise:
 
 ```bash
 # Get main repo root for CWD safety

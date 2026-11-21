@@ -1,4 +1,4 @@
-Run the EGM drift report: check that the code in this worktree still matches this run's design. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/egm-drift-report/SKILL.md and follow it, with these inputs, all provided:
+Run the EGM drift report: check that the code in this worktree still matches this run's design. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/spec-drift/SKILL.md and follow it, with these inputs, all provided:
 - The design documents to check: {{DESIGN_FILE}} and {{DECISIONS_LOG}}. The decisions log amends the design; where they differ, the decisions log wins. Check no other document.
 - The source tree: this worktree, at the run's finished feature branch.
 Write every finding to {{OUTPUT_FILE}}, each with its kind (missing feature, incomplete model, logic shortcut, architectural divergence, or other), a severity on this run's scale (Critical, Important, Minor), the design line it concerns, and the file:line in the code. If you find no drift, write "No drift found." to that file.

@@ -185,17 +185,17 @@ class Finish:
         r = self.r
         harness = parse_pair(r.need("ROLE_EGM")).harness
         rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
-                       "--skill", "egm-drift-report")
+                       "--skill", "spec-drift")
         if rc == 0:
             return str(Path(out).parent)
-        return bundled_skills_dir("egm-drift-report")
+        return bundled_skills_dir("spec-drift")
 
     def do_drift(self):
         r = self.r
         skills = self.drift_skills()
         if not skills:
             note = r.run_dir / "results" / "drift-failed.md"
-            note.write_text(f"The EGM pick's harness has no egm-drift-report skill ({r.need('ROLE_EGM')}).\n",
+            note.write_text(f"The EGM pick's harness has no spec-drift skill ({r.need('ROLE_EGM')}).\n",
                             encoding="utf-8")
             r.set(DRIFT_DONE="yes")
             self.job("drift-done", f"failed: {note}")

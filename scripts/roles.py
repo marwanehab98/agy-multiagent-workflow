@@ -31,17 +31,17 @@ from pairs import EFFORTS, parse_pair  # noqa: E402
 import state as state_file  # noqa: E402
 
 ROLES = ("architect", "egm", "base")
-SESSION_REQUIRES = ["agy-multiagent-workflow", "verification-before-completion", "finishing-a-development-branch"]
+SESSION_REQUIRES = ["mission", "gatecheck", "touchdown"]
 REQUIRES = {
-    "architect": ["brainstorming", "writing-plans"],
-    "egm": ["egm-brainstorm", "egm-review", "egm-review-loop"],
-    "base": ["test-driven-development", "verification-before-completion"],
+    "architect": ["draft-spec", "flight-plan"],
+    "egm": ["crucible", "gauntlet", "crossfire"],
+    "base": ["red-green", "gatecheck"],
 }
-EXECUTE_SESSION_REQUIRES = ["execute-plan", "verification-before-completion", "finishing-a-development-branch"]
+EXECUTE_SESSION_REQUIRES = ["launch-plan", "gatecheck", "touchdown"]
 EXECUTE_REQUIRES = {
     "architect": [],
     "egm": [],
-    "base": ["test-driven-development", "verification-before-completion"],
+    "base": ["red-green", "gatecheck"],
 }
 
 
@@ -88,8 +88,9 @@ def session_harness_name(catalog):
 
 
 def check(catalog, jira, picks, mode="full"):
-    session_req = EXECUTE_SESSION_REQUIRES if mode == "execute-plan" else SESSION_REQUIRES
-    role_reqs = EXECUTE_REQUIRES if mode == "execute-plan" else REQUIRES
+    plan_mode = mode in ("launch-plan", "execute-plan")
+    session_req = EXECUTE_SESSION_REQUIRES if plan_mode else SESSION_REQUIRES
+    role_reqs = EXECUTE_REQUIRES if plan_mode else REQUIRES
     lines, bad = [], False
     sess_name = session_harness_name(catalog)
     sess_h = catalog["harnesses"].get(sess_name)
@@ -192,7 +193,7 @@ def main(argv=None):
     c = sub.add_parser("check")
     c.add_argument("--catalog", required=True)
     c.add_argument("--jira", required=True, choices=["yes", "no"])
-    c.add_argument("--mode", choices=["full", "execute-plan"], default="full")
+    c.add_argument("--mode", choices=["full", "launch-plan", "execute-plan"], default="full")
     add_picks(c)
     r = sub.add_parser("remembered")
     r.add_argument("--roles", required=True)

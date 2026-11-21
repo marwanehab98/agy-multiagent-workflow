@@ -1,5 +1,5 @@
 ---
-name: egm-review-loop
+name: crossfire
 license: Apache-2.0
 disable-model-invocation: true
 description: >-
@@ -32,13 +32,13 @@ with the Elephant context to resolve findings.
 
 A Goldfish runs in a fresh context with no conversation history. Spawn each
 subagent with Antigravity's `invoke_subagent` (or `define_subagent` + `invoke_subagent` when named subagents are not pre-registered), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless `agy -p` worker started by `agy-multiagent-workflow` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+If running inside a headless `agy -p` worker started by `mission` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
 
 ## Asset Resolution
 
 Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the plugin/skill bundle root (never from the target repository's working tree):
 - In a plugin or repo layout (`.../skills/<this-skill>/SKILL.md`): `../../agents/` and `../../resources/document_standards/`.
-- In a flat skills install (`<skills_dir>/<this-skill>/SKILL.md`): `../agy-multiagent-workflow/agents/` and `../agy-multiagent-workflow/resources/document_standards/`.
+- In a flat skills install (`<skills_dir>/<this-skill>/SKILL.md`): `../mission/agents/` and `../mission/resources/document_standards/`.
 
 ## Inputs
 
@@ -187,7 +187,7 @@ another round of review.
 Upon completion (converged, cap or churn accepted by the user, or manual
 halt):
 
-*   **Programmatic Callers**: If running as a subflow of `egm-review`, exit
+*   **Programmatic Callers**: If running as a subflow of `gauntlet`, exit
     cleanly to hand execution back to the parent workflow.
 *   **Manual Invocations**: Output a summary of completion in chat: *"The review
     loop has completed after [N] rounds ([converged | accepted at cap | halted]).

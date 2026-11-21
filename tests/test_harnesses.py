@@ -127,14 +127,14 @@ class DetectTests(unittest.TestCase):
             harnesses.shutil, "which", return_value="/usr/bin/agy"
         ):
             home = Path(td)
-            override = home / ".gemini" / "config" / "skills" / "egm-review"
+            override = home / ".gemini" / "config" / "skills" / "gauntlet"
             override.mkdir(parents=True)
-            (override / "SKILL.md").write_text("---\nname: egm-review\n---\n")
+            (override / "SKILL.md").write_text("---\nname: gauntlet\n---\n")
             h = detect(live_like_runner, home, env={})["harnesses"]["antigravity"]
-            self.assertEqual(h["skills"]["egm-review"], str(override))
-            self.assertEqual(h["skills"]["brainstorming"], str(SKILL / "skills" / "brainstorming"))
-            self.assertEqual(h["skills"]["execute-plan"], str(SKILL / "skills" / "execute-plan"))
-            self.assertEqual(h["skills"]["egm-drift-report"], str(SKILL / "skills" / "egm-drift-report"))
+            self.assertEqual(h["skills"]["gauntlet"], str(override))
+            self.assertEqual(h["skills"]["draft-spec"], str(SKILL / "skills" / "draft-spec"))
+            self.assertEqual(h["skills"]["launch-plan"], str(SKILL / "skills" / "launch-plan"))
+            self.assertEqual(h["skills"]["spec-drift"], str(SKILL / "skills" / "spec-drift"))
 
     def test_antigravity_cli_plugins_dir_scanned(self):
         with tempfile.TemporaryDirectory() as td:

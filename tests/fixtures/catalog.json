@@ -43,16 +43,16 @@
     }
    ],
    "skills": {
-    "agy-multiagent-workflow": "/skills/agy-multiagent-workflow",
-    "execute-plan": "/skills/execute-plan",
-    "verification-before-completion": "/skills/verification-before-completion",
-    "finishing-a-development-branch": "/skills/finishing-a-development-branch",
-    "brainstorming": "/skills/brainstorming",
-    "writing-plans": "/skills/writing-plans",
-    "egm-brainstorm": "/skills/egm-brainstorm",
-    "egm-review": "/skills/egm-review",
-    "egm-review-loop": "/skills/egm-review-loop",
-    "test-driven-development": "/skills/test-driven-development"
+    "mission": "/skills/mission",
+    "launch-plan": "/skills/launch-plan",
+    "gatecheck": "/skills/gatecheck",
+    "touchdown": "/skills/touchdown",
+    "draft-spec": "/skills/draft-spec",
+    "flight-plan": "/skills/flight-plan",
+    "crucible": "/skills/crucible",
+    "gauntlet": "/skills/gauntlet",
+    "crossfire": "/skills/crossfire",
+    "red-green": "/skills/red-green"
    },
    "plugins": [],
    "mcp": {

@@ -139,7 +139,7 @@ class Design:
             raise
         self.set_phase("dispatch")
 
-    def egm_skills(self, skill_name="egm-review"):
+    def egm_skills(self, skill_name="gauntlet"):
         r = self.r
         harness = parse_pair(r.need("ROLE_EGM")).harness
         rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
@@ -150,7 +150,7 @@ class Design:
             skills_dir = bundled_skills_dir(skill_name)
             if not skills_dir:
                 raise Done(ERROR, f"ERROR EGM_SKILLS {out}")
-        if skill_name == "egm-review":
+        if skill_name == "gauntlet":
             r.set(EGM_SKILLS=skills_dir)
         return skills_dir
 
@@ -165,7 +165,7 @@ class Design:
             build("builder-check.txt", spec, {"DESIGN_FILE": args[0], "OUTPUT_FILE": out})
             pair = args[1]
         else:
-            skill_map = {"egm": "egm-review", "lens": "egm-brainstorm", "plan-review": "egm-review-loop"}
+            skill_map = {"egm": "gauntlet", "lens": "crucible", "plan-review": "crossfire"}
             skills = self.egm_skills(skill_map[kind])
             pair = r.need("ROLE_EGM")
             if kind == "egm":

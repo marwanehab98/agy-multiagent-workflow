@@ -1,5 +1,5 @@
 ---
-name: writing-plans
+name: flight-plan
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
@@ -9,7 +9,7 @@ description: Use when you have a spec or requirements for a multi-step task, bef
 
 Write implementation plans for an engineer who has not seen this codebase or this spec. Assume they write idiomatic code in the project's language once they know the exact interface and the exact test, and that they will make a reasonable choice wherever the plan leaves one open. What they cannot know is what you decided: which files, which names and signatures, which values from the spec, which tests prove each task. Document those. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.
 
-**Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
+**Announce at start:** "I'm using the flight-plan skill to create the implementation plan."
 
 **Context:** If working in an isolated worktree, create or reuse one (e.g., via `git worktree add` or `scripts/worktree.sh`) before execution.
 
@@ -18,7 +18,7 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 
 ## Scope Check
 
-If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during brainstorming. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
+If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during draft-spec. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
 
 ## File Structure
 
@@ -56,7 +56,7 @@ independently testable deliverable.
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **For agentic workers:** Use `execute-plan` (multi-agent execution via headless `agy -p` workers) or execute inline task-by-task following `test-driven-development` and `verification-before-completion`. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use `launch-plan` (multi-agent execution via headless `agy -p` workers) or execute inline task-by-task following `red-green` and `gatecheck`. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** [One sentence describing what this builds]
 
@@ -188,17 +188,17 @@ them to review the plan and choose an execution method before implementation.
 
 **"Plan complete and saved to `docs/plans/<filename>.md`. Please review the plan. Which execution approach would you prefer?**
 
-- **Multi-agent (`execute-plan`)** - Runs each task sequentially in an isolated worktree with headless `agy -p` implementers, automated gate checks, two-stage independent reviews, final verification, and PR/merge handling. Most thorough; gives fresh contexts per task and review.
-- **Inline (this session)** - Implement each task directly in this session following `test-driven-development`, verify with `verification-before-completion`, and finish with `finishing-a-development-branch`. Cheapest and fastest for small standalone plans.
+- **Multi-agent (`launch-plan`)** - Runs each task sequentially in an isolated worktree with headless `agy -p` implementers, automated gate checks, two-stage independent reviews, final verification, and PR/merge handling. Most thorough; gives fresh contexts per task and review.
+- **Inline (this session)** - Implement each task directly in this session following `red-green`, verify with `gatecheck`, and finish with `touchdown`. Cheapest and fastest for small standalone plans.
 
-**For this plan I recommend <one of the two>, because <one sentence from the plan: how much the tasks depend on each other's interfaces, how many there are, what a shipped mistake would cost>. Optionally run `egm-review-loop` first for a readiness check, or choose an execution approach. Does the plan capture what you want, and which approach should we use?"**
+**For this plan I recommend <one of the two>, because <one sentence from the plan: how much the tasks depend on each other's interfaces, how many there are, what a shipped mistake would cost>. Optionally run `crossfire` first for a readiness check, or choose an execution approach. Does the plan capture what you want, and which approach should we use?"**
 
 **When an execution method has already been supplied:**
 
 **"Plan complete and saved to `docs/plans/<filename>.md`. Please review the plan. Does it capture what you want?"**
 
-**If `execute-plan` chosen:**
-- Invoke the `execute-plan` skill with the saved plan path (it automatically prepares `tasks/` and `run-values.txt` if needed, or consumes pre-built ones).
+**If `launch-plan` chosen:**
+- Invoke the `launch-plan` skill with the saved plan path (it automatically prepares `tasks/` and `run-values.txt` if needed, or consumes pre-built ones).
 
 **If Inline chosen:**
-- Work through the plan's tasks in order using `test-driven-development`, verify with `verification-before-completion`, and wrap up with `finishing-a-development-branch`.
+- Work through the plan's tasks in order using `red-green`, verify with `gatecheck`, and wrap up with `touchdown`.

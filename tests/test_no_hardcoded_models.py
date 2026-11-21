@@ -12,7 +12,7 @@ NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|flash|hydrogen|argon|gemini|
 EXEMPT = re.compile(r"\bCLAUDE\.md\b")  # the project instructions file, exactly as spelled; not a model/harness name
 CHECKED = ["skills", "agents", "resources", "references/coordinator.md", "references/architect.md", "references/templates", "scripts"]
 ALLOWED = {"scripts/harnesses.py"}
-TRIGGER_SKILLS = {"skills/agy-multiagent-workflow/SKILL.md", "skills/execute-plan/SKILL.md"}
+TRIGGER_SKILLS = {"skills/mission/SKILL.md", "skills/launch-plan/SKILL.md"}
 
 
 def files():

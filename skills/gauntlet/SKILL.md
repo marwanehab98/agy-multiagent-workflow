@@ -1,5 +1,5 @@
 ---
-name: egm-review
+name: gauntlet
 license: Apache-2.0
 disable-model-invocation: true
 description: >-
@@ -17,13 +17,13 @@ Reviews and validates a design document through specialized reviewer personas.
 
 A Goldfish runs in a fresh context with no conversation history. Spawn each
 subagent with Antigravity's `invoke_subagent` (or `define_subagent` + `invoke_subagent` when named subagents are not pre-registered), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless `agy -p` worker started by `agy-multiagent-workflow` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+If running inside a headless `agy -p` worker started by `mission` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
 
 ## Asset Resolution
 
 Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the plugin/skill bundle root (never from the target repository's working tree):
 - In a plugin or repo layout (`.../skills/<this-skill>/SKILL.md`): `../../agents/` and `../../resources/document_standards/`.
-- In a flat skills install (`<skills_dir>/<this-skill>/SKILL.md`): `../agy-multiagent-workflow/agents/` and `../agy-multiagent-workflow/resources/document_standards/`.
+- In a flat skills install (`<skills_dir>/<this-skill>/SKILL.md`): `../mission/agents/` and `../mission/resources/document_standards/`.
 
 ## Execution Constraints (CRITICAL)
 
@@ -336,7 +336,7 @@ plain chat):
 
 ### Subflow: Critic Review
 
-1. **Invoke Antagonistic Review Loop**: Invoke `egm-review-loop` in-thread on
+1. **Invoke Antagonistic Review Loop**: Invoke `crossfire` in-thread on
   `FeatureRange` with reviewers `[egm-design, egm-structural, egm-style]`,
   standards `{"egm-design": "feature-spec-standard", "egm-structural":
   "feature-spec-standard"}`, and `GoldfishContext`.
@@ -363,7 +363,7 @@ plain chat):
 
 ### Subflow: Implementation Readiness Test
 
-1. **Invoke Antagonistic Review Loop**: Invoke `egm-review-loop` in-thread on
+1. **Invoke Antagonistic Review Loop**: Invoke `crossfire` in-thread on
   `DetailedRange` with reviewers `[egm-implementation-readiness,
   egm-codebase-details, egm-style]` and standards
   `{"egm-implementation-readiness": "implementation-readiness-standard",

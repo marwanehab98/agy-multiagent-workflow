@@ -1,4 +1,4 @@
-Run the EGM review loop for exactly one round, findings only. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/egm-review-loop/SKILL.md and follow it with these inputs. Every input is provided; do not ask for any, and skip the confirmation step.
+Run the EGM review loop for exactly one round, findings only. The skill is a file, not a command you can call: read {{EGM_SKILLS}}/crossfire/SKILL.md and follow it with these inputs. Every input is provided; do not ask for any, and skip the confirmation step.
 - TargetFile: {{PLAN_FILE}}
 - SemanticTarget: full file
 - Reviewers: implementation_readiness, codebase_details

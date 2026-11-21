@@ -372,7 +372,7 @@ class Drift(Finish):
     def setUp(self):
         super().setUp()
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"]["egm-drift-report"] = "/egm/skills/egm-drift-report"
+        cat["harnesses"]["antigravity"]["skills"]["spec-drift"] = "/egm/skills/spec-drift"
         catalog = self.tmp / "catalog.json"
         catalog.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(catalog), "DRIFT_CHECK": "yes",
@@ -393,7 +393,7 @@ class Drift(Finish):
         call = self.calls()[-1]
         self.assertEqual(call["model"], "g-high")
         self.assertEqual(call["cwd"], str(self.impl))
-        self.assertIn("/egm/skills/egm-drift-report/SKILL.md", call["prompt"])
+        self.assertIn("/egm/skills/spec-drift/SKILL.md", call["prompt"])
         self.assertIn(str(self.design), call["prompt"])
         self.assertIn(str(self.decisions), call["prompt"])
 
@@ -415,7 +415,7 @@ class Drift(Finish):
             self.SCRIPT = finish
         self.behave("pass")
         self.expect(0, "VERIFIED")
-        self.assertEqual(sum("egm-drift-report" in c["prompt"] for c in self.calls()), 1)
+        self.assertEqual(sum("spec-drift" in c["prompt"] for c in self.calls()), 1)
 
     def test_failed_drift_worker_retries_once_then_reports_failed(self):
         self.behave("pass", "fail", "fail")
@@ -457,24 +457,24 @@ class Drift(Finish):
 
     def test_drift_falls_back_to_bundled_skills_when_missing_from_catalog(self):
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"].pop("egm-drift-report", None)
+        cat["harnesses"]["antigravity"]["skills"].pop("spec-drift", None)
         cat_path = self.tmp / "no-drift-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
         last, _ = self.to_drift_job()
         self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
-        self.assertIn(str(SKILL / "skills" / "egm-drift-report" / "SKILL.md"), self.calls()[-1]["prompt"])
+        self.assertIn(str(SKILL / "skills" / "spec-drift" / "SKILL.md"), self.calls()[-1]["prompt"])
 
     def test_drift_falls_back_to_flat_harness_sibling_skills_when_missing_from_catalog(self):
         flat_root = self.tmp / "flat-skills"
         pkg = flat_root / "agy-multiagent-workflow"
         shutil.copytree(SKILL / "scripts", pkg / "scripts")
         shutil.copytree(SKILL / "references", pkg / "references")
-        (flat_root / "egm-drift-report").mkdir(parents=True)
-        (flat_root / "egm-drift-report" / "SKILL.md").write_text("---\nname: egm-drift-report\n---\n")
+        (flat_root / "spec-drift").mkdir(parents=True)
+        (flat_root / "spec-drift" / "SKILL.md").write_text("---\nname: spec-drift\n---\n")
 
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"].pop("egm-drift-report", None)
+        cat["harnesses"]["antigravity"]["skills"].pop("spec-drift", None)
         cat_path = self.tmp / "no-drift-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -482,7 +482,7 @@ class Drift(Finish):
         self.SCRIPT = pkg / "scripts" / "run_finish.py"
         last, _ = self.to_drift_job()
         self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
-        self.assertIn(str(flat_root / "egm-drift-report" / "SKILL.md"), self.calls()[-1]["prompt"])
+        self.assertIn(str(flat_root / "spec-drift" / "SKILL.md"), self.calls()[-1]["prompt"])
 
 
 if __name__ == "__main__":

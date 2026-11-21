@@ -178,7 +178,7 @@ class Egm(Design):
         self.assertEqual(out.read_text(), (self.docs_wt / FINDINGS).read_text())
         self.assertIn("Important: x.md:1 unclear.", out.read_text())
         self.assertEqual(self.st("EGM_SKILLS"), "/skills")
-        self.assertIn("/skills/egm-review/SKILL.md", call["prompt"])
+        self.assertIn("/skills/gauntlet/SKILL.md", call["prompt"])
         self.assertEqual(self.docs_clean(), f"?? {FINDINGS}")
 
     def commit_findings(self):
@@ -240,7 +240,7 @@ class Egm(Design):
 
     def test_egm_falls_back_to_bundled_skills_when_missing_from_catalog(self):
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"].pop("egm-review", None)
+        cat["harnesses"]["antigravity"]["skills"].pop("gauntlet", None)
         cat_path = self.tmp / "no-egm-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -248,18 +248,18 @@ class Egm(Design):
         last, _ = self.egm_need()
         self.assertEqual(last, f"ARCHITECT_JOB egm-done {self.run_dir / 'egm-1.md'}")
         self.assertEqual(self.st("EGM_SKILLS"), str(SKILL / "skills"))
-        self.assertIn(str(SKILL / "skills" / "egm-review" / "SKILL.md"), self.calls()[0]["prompt"])
+        self.assertIn(str(SKILL / "skills" / "gauntlet" / "SKILL.md"), self.calls()[0]["prompt"])
 
     def test_egm_falls_back_to_flat_harness_sibling_skills_when_missing_from_catalog(self):
         flat_root = self.tmp / "flat-skills"
         pkg = flat_root / "agy-multiagent-workflow"
         shutil.copytree(SKILL / "scripts", pkg / "scripts")
         shutil.copytree(SKILL / "references", pkg / "references")
-        (flat_root / "egm-review").mkdir(parents=True)
-        (flat_root / "egm-review" / "SKILL.md").write_text("---\nname: egm-review\n---\n")
+        (flat_root / "gauntlet").mkdir(parents=True)
+        (flat_root / "gauntlet" / "SKILL.md").write_text("---\nname: gauntlet\n---\n")
 
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"].pop("egm-review", None)
+        cat["harnesses"]["antigravity"]["skills"].pop("gauntlet", None)
         cat_path = self.tmp / "no-egm-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -269,7 +269,7 @@ class Egm(Design):
         last, _ = self.egm_need()
         self.assertEqual(last, f"ARCHITECT_JOB egm-done {self.run_dir / 'egm-1.md'}")
         self.assertEqual(self.st("EGM_SKILLS"), str(flat_root))
-        self.assertIn(str(flat_root / "egm-review" / "SKILL.md"), self.calls()[0]["prompt"])
+        self.assertIn(str(flat_root / "gauntlet" / "SKILL.md"), self.calls()[0]["prompt"])
 
 
 class Lens(Design):
@@ -281,15 +281,15 @@ class Lens(Design):
         last, _ = self.lens_need()
         first = self.run_dir / "lens-1.md"
         self.assertEqual(last, f"ARCHITECT_JOB lens-done {first}")
-        self.assertIn("egm-brainstorm", self.calls()[0]["prompt"])
+        self.assertIn("crucible", self.calls()[0]["prompt"])
         last, _ = self.lens_need()
         self.assertEqual(last, f"ARCHITECT_JOB lens-done {first}")
         self.assertEqual(len(self.calls()), 1)
 
     def test_lens_resolves_egm_brainstorm_independently_of_egm_review_override(self):
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"]["egm-review"] = "/override/skills/egm-review"
-        cat["harnesses"]["antigravity"]["skills"].pop("egm-brainstorm", None)
+        cat["harnesses"]["antigravity"]["skills"]["gauntlet"] = "/override/skills/gauntlet"
+        cat["harnesses"]["antigravity"]["skills"].pop("crucible", None)
         cat_path = self.tmp / "override-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -300,7 +300,7 @@ class Lens(Design):
         sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "findings")
         last, _ = self.lens_need()
         self.assertEqual(last, f"ARCHITECT_JOB lens-done {self.run_dir / 'lens-1.md'}")
-        self.assertIn(str(SKILL / "skills" / "egm-brainstorm" / "SKILL.md"), self.calls()[1]["prompt"])
+        self.assertIn(str(SKILL / "skills" / "crucible" / "SKILL.md"), self.calls()[1]["prompt"])
 
 
 class PlanReview(Design):
@@ -322,8 +322,8 @@ class PlanReview(Design):
     def test_plan_review_resolves_egm_review_loop_from_its_own_dir(self):
         (self.tmp / "plan.md").write_text("plan\n")
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"]["egm-review"] = "/override/skills/egm-review"
-        cat["harnesses"]["antigravity"]["skills"]["egm-review-loop"] = "/other/skills/egm-review-loop"
+        cat["harnesses"]["antigravity"]["skills"]["gauntlet"] = "/override/skills/gauntlet"
+        cat["harnesses"]["antigravity"]["skills"]["crossfire"] = "/other/skills/crossfire"
         cat_path = self.tmp / "split-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -333,7 +333,7 @@ class PlanReview(Design):
         sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "findings")
         last, _ = self.review_need()
         self.assertEqual(last, f"ARCHITECT_JOB plan-review-done {self.run_dir / 'plan-review-1.md'}")
-        self.assertIn("/other/skills/egm-review-loop/SKILL.md", self.calls()[1]["prompt"])
+        self.assertIn("/other/skills/crossfire/SKILL.md", self.calls()[1]["prompt"])
 
 
 if __name__ == "__main__":

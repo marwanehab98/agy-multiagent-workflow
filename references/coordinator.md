@@ -1,6 +1,6 @@
 # Coordinator: the whole run
 
-Part of agy-multiagent-workflow. The Rules in `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) hold throughout.
+Part of agy-multiagent-workflow. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) hold throughout.
 
 ## How you work
 
@@ -97,7 +97,7 @@ Handle `run_architect.py`'s `RESULT` file (`<saved>`) by branching on its first 
 
 ## Step 3: Set up execution
 
-Entered on `RESULT: PLAN_APPROVED <run-values>` from Step 2 (or from `execute-plan` once `<DOCS_DIR>/run-values.txt` and `tasks/` are committed).
+Entered on `RESULT: PLAN_APPROVED <run-values>` from Step 2 (or from `launch-plan` once `<DOCS_DIR>/run-values.txt` and `tasks/` are committed).
 
 1. **Close the design architect conversation:** `STATE unset ARCHITECT_CONVERSATION_ID ARCHITECT_KEEP_OPEN` and `STATE set PHASE=execution STEP="3 setup"`. From now on every architect job starts a fresh `agy -p` run.
 2. **Read `<run-values>`** and `STATE set` each of `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS` and `CLERICAL_PAIR`, plus `RUN_VALUES=<run-values path>`, `BASELINE_SKIP` (empty when the file has none) and `DRIFT_CHECK` (`no` when the file has none). The `VERIFY_<n>` and `GATE_<n>` commands stay in that file; `gate.py` reads them from there.
@@ -146,8 +146,8 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 | `STOP <reason>` (40) | Dispatch nothing more and go to item 7. |
 
 4. **Open the PR (or finish locally):**
-   1. **When `START_HOW` is `no-remote` and `REQUIREMENTS_SOURCE` is `written`:** skip `job=pr` (there is no remote to push to). Invoke `finishing-a-development-branch` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, telling it `START_HOW=no-remote` (omit the Push/PR option and offer only local merge or keep as-is), that the branch is not checked out anywhere, that it has already been verified (`<the passing verify log>`), and to skip its own worktree cleanup. Carry out the user's choice, using `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a local merge (never through that skill or a hand-typed git command; on exit 2 or 3 show its output and offer the options again).
-   2. **Otherwise:** send job `pr` with `INPUT=<the passing verify log>`. On `RESULT: PR_READY <title> <body>`, invoke `finishing-a-development-branch` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, title `$(cat <title>)`, and body file `<body>`. Tell it the branch is not checked out anywhere (it pushes with `git -C <MAIN_CHECKOUT> push -u origin <FEATURE_BRANCH>`), that it has already been verified (the log above), and to skip its own worktree cleanup. For `jira`, tell it to push and create the PR immediately, without presenting options; for `written`, let it offer its usual options and carry out the user's choice, with one change: a local merge never goes through that skill or a hand-typed git command. Run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` and show its output exactly. On exit 2 or 3 nothing changed: show its output, then offer the options again.
+   1. **When `START_HOW` is `no-remote` and `REQUIREMENTS_SOURCE` is `written`:** skip `job=pr` (there is no remote to push to). Invoke `touchdown` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, telling it `START_HOW=no-remote` (omit the Push/PR option and offer only local merge or keep as-is), that the branch is not checked out anywhere, that it has already been verified (`<the passing verify log>`), and to skip its own worktree cleanup. Carry out the user's choice, using `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a local merge (never through that skill or a hand-typed git command; on exit 2 or 3 show its output and offer the options again).
+   2. **Otherwise:** send job `pr` with `INPUT=<the passing verify log>`. On `RESULT: PR_READY <title> <body>`, invoke `touchdown` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, title `$(cat <title>)`, and body file `<body>`. Tell it the branch is not checked out anywhere (it pushes with `git -C <MAIN_CHECKOUT> push -u origin <FEATURE_BRANCH>`), that it has already been verified (the log above), and to skip its own worktree cleanup. For `jira`, tell it to push and create the PR immediately, without presenting options; for `written`, let it offer its usual options and carry out the user's choice, with one change: a local merge never goes through that skill or a hand-typed git command. Run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` and show its output exactly. On exit 2 or 3 nothing changed: show its output, then offer the options again.
    3. Log the PR URL (if a PR was created).
 5. **Update JIRA** (`jira` with a PR only): send job `jira-close` with `INPUT=<PR URL>`, and log the `RESULT: JIRA_DONE` line.
 6. **Clean up:** once a PR is open or the branch is merged, run `bash <SKILL_DIR>/scripts/worktree.sh remove <MAIN_CHECKOUT> <IMPL_WORKTREE> --delete-branch --merged-into <FEATURE_BRANCH>`, never with `--force`. If it fails, show the user the output. If the user chose keep or discard, leave the worktree in place.
@@ -167,7 +167,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 
 ## Resume a run
 
-Use this when the user asks to continue a run or after a context compaction in the same session (first re-read `<SKILL_DIR>/skills/agy-multiagent-workflow/SKILL.md` — or `<SKILL_DIR>/SKILL.md` in a flat install — and this file in full).
+Use this when the user asks to continue a run or after a context compaction in the same session (first re-read `<SKILL_DIR>/skills/mission/SKILL.md` — or `<SKILL_DIR>/SKILL.md` in a flat install — and this file in full).
 
 1. Find `<RUN_DIR>/state.json` (for a topic, in the worktree on `refs/heads/<TOPIC>-docs`) and run `STATE show`.
    - **No state file, or no `ROLE_ARCHITECT` in it:** say exactly "ERROR OLD_FORMAT_RUN remove <RUN_DIR> and start a new run" and stop.
@@ -198,7 +198,7 @@ Use this when the user asks to continue a run or after a context compaction in t
 
 | Keys | Meaning | Set in |
 | --- | --- | --- |
-| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `AGY`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `EGM_REQUESTED`, `RUN_MODE` | From Setup and the request; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later; `execute-plan` sets `RUN_MODE=execute-plan` (default `full`) | 1 |
+| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `AGY`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `EGM_REQUESTED`, `RUN_MODE` | From Setup and the request; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later; `launch-plan` sets `RUN_MODE=launch-plan` (default `full`) | 1 |
 | `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, `START_SHA`, `START_HOW` | Repo | 1 |
 | `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR` | The docs worktree | 1 |
 | `ROLE_ARCHITECT`, `ROLE_EGM`, `ROLE_BASE`, `BASE_TOP`, `CATALOG` | The picks, the base model's highest effort, and the catalog; fixed for the run | 1 (`roles.py to-state`) |

@@ -21,9 +21,9 @@ expect 0 $? "worktree create docs"
 [ -d "$WT_DOCS" ] && ok "docs worktree exists" || bad "docs worktree missing: $WT_DOCS"
 
 echo "--- check-tree catches an uncommitted docs file"
-mkdir -p "$WT_DOCS/docs/plans"; echo findings > "$WT_DOCS/docs/plans/egm-review.md"
+mkdir -p "$WT_DOCS/docs/plans"; echo findings > "$WT_DOCS/docs/plans/gauntlet.md"
 bash "$SK/check-tree.sh" "$WT_DOCS" "$BASE" >/dev/null; expect 2 $? "check-tree flags uncommitted docs file before dispatch"
-rm "$WT_DOCS/docs/plans/egm-review.md"
+rm "$WT_DOCS/docs/plans/gauntlet.md"
 
 echo "--- check-tree: renames and spaces"
 git -C "$WT_DOCS" mv a.txt "b file.txt"

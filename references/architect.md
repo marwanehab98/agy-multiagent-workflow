@@ -17,7 +17,7 @@ Part of agy-multiagent-workflow. You are the run's only thinker. You do the desi
   2. End your response with `RESULT: RELAY <that absolute path>` on line 1.
   3. On the next turn of your resumed conversation, you receive the user's answer verbatim.
 
-  The coordinator shows your file unchanged, so write it as you would write to the user directly. Ask one question per message while brainstorming.
+  The coordinator shows your file unchanged, so write it as you would write to the user directly. Ask one question per message while draft-spec.
 - **Fixed answers go in a choice block.** When the answer is one of 2–4 options (a sign-off, the EGM choice, the go-ahead, a pick between approaches), end the relay file with:
 
   ```text
@@ -151,11 +151,11 @@ You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and
 2. **Explore** `DOCS_WORKTREE`: structure, the files the requirements touch, related tests, and recent commits on those areas. If `START_HOW` is `local-ahead` or `fetch-failed`, tell the user in a `NOTIFY` that the run starts from their local `DEFAULT_BRANCH`, which may not match the remote.
 3. **Find the conventions** (project skills, `CLAUDE.md`, `AGENTS.md`, contributing docs, lint, format and type-check configs, PR template, commit and branch conventions). Sort them as in "How you work".
 4. **Check the scope.** If the work needs changes in another git repo or a submodule, ask the user in a relay, recommending one run per repo.
-5. **Clarify** with `brainstorming`, talking to the user through relays. Ask only about real gaps, contradictions, or risky edge cases the requirements don't settle.
-   - Its defaults give way to this workflow: the design goes to `DOCS_DIR/DATE-TOPIC-design.md`, the builder check is a `NEED`, and you don't move on to `writing-plans`.
+5. **Clarify** with `draft-spec`, talking to the user through relays. Ask only about real gaps, contradictions, or risky edge cases the requirements don't settle.
+   - Its defaults give way to this workflow: the design goes to `DOCS_DIR/DATE-TOPIC-design.md`, the builder check is a `NEED`, and you don't move on to `flight-plan`.
 6. **Write the concepts brief** to `DOCS_DIR/DATE-TOPIC-concepts.md` once the problem is clear, and before you propose approaches. It is 3–6 sentences, written as one anchored hypothesis: what the feature does, for whom, its hard constraints, and the parts of the current code it changes, by path. Commit it.
    - **Full design:** settle `RESULT: NEED lens <concepts file>`. The coordinator runs EGM's Goldfish lenses on the brief, and the findings come back as job `lens-done`.
-   - **Small change** (brainstorming's short design, which skips the builder check), unless `RUN_NOTES` asks for every review pass: skip the lens pass and go on to item 7 in this job.
+   - **Small change** (draft-spec's short design, which skips the builder check), unless `RUN_NOTES` asks for every review pass: skip the lens pass and go on to item 7 in this job.
 
 ## JOB: lens-done
 
@@ -185,7 +185,7 @@ One exception: for `builder-check-done`, the file may hold `PROBLEM` lines about
    Commit it.
 9. **Settle.**
    - **Full design:** settle `RESULT: NEED builder-check <design path> <pair>`, with the pair scaled to the design ("Model choices"). Tell the user first, in a `NOTIFY`, that a reviewer reads the design next and you may come back once with questions.
-   - **Small change** (brainstorming's short design, which skips the builder check): ask for sign-off as in "Sign-off and EGM", in this job.
+   - **Small change** (draft-spec's short design, which skips the builder check): ask for sign-off as in "Sign-off and EGM", in this job.
 
 ## JOB: builder-check-done
 
@@ -204,7 +204,7 @@ Ask for sign-off once per design, in one relay that also settles EGM:
    - **`EGM_REQUESTED=yes`:** end with `CHOICE: Do you sign off on the design?`, options `Sign off (recommended)` and `I want changes`.
    - **Otherwise:** say in one plain sentence what EGM is and your recommendation with one reason. Recommend running it when the ticket is an Epic, the requirements cover several separable features, the design spans more than one service, or the design rests on facts about the code, data or environment that nobody has confirmed (the calls you list for the user to overrule don't count); otherwise recommend skipping it. End with `CHOICE: Do you sign off on the design, and should the full design review (EGM) run first?`, options `Sign off and run EGM`, `Sign off and skip EGM` and `I want changes`, your recommendation first.
 2. **The reply:**
-   - **Sign-off with EGM** (or `EGM_REQUESTED=yes`): commit, then settle `RESULT: NEED egm <design path> docs/plans/DATE-TOPIC-egm-review.md`.
+   - **Sign-off with EGM** (or `EGM_REQUESTED=yes`): commit, then settle `RESULT: NEED egm <design path> docs/plans/DATE-TOPIC-gauntlet.md`.
    - **Sign-off, EGM skipped:** `EGM_OUTCOME=declined`; go on to "Plan" in this same job.
    - **Changes, or a request for reviews you skipped:** make them (a skipped lens pass or builder check: settle its `NEED`), and ask again only if what changed alters something the user already signed off. Otherwise tell them what changed in a `NOTIFY` and carry on from their earlier answer.
 
@@ -225,7 +225,7 @@ EGM has already run twice. Finish triage with the findings you have, then go on 
 
 ## Plan (the end of whichever job finishes the design)
 
-1. **Write the plan** at `DOCS_DIR/DATE-TOPIC-plan.md` with `writing-plans`. Where its defaults differ, this workflow wins:
+1. **Write the plan** at `DOCS_DIR/DATE-TOPIC-plan.md` with `flight-plan`. Where its defaults differ, this workflow wins:
    - use this path, not the skill's default;
    - leave out its execution-handoff choice, since this workflow already decides how tasks run;
    - put its Global Constraints and Review Focus into each task file they apply to, because implementers and reviewers see only task files;
@@ -362,7 +362,7 @@ An earlier design-phase architect was lost, and you replace it. Read every file 
 
 ## JOB: prepare-plan
 
-Started by `execute-plan` when the user already has a markdown plan without per-task `.meta` files or `run-values.txt`. Input names the plan file path (and optionally a design/spec file path).
+Started by `launch-plan` when the user already has a markdown plan without per-task `.meta` files or `run-values.txt`. Input names the plan file path (and optionally a design/spec file path).
 1. **Read** the input plan (and design/spec file, if provided) and explore `DOCS_WORKTREE` plus project conventions (`CLAUDE.md`, `AGENTS.md`, test/build config).
 2. **Write the design & decisions baseline:** copy or synthesize `DOCS_DIR/DATE-TOPIC-design.md` with explicit numbered acceptance criteria (`AC-1`, `AC-2`, ...) matching the plan's requirements, and create `DOCS_DIR/DATE-TOPIC-decisions.md`.
 3. **Break into coordinator task files and `run-values.txt`** per "Files the coordinator reads" and "Model choices" (`tasks/<id>.{md,meta,-summary.md,-decisions.md}`, `DOCS_DIR/DATE-TOPIC-plan.md`, `DOCS_DIR/run-values.txt` with `EGM_OUTCOME=declined`).

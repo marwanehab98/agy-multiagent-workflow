@@ -1,5 +1,5 @@
 ---
-name: brainstorming
+name: draft-spec
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
@@ -29,7 +29,7 @@ Before you start implementing, you must, in order:
    human partner pick one (see Lay out the approaches).
 2. Write the design doc, short or full (see Size the Work).
 3. Get their approval of that doc.
-4. Invoke the writing-plans skill.
+4. Invoke the flight-plan skill.
 
 If nothing is open when you write your first message and there's one
 sensible way, steps 1 to 3 happen in that message (see Your First
@@ -83,7 +83,7 @@ Move the work forward, with one of these:
   different site. What do you want someone to do when they land on it?"
 
 How the message ends depends on whether their message asked for
-brainstorming:
+draft-spec:
 
 - **They asked for it** (by name, by invoking it, or by asking for a
   design discussion): end there. They want this conversation.
@@ -272,8 +272,8 @@ stays labeled throwaway, and keeping what it produced is a new request
 that comes back through this gate.
 
 If you or the user want an independent multi-angle design audit first,
-optionally run `egm-review` on the approved design doc. Otherwise, the
-next step is the plan: invoke `writing-plans` and no other skill.
+optionally run `gauntlet` on the approved design doc. Otherwise, the
+next step is the plan: invoke `flight-plan` and no other skill.
 </HARD-GATE>
 
 ## Red Flags

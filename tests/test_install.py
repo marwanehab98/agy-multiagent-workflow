@@ -33,10 +33,10 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertTrue((self.target / "plugin.json").is_file())
         self.assertTrue((self.target / "THIRD_PARTY_NOTICES.md").is_file())
-        self.assertTrue((self.target / "skills" / "agy-multiagent-workflow" / "SKILL.md").is_file())
-        self.assertTrue((self.target / "skills" / "execute-plan" / "SKILL.md").is_file())
-        self.assertTrue((self.target / "skills" / "brainstorming" / "SKILL.md").is_file())
-        self.assertTrue((self.target / "skills" / "egm-review" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "mission" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "launch-plan" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "draft-spec" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "gauntlet" / "SKILL.md").is_file())
         self.assertTrue((self.target / "agents" / "zoom_out.md").is_file())
         self.assertTrue((self.target / "resources" / "document_standards" / "feature-spec-standard.md").is_file())
         self.assertTrue((self.target / "scripts" / "run_task.py").is_file())
@@ -64,6 +64,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn(older, (self.target / "VERSION").read_text())
         self.assertTrue(
             (self.target / "SKILL.md").is_file()
+            or (self.target / "skills" / "mission" / "SKILL.md").is_file()
             or (self.target / "skills" / "agy-multiagent-workflow" / "SKILL.md").is_file()
         )
 
@@ -85,25 +86,26 @@ class InstallTests(unittest.TestCase):
         rc, out = self.harness_install("--harness", "antigravity")
         self.assertEqual(rc, 0, out)
         skills_root = self.d / "home" / ".gemini" / "config" / "skills"
-        dest = skills_root / "agy-multiagent-workflow"
-        (dest / "marker").write_text("new\n")
+        modern_dest = skills_root / "mission"
+        (modern_dest / "marker").write_text("new\n")
         custom = skills_root / "my-custom-skill"
         custom.mkdir()
         (custom / "SKILL.md").write_text("---\nname: my-custom-skill\n---\n")
         rc, out = self.harness_install("--ref", legacy, "--harness", "antigravity")
         self.assertEqual(rc, 0, out)
-        self.assertIn(legacy, (dest / "VERSION").read_text())
-        self.assertTrue((dest / "SKILL.md").is_file())
-        self.assertFalse((dest / "marker").exists())
-        self.assertFalse((dest / ".managed-skills").exists())
+        legacy_dest = skills_root / "agy-multiagent-workflow"
+        self.assertIn(legacy, (legacy_dest / "VERSION").read_text())
+        self.assertTrue((legacy_dest / "SKILL.md").is_file())
+        self.assertFalse(modern_dest.exists())
+        self.assertFalse((legacy_dest / ".managed-skills").exists())
         self.assertTrue((custom / "SKILL.md").is_file())
         kept = list((self.backups / "antigravity").iterdir())
         self.assertEqual(len(kept), 1)
-        self.assertTrue((kept[0] / "agy-multiagent-workflow" / "marker").is_file())
+        self.assertTrue((kept[0] / "mission" / "marker").is_file())
         for name in (
-            "execute-plan", "brainstorming", "writing-plans", "test-driven-development",
-            "verification-before-completion", "finishing-a-development-branch",
-            "egm-brainstorm", "egm-review", "egm-review-loop", "egm-drift-report",
+            "launch-plan", "draft-spec", "flight-plan", "red-green",
+            "gatecheck", "touchdown",
+            "crucible", "gauntlet", "crossfire", "spec-drift",
         ):
             self.assertFalse((skills_root / name).exists(), name)
             self.assertTrue((kept[0] / name / "SKILL.md").is_file(), name)
@@ -150,7 +152,7 @@ class InstallTests(unittest.TestCase):
         )
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
         self.assertIn("INSTALLED", r1.stdout)
-        self.assertTrue((self.target / "skills" / "agy-multiagent-workflow" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "mission" / "SKILL.md").is_file())
         self.assertFalse((self.target / "release").exists(), "fallback must not nest release/ inside target")
 
         r2 = subprocess.run(
@@ -161,9 +163,9 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
         self.assertIn("INSTALLED", r2.stdout)
         skills_root = self.d / "home" / ".gemini" / "config" / "skills"
-        self.assertTrue((skills_root / "agy-multiagent-workflow" / "SKILL.md").is_file())
-        self.assertTrue((skills_root / "egm-review" / "SKILL.md").is_file())
-        self.assertFalse((skills_root / "egm-review" / "egm-review").exists(), "fallback must not nest skill dir")
+        self.assertTrue((skills_root / "mission" / "SKILL.md").is_file())
+        self.assertTrue((skills_root / "gauntlet" / "SKILL.md").is_file())
+        self.assertFalse((skills_root / "gauntlet" / "gauntlet").exists(), "fallback must not nest skill dir")
 
     def harness_install(self, *extra):
         r = sh("bash", str(INSTALL), "--home", str(self.d / "home"), "--harness-fixtures", str(FIXTURES),
@@ -174,30 +176,30 @@ class InstallTests(unittest.TestCase):
         rc, out = self.harness_install("--harness", "antigravity")
         self.assertEqual(rc, 0, out)
         skills_root = self.d / "home" / ".gemini" / "config" / "skills"
-        dest = skills_root / "agy-multiagent-workflow"
+        dest = skills_root / "mission"
         self.assertTrue((dest / "SKILL.md").is_file())
         self.assertTrue((dest / "scripts" / "run_task.py").is_file())
         self.assertTrue((dest / "references" / "coordinator.md").is_file())
         self.assertTrue((dest / "agents" / "zoom_out.md").is_file())
         for name in (
-            "execute-plan", "brainstorming", "writing-plans", "test-driven-development",
-            "verification-before-completion", "finishing-a-development-branch",
-            "egm-brainstorm", "egm-review", "egm-review-loop", "egm-drift-report",
+            "launch-plan", "draft-spec", "flight-plan", "red-green",
+            "gatecheck", "touchdown",
+            "crucible", "gauntlet", "crossfire", "spec-drift",
         ):
             self.assertTrue((skills_root / name / "SKILL.md").is_file(), name)
 
     def test_no_option_updates_existing_antigravity_install(self):
         self.harness_install("--harness", "antigravity")
         skills_root = self.d / "home" / ".gemini" / "config" / "skills"
-        (skills_root / "brainstorming" / "marker").write_text("old\n")
+        (skills_root / "draft-spec" / "marker").write_text("old\n")
         rc, out = self.harness_install()
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.count("INSTALLED"), 1)
-        self.assertIn(".gemini/config/skills/agy-multiagent-workflow", out)
+        self.assertIn(".gemini/config/skills/mission", out)
         kept = list((self.backups / "antigravity").iterdir())
         self.assertEqual(len(kept), 1)
-        self.assertTrue((kept[0] / "brainstorming" / "marker").is_file())
-        self.assertFalse((skills_root / "brainstorming" / "marker").exists())
+        self.assertTrue((kept[0] / "draft-spec" / "marker").is_file())
+        self.assertFalse((skills_root / "draft-spec" / "marker").exists())
 
     def test_no_option_and_no_existing_install_asks_for_a_harness(self):
         rc, out = self.harness_install()

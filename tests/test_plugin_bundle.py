@@ -9,17 +9,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 EXPECTED_SKILLS = {
-    "agy-multiagent-workflow",
-    "execute-plan",
-    "brainstorming",
-    "writing-plans",
-    "test-driven-development",
-    "verification-before-completion",
-    "finishing-a-development-branch",
-    "egm-brainstorm",
-    "egm-review",
-    "egm-review-loop",
-    "egm-drift-report",
+    "mission",
+    "launch-plan",
+    "draft-spec",
+    "flight-plan",
+    "red-green",
+    "gatecheck",
+    "touchdown",
+    "crucible",
+    "gauntlet",
+    "crossfire",
+    "spec-drift",
 }
 
 EXPECTED_AGENTS = {
@@ -53,7 +53,7 @@ class PluginBundleTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "agy-multiagent-workflow")
         self.assertTrue((ROOT / manifest["logo"]).is_file())
         self.assertTrue((ROOT / "THIRD_PARTY_NOTICES.md").is_file())
-        self.assertFalse((ROOT / "SKILL.md").exists(), "root SKILL.md should live under skills/agy-multiagent-workflow/")
+        self.assertFalse((ROOT / "SKILL.md").exists(), "root SKILL.md should live under skills/mission/")
 
     def test_all_expected_skills_and_frontmatter(self):
         skills_dir = ROOT / "skills"

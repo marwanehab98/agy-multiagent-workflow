@@ -1,6 +1,6 @@
 ---
-name: agy-multiagent-workflow
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names agy-multiagent-workflow. For individual stages (brainstorming, writing-plans, execute-plan, egm-review, etc.), invoke those bundled skills directly.
+name: mission
+description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names agy-multiagent-workflow. For individual stages (draft-spec, flight-plan, launch-plan, gauntlet, etc.), invoke those bundled skills directly.
 ---
 
 # Agy multi-agent workflow
@@ -23,7 +23,7 @@ A pair is written `<harness>:<model>@<effort>`. Only `scripts/harnesses.py` know
 The session that loads this skill **is the coordinator**:
 
 - **The user asks to continue or resume an earlier run:** go to "Continue a run" below.
-- **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`brainstorming`, `writing-plans`, `execute-plan`, `egm-brainstorm`, `egm-review`, `egm-review-loop`, `egm-drift-report`, `test-driven-development`, `verification-before-completion`, `finishing-a-development-branch`) directly.
+- **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`draft-spec`, `flight-plan`, `launch-plan`, `crucible`, `gauntlet`, `crossfire`, `spec-drift`, `red-green`, `gatecheck`, `touchdown`) directly.
 - **Otherwise:** run Setup below, then go straight to `references/coordinator.md` Step 1 in this same session.
 
 `SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/` (two directories above this `SKILL.md` in a plugin or repo checkout, or this skill's folder in a flat `install.sh --harness` install). `CFG` is `$HOME/.config/agy-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
@@ -60,7 +60,7 @@ The session that loads this skill **is the coordinator**:
 2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
 3. Read `<SKILL_DIR>/references/coordinator.md` in full and run "Resume a run" with that state file in this same session.
 
-All required skills (`brainstorming`, `writing-plans`, `test-driven-development`, `verification-before-completion`, `finishing-a-development-branch`, `egm-brainstorm`, `egm-review`, `egm-review-loop`, `egm-drift-report`, `execute-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
+All required skills (`draft-spec`, `flight-plan`, `red-green`, `gatecheck`, `touchdown`, `crucible`, `gauntlet`, `crossfire`, `spec-drift`, `launch-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
 The architect worker reads `references/architect.md`; its spec tells it to. Confirmed headless `agy -p` behavior is in `references/agy-facts.md`.
 
 ## Roles
@@ -113,7 +113,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
    When `run_architect.py` exits `12` (`NOTIFY <path> <saved>`), it needs no answer. Show `<path>` to the user as in step 2 (in chat text, without ending your turn), then run `python3 -I <SKILL_DIR>/scripts/run_architect.py notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` at once without waiting for the user.
 6. **One implementer at a time,** in one shared worktree `<IMPL_WORKTREE>`. The next task starts only after the current one passed both reviews and was merged.
 7. **Fresh implementer per task.** Implementers keep their `--conversation` ID across fix and commit rounds (`scripts/run_task.py`), with automatic fallback to a fresh `agy -p` run if resume fails. The conversation ID is cleared at merge or escalation.
-8. **Implementers use only** `test-driven-development`, `verification-before-completion`, and the convention files named in their task. They never brainstorm, plan, create worktrees, ask in a local interactive prompt, or finish or merge the branch.
+8. **Implementers use only** `red-green`, `gatecheck`, and the convention files named in their task. They never brainstorm, plan, create worktrees, ask in a local interactive prompt, or finish or merge the branch.
 9. **Project instructions:** output rules (style, naming, architecture, tests, commit and branch format, PR template, required checks) are followed. Rules about running the work (planning, spawning agents, review process, merging) are ignored. The architect sorts them.
 10. **No `/boost`, `/swarm`, or `/teamwork`** for anyone.
 11. **Reviewers are read-only and single-use.** They work from `git diff` and `git show` on the task range. Each writes its review to a file in `<RUN_DIR>/verdicts`, outside the worktree, ending with a `VERDICT:` line.

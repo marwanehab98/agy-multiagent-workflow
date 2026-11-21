@@ -1,35 +1,35 @@
 ---
-name: egm-brainstorm
+name: crucible
 license: Apache-2.0
 disable-model-invocation: true
 description: >-
-  Interactive ideation and brainstorming skill for the Elephant &
+  Interactive ideation and draft-spec skill for the Elephant &
   Goldfish Model (EGM). Helps turn half-baked concepts into structured
   hypotheses via clarifying questions, review, and iterative refinement.
-  Produces an RFC summary (`concepts_brief.md`) for human review or downstream design/planning with `brainstorming` or `writing-plans`.
+  Produces an RFC summary (`concepts_brief.md`) for human review or downstream design/planning with `draft-spec` or `flight-plan`.
 ---
 
 # EGM Brainstorm: Interactive Multi-Lens Ideation & Refinement
 
 ## Overview
 
-This skill acts as the upstream conversational brainstorming engine for the
+This skill acts as the upstream conversational draft-spec engine for the
 Elephant-Goldfish Model (EGM). It turns "half-baked" or raw concepts into
 hypotheses by combining **interactive clarifying questions** with an automated
 **Goldfish review**. The outcome is an iteratively refined RFC summary
-(`concepts_brief.md`) that leads into `brainstorming`, `writing-plans`, or review with peers.
+(`concepts_brief.md`) that leads into `draft-spec`, `flight-plan`, or review with peers.
 
 ## Delegation
 
 A Goldfish runs in a fresh context with no conversation history. Spawn each
 subagent with Antigravity's `invoke_subagent` (or `define_subagent` + `invoke_subagent` when named subagents are not pre-registered), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless `agy -p` worker started by `agy-multiagent-workflow` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+If running inside a headless `agy -p` worker started by `mission` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
 
 ## Asset Resolution
 
 Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the plugin/skill bundle root (never from the target repository's working tree):
 - In a plugin or repo layout (`.../skills/<this-skill>/SKILL.md`): `../../agents/` and `../../resources/document_standards/`.
-- In a flat skills install (`<skills_dir>/<this-skill>/SKILL.md`): `../agy-multiagent-workflow/agents/` and `../agy-multiagent-workflow/resources/document_standards/`.
+- In a flat skills install (`<skills_dir>/<this-skill>/SKILL.md`): `../mission/agents/` and `../mission/resources/document_standards/`.
 
 ## Execution Constraints (CRITICAL)
 
@@ -201,7 +201,7 @@ The `concepts_brief.md` artifact follows this structure:
 
 ## Key Decisions & Staging for Next Steps
 
-[Key decisions resolved during ideation to be carried forward into `brainstorming` or `writing-plans`.]
+[Key decisions resolved during ideation to be carried forward into `draft-spec` or `flight-plan`.]
 ```
 
 ### Step 3: Interactive Iteration & Refinement Loop
@@ -229,9 +229,9 @@ The `concepts_brief.md` artifact follows this structure:
           "question": "Brainstorming complete. concepts_brief.md is finalized. Select next step:",
           "options": [
             "Publish concepts_brief.md as RFC for team feedback",
-            "Proceed to writing-plans / brainstorming (Create formal design or implementation plan)",
+            "Proceed to flight-plan / draft-spec (Create formal design or implementation plan)",
             "Continue refining concepts_brief.md in ideation mode",
-            "Conclude brainstorming and keep brief for later"
+            "Conclude draft-spec and keep brief for later"
           ],
           "is_multi_select": false
         }
@@ -247,17 +247,17 @@ The `concepts_brief.md` artifact follows this structure:
         *   Notify the user in chat that the RFC has been published and can be
             shared with the team for feedback. Remind the user that once
             feedback is gathered, a formal design or plan can be created by
-            invoking `brainstorming` or `writing-plans` on
+            invoking `draft-spec` or `flight-plan` on
             `docs/designs/<feature_name>.md`.
-    *   **Option 1: `Proceed to writing-plans / brainstorming (Create formal design or implementation plan)`**:
+    *   **Option 1: `Proceed to flight-plan / draft-spec (Create formal design or implementation plan)`**:
         *   Confirm that `concepts_brief.md` is saved in the working directory
             or artifact directory.
-        *   Instruct the user to invoke `brainstorming` (to draft a full design
-            doc) or `writing-plans` (if the design is ready to break into
+        *   Instruct the user to invoke `draft-spec` (to draft a full design
+            doc) or `flight-plan` (if the design is ready to break into
             implementation tasks) using `concepts_brief.md` as input.
     *   **Option 2: `Continue refining concepts_brief.md in ideation mode`**:
         *   Return to Step 3 iteration loop to drill into further edge cases or
             update the brief based on user chat input.
-    *   **Option 3: `Conclude brainstorming and keep brief for later`**:
+    *   **Option 3: `Conclude draft-spec and keep brief for later`**:
         *   Conclude the session gracefully. Remind the user that
             `concepts_brief.md` remains saved for future reference.

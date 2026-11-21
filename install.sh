@@ -160,12 +160,19 @@ for i in "${!targets[@]}"; do
   else
     mkdir -p "$dest"
     snap="$keep/$(date +%Y%m%d-%H%M%S)-$$"
-    prev_managed=()
-    if [ -f "$dest/$name/.managed-skills" ]; then
-      while IFS= read -r mname; do
-        [ -n "$mname" ] && prev_managed+=("$mname")
-      done < "$dest/$name/.managed-skills"
+    if [ -d "$release/skills/mission" ]; then
+      main_skill="mission"
+    else
+      main_skill="$name"
     fi
+    prev_managed=()
+    for prev_main in mission "$name"; do
+      if [ -f "$dest/$prev_main/.managed-skills" ]; then
+        while IFS= read -r mname; do
+          [ -n "$mname" ] && prev_managed+=("$mname")
+        done < "$dest/$prev_main/.managed-skills"
+      fi
+    done
     count=0
     has_bundled_skills=0
     for sdir in "$release"/skills/*; do
@@ -179,9 +186,16 @@ for i in "${!targets[@]}"; do
         backup="$snap"
       fi
     done
+    # Back up any previously managed sibling skills and any prior main orchestrator folder
+    for prev_main in mission "$name"; do
+      if [ -e "$dest/$prev_main" ]; then
+        mkdir -p "$snap"
+        move_backup "$dest/$prev_main" "$snap/$prev_main"
+        backup="$snap"
+      fi
+    done
     if [ ${#prev_managed[@]} -gt 0 ]; then
       for sname in "${prev_managed[@]}"; do
-        [ "$sname" = "$name" ] && continue
         if [ -e "$dest/$sname" ]; then
           mkdir -p "$snap"
           move_backup "$dest/$sname" "$snap/$sname"
@@ -189,35 +203,30 @@ for i in "${!targets[@]}"; do
         fi
       done
     fi
-    if [ "$has_bundled_skills" -eq 0 ] && [ -e "$dest/$name" ]; then
-      mkdir -p "$snap"
-      move_backup "$dest/$name" "$snap/$name"
-      backup="$snap"
-    fi
-    # Install main orchestrator + shared runtime into $dest/$name
-    mkdir -p "$dest/$name"
-    if [ -d "$release/skills/$name" ]; then
-      copy_into "$release/skills/$name" "$dest/$name"
+    # Install main orchestrator + shared runtime into $dest/$main_skill
+    mkdir -p "$dest/$main_skill"
+    if [ -d "$release/skills/$main_skill" ]; then
+      copy_into "$release/skills/$main_skill" "$dest/$main_skill"
     elif [ -f "$release/SKILL.md" ]; then
-      copy_item "$release/SKILL.md" "$dest/$name/SKILL.md"
+      copy_item "$release/SKILL.md" "$dest/$main_skill/SKILL.md"
       count=1
     fi
     for part in plugin.json THIRD_PARTY_NOTICES.md assets references scripts agents resources docs VERSION; do
-      [ -e "$release/$part" ] && copy_item "$release/$part" "$dest/$name/$part"
+      [ -e "$release/$part" ] && copy_item "$release/$part" "$dest/$main_skill/$part"
     done
     # Install each standalone skill directly into $dest/<skill_name>
     managed=()
     for sdir in "$release"/skills/*; do
       [ -d "$sdir" ] || continue
       sname=$(basename "$sdir")
-      [ "$sname" = "$name" ] && continue
+      [ "$sname" = "$main_skill" ] && continue
       copy_item "$sdir" "$dest/$sname"
       managed+=("$sname")
     done
     if [ ${#managed[@]} -gt 0 ]; then
-      printf '%s\n' "${managed[@]}" > "$dest/$name/.managed-skills"
+      printf '%s\n' "${managed[@]}" > "$dest/$main_skill/.managed-skills"
     fi
     prune_backups "$keep"
-    echo "INSTALLED ${sha:0:12} to $dest/$name ($count skills in $dest) ($label)${backup:+, previous kept at $backup}"
+    echo "INSTALLED ${sha:0:12} to $dest/$main_skill ($count skills in $dest) ($label)${backup:+, previous kept at $backup}"
   fi
 done
