@@ -1,0 +1,135 @@
+{
+ "detected_at": "2026-11-21T00:00:00+00:00",
+ "harnesses": {
+  "antigravity": {
+   "binary": "agy",
+   "version": "1.5.9",
+   "styles": [
+    "slug",
+    "flag"
+   ],
+   "models": [
+    {
+     "model": "g",
+     "label": "G model",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+     ]
+    },
+    {
+     "model": "big",
+     "label": "Big",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    {
+     "model": "small",
+     "label": "Small",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    }
+   ],
+   "skills": {
+    "mission": "/skills/mission",
+    "launch-plan": "/skills/launch-plan",
+    "gatecheck": "/skills/gatecheck",
+    "touchdown": "/skills/touchdown",
+    "draft-spec": "/skills/draft-spec",
+    "flight-plan": "/skills/flight-plan",
+    "crucible": "/skills/crucible",
+    "gauntlet": "/skills/gauntlet",
+    "crossfire": "/skills/crossfire",
+    "red-green": "/skills/red-green",
+    "spec-drift": "/skills/spec-drift"
+   },
+   "plugins": [],
+   "mcp": {
+    "atlassian-mcp-server": true
+   },
+   "broken": null,
+   "skill_dirs": [
+    "/home/u/.gemini/config/skills"
+   ],
+   "plugin_cmd": "agy plugin list",
+   "mcp_cmd": "agy mcp list"
+  },
+  "claude": {
+   "binary": "claude",
+   "version": "2.1.323",
+   "styles": [
+    "flag"
+   ],
+   "models": [
+    {
+     "model": "opus",
+     "label": "Claude Opus",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    {
+     "model": "sonnet",
+     "label": "Claude Sonnet",
+     "efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
+    },
+    {
+     "model": "haiku",
+     "label": "Claude Haiku",
+     "efforts": [
+      "default"
+     ]
+    }
+   ],
+   "skills": {
+    "mission": "/claude-skills/mission",
+    "launch-plan": "/claude-skills/launch-plan",
+    "gatecheck": "/claude-skills/gatecheck",
+    "touchdown": "/claude-skills/touchdown",
+    "draft-spec": "/claude-skills/draft-spec",
+    "flight-plan": "/claude-skills/flight-plan",
+    "crucible": "/claude-skills/crucible",
+    "gauntlet": "/claude-skills/gauntlet",
+    "crossfire": "/claude-skills/crossfire",
+    "red-green": "/claude-skills/red-green",
+    "spec-drift": "/claude-skills/spec-drift"
+   },
+   "plugins": [
+    "superpowers@claude-plugins-official"
+   ],
+   "mcp": {
+    "claude.ai Atlassian MCP": true,
+    "claude.ai Context7": true,
+    "claude.ai Linear": false
+   },
+   "broken": null,
+   "skill_dirs": [
+    "/home/u/.claude/skills"
+   ],
+   "plugin_cmd": "claude plugin list",
+   "mcp_cmd": "claude mcp list"
+  }
+ }
+}

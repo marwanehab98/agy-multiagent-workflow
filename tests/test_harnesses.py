@@ -58,13 +58,16 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(m["gemini-4-hydrogen"], ["low", "medium", "high", "xhigh"])
         self.assertEqual(m["gemini-pro-orchestrator-g1-pro"], ["default"])
 
-    def test_install_dirs_lists_antigravity_skills_folder(self):
+    def test_install_dirs_lists_antigravity_and_claude_skills_folders(self):
         home = Path(tempfile.mkdtemp(prefix="home-"))
         r = subprocess.run([sys.executable, "-I", str(SCRIPT), "install-dirs", "--fixtures", str(FIXTURES),
                             "--home", str(home)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = {l.split("\t")[0]: l.split("\t")[1:] for l in r.stdout.splitlines()}
-        self.assertEqual(rows, {"antigravity": [str(home / ".gemini" / "config" / "skills"), "found"]})
+        self.assertEqual(rows, {
+            "antigravity": [str(home / ".gemini" / "config" / "skills"), "found"],
+            "claude": [str(home / ".claude" / "skills"), "found"],
+        })
 
     def test_signed_out_harness_is_broken_not_empty(self):
         h = detect_fixture(agy_models="agy_models_signed_out.txt")["harnesses"]["antigravity"]
@@ -158,6 +161,141 @@ class DetectTests(unittest.TestCase):
         cat = detect_fixture()
         self.assertEqual(top_effort(cat, "antigravity", "gemini-4-hydrogen"), "xhigh")
         self.assertEqual(top_effort(cat, "antigravity", "gemini-pro-orchestrator-g1-pro"), "default")
+
+
+class ClaudeAdapterTests(unittest.TestCase):
+    def test_detect_claude_version_models_plugins_mcp(self):
+        cat = detect_fixture()
+        self.assertIn("claude", cat["harnesses"])
+        c = cat["harnesses"]["claude"]
+        self.assertEqual(c["binary"], "claude")
+        self.assertEqual(c["version"], "2.1.323")
+        self.assertEqual(c["styles"], ["flag"])
+        self.assertIsNone(c["broken"])
+        models = {m["model"]: m["efforts"] for m in c["models"]}
+        self.assertEqual(models["opus"], ["low", "medium", "high", "xhigh", "max"])
+        self.assertEqual(models["sonnet"], ["low", "medium", "high", "xhigh", "max"])
+        self.assertEqual(models["haiku"], ["default"])
+        self.assertEqual(c["plugins"], ["superpowers@claude-plugins-official", "engineering@synced"])
+        self.assertEqual(c["mcp"], {
+            "claude.ai Atlassian MCP": True,
+            "claude.ai Context7": True,
+            "claude.ai Linear": False,
+        })
+        self.assertEqual(c["skill_dirs"], [str(FAKE_HOME / ".claude" / "skills")])
+        self.assertEqual((c["plugin_cmd"], c["mcp_cmd"]), ("claude plugin list", "claude mcp list"))
+
+    def test_nonzero_help_marks_claude_broken(self):
+        base = fixture_runner()
+        def runner(cmd):
+            if tuple(cmd) == ("claude", "--help"):
+                return 1, "Auth required\n"
+            return base(cmd)
+        runner.fixtures = True
+        c = detect(runner, FAKE_HOME, env={})["harnesses"]["claude"]
+        self.assertEqual(c["models"], [])
+        self.assertIn("Auth required", c["broken"])
+
+    def test_claude_skill_roots_priority(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            user_dir = home / ".claude" / "skills" / "brainstorming"
+            old_cache = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.1" / "skills"
+            new_cache = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.2" / "skills"
+            for d in (
+                user_dir,
+                old_cache / "brainstorming",
+                old_cache / "tdd",
+                new_cache / "brainstorming",
+                new_cache / "tdd",
+            ):
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text("---\nname: test\n---\n")
+            with unittest.mock.patch.object(harnesses.shutil, "which", return_value="/usr/bin/claude"):
+                base = fixture_runner()
+                def live_like_runner(cmd):
+                    return base(cmd)
+                c = detect(live_like_runner, home, env={})["harnesses"]["claude"]
+            self.assertEqual(c["skills"]["brainstorming"], str(user_dir))
+            self.assertEqual(c["skills"]["tdd"], str(new_cache / "tdd"))
+            self.assertEqual(c["skills"]["mission"], str(SKILL / "skills" / "mission"))
+
+    def test_claude_launch_args_and_top_effort(self):
+        cat = detect_fixture()
+        self.assertEqual(launch_args(cat, parse_pair("claude:opus@max"), "flag"), ["--model", "opus", "--effort", "max"])
+        self.assertEqual(launch_args(cat, parse_pair("claude:haiku@default"), "flag"), ["--model", "haiku"])
+        self.assertEqual(top_effort(cat, "claude", "opus"), "max")
+        self.assertEqual(top_effort(cat, "claude", "haiku"), "default")
+
+    def test_detect_session_harness(self):
+        cat = detect_fixture()
+        self.assertEqual(harnesses.detect_session_harness(cat, env={"CLAUDECODE": "1"}), "claude")
+        self.assertEqual(harnesses.detect_session_harness(cat, env={"CLAUDE_CODE_ENTRYPOINT": "cli"}), "claude")
+        self.assertEqual(harnesses.detect_session_harness(cat, env={"ANTIGRAVITY_CLI_ALIAS": "agy"}), "antigravity")
+        self.assertEqual(harnesses.detect_session_harness(cat, env={}), "antigravity")
+        claude_only = {"harnesses": {"claude": cat["harnesses"]["claude"]}}
+        self.assertEqual(harnesses.detect_session_harness(claude_only, env={}), "claude")
+
+    def test_claude_mcp_status_parsing_and_nonzero_rc(self):
+        base = fixture_runner()
+        def runner(cmd):
+            if tuple(cmd) == ("claude", "mcp", "list"):
+                return 0, (
+                    "srv-ok: https://example.com/1 - ✔ Connected\n"
+                    "srv-dis: https://example.com/2 - ✗ Disconnected\n"
+                    "srv-not: https://example.com/3 - ! Not connected\n"
+                )
+            return base(cmd)
+        adapter = harnesses.ClaudeAdapter(runner, FAKE_HOME, env={})
+        self.assertEqual(adapter.mcp(), {
+            "srv-ok": True,
+            "srv-dis": False,
+            "srv-not": False,
+        })
+
+        def failing_runner(cmd):
+            if tuple(cmd) == ("claude", "mcp", "list"):
+                return 1, "srv-ok: https://example.com/1 - ✔ Connected\n"
+            return base(cmd)
+        self.assertEqual(harnesses.ClaudeAdapter(failing_runner, FAKE_HOME, env={}).mcp(), {})
+
+    def test_claude_plugins_excludes_negated_statuses(self):
+        base = fixture_runner()
+        def runner(cmd):
+            if tuple(cmd) == ("claude", "plugin", "list"):
+                return 0, (
+                    "Installed plugins:\n\n"
+                    "  ❯ active-one@official\n"
+                    "    Status: ✔ enabled\n\n"
+                    "  ❯ active-two@synced\n"
+                    "    Status: ✔ loaded\n\n"
+                    "  ❯ off-unloaded@official\n"
+                    "    Status: ✗ unloaded\n\n"
+                    "  ❯ off-not-loaded@official\n"
+                    "    Status: ! not loaded\n\n"
+                    "  ❯ off-disabled@official\n"
+                    "    Status: ✗ disabled\n\n"
+                    "  ❯ off-not-enabled@official\n"
+                    "    Status: ! not enabled\n"
+                )
+            return base(cmd)
+        self.assertEqual(
+            harnesses.ClaudeAdapter(runner, FAKE_HOME, env={}).plugins(),
+            ["active-one@official", "active-two@synced"],
+        )
+
+    def test_claude_skill_roots_prefers_numeric_version_sort(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            v_old = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.2" / "skills"
+            v_new = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.10" / "skills"
+            for d in (v_old / "tdd", v_new / "tdd"):
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text("---\nname: tdd\n---\n")
+            adapter = harnesses.ClaudeAdapter(fixture_runner(), home, env={})
+            roots = adapter.skill_roots()
+            self.assertLess(roots.index(v_new), roots.index(v_old))
+            self.assertEqual(adapter.skills()["tdd"], str(v_new / "tdd"))
 
 
 class RealRunnerTests(unittest.TestCase):

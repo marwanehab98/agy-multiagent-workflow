@@ -1,13 +1,13 @@
-"""Harness adapter for Antigravity (`agy` CLI).
+"""Harness adapters for Antigravity (`agy` CLI) and Claude Code (`claude` CLI).
 
 Usage:
   python3 -I harnesses.py detect --out <file> [--fixtures DIR --home DIR]
-  python3 -I harnesses.py args (--state <state.json> | --catalog <file>) --pair <pair>   # agy CLI model/effort args
+  python3 -I harnesses.py args (--state <state.json> | --catalog <file>) --pair <pair>   # CLI model/effort args
   python3 -I harnesses.py skill-dir --catalog <file> --harness H --skill NAME
   python3 -I harnesses.py top-effort --catalog <file> --harness H --model M
   python3 -I harnesses.py install-dirs [--fixtures DIR --home DIR]   # name<TAB>skills folder<TAB>found|missing
 
-`detect` runs `agy` CLI commands and writes a catalog:
+`detect` runs harness CLI commands and writes a catalog:
   {"detected_at": iso, "harnesses": {name: {binary, version, styles, models,
    skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str,
    skill_dirs: [folder], plugin_cmd: str, mcp_cmd: str}}}
@@ -46,7 +46,21 @@ FIXTURE_FILES = {
     ("agy", "plugin", "list"): "agy_plugin_list.txt",
     ("agy", "mcp", "list"): "agy_mcp_list.txt",
     ("agy", "--version"): "agy_version.txt",
+    ("claude", "--version"): "claude_version.txt",
+    ("claude", "--help"): "claude_help.txt",
+    ("claude", "plugin", "list"): "claude_plugin_list.txt",
+    ("claude", "mcp", "list"): "claude_mcp_list.txt",
 }
+
+
+def _as_text(val):
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    return str(val)
 
 
 def fixture_runner(fixtures, overrides=None):
@@ -66,6 +80,8 @@ class Adapter:
     name = binary = ""
     styles = []
     version_cmd = ["--version"]
+    exe_state_key = ""
+    resume_flag = ""
 
     def __init__(self, runner, home, env=None):
         self.runner, self.home = runner, Path(home)
@@ -112,11 +128,28 @@ class Adapter:
                 found.setdefault(f.parent.name, str(f.parent))
         return found
 
+    @classmethod
+    def build_exec_cmd(cls, exe, prompt, args, conversation_id=None):
+        cmd = [exe, "-p", prompt, "--output-format", "json", "--dangerously-skip-permissions", *args]
+        if conversation_id:
+            cmd += [cls.resume_flag, conversation_id]
+        return cmd
+
+    @classmethod
+    def is_envelope(cls, data):
+        raise NotImplementedError
+
+    @classmethod
+    def extract_envelope(cls, data, returncode, exe, conversation_id=None, raw_err=""):
+        raise NotImplementedError
+
 
 class AntigravityAdapter(Adapter):
     name, binary = "antigravity", "agy"
     styles = ["slug", "flag"]
     models_cmd = ("models",)
+    exe_state_key = "AGY"
+    resume_flag = "--conversation"
 
     def models(self):
         rc, raw = self.run(*self.models_cmd)
@@ -166,8 +199,189 @@ class AntigravityAdapter(Adapter):
             roots.append(bundled)
         return roots
 
+    @classmethod
+    def is_envelope(cls, data):
+        return (
+            isinstance(data, dict)
+            and isinstance(data.get("status"), str)
+            and bool({"response", "error", "conversation_id"} & data.keys())
+        )
 
-ADAPTERS = {"antigravity": AntigravityAdapter}
+    @classmethod
+    def extract_envelope(cls, data, returncode, exe, conversation_id=None, raw_err=""):
+        returned_id = _as_text(data.get("conversation_id")).strip()
+        conv_id = returned_id or conversation_id or ""
+        status = _as_text(data.get("status")).strip()
+        resp = _as_text(data.get("response"))
+        err = _as_text(data.get("error"))
+        ok = (status == "SUCCESS" and returncode == 0)
+        detail = "" if ok else (err or resp or raw_err or f"{exe} exited {returncode} (status={status})").strip()
+        return {
+            "ok": ok,
+            "returned_id": returned_id,
+            "conv_id": conv_id,
+            "response": resp,
+            "detail": detail,
+        }
+
+
+class ClaudeAdapter(Adapter):
+    name, binary = "claude", "claude"
+    styles = ["flag"]
+    models_cmd = ("--help",)
+    exe_state_key = "CLAUDE"
+    resume_flag = "--resume"
+
+    def models(self):
+        rc, raw = self.run(*self.models_cmd)
+        if rc != 0 or "--model" not in raw:
+            return []
+        efforts = ["default"]
+        m_flag = re.search(r"(?m)^\s*--effort\b[^\n]*(?:\n(?!\s*-)[^\n]*)*", raw)
+        if m_flag:
+            block = m_flag.group(0)
+            parsed = []
+            for grp in re.findall(r"\(([^)]+)\)", block):
+                items = [x.strip(" \"'") for x in grp.split(",")]
+                cand = [x for x in items if x in EFFORTS]
+                if cand:
+                    parsed = cand
+                    break
+            efforts = parsed or ["low", "medium", "high"]
+        return [
+            {"model": "opus", "label": "Claude Opus", "efforts": list(efforts)},
+            {"model": "sonnet", "label": "Claude Sonnet", "efforts": list(efforts)},
+            {"model": "haiku", "label": "Claude Haiku", "efforts": ["default"]},
+        ]
+
+    def _parse_plugins(self):
+        rc, raw = self.run("plugin", "list")
+        if rc != 0:
+            return [], []
+        ids, paths = [], []
+        for block in re.split(r"(?m)^\s*❯\s+", raw)[1:]:
+            lines = block.splitlines()
+            pid = lines[0].strip() if lines else ""
+            if not pid:
+                continue
+            status = ""
+            path = ""
+            for line in lines[1:]:
+                s = line.strip()
+                if s.startswith("Status:"):
+                    status = s.partition(":")[2].strip().lower()
+                elif s.startswith("Path:"):
+                    path = s.partition(":")[2].strip()
+            if (
+                re.search(r"\b(enabled|loaded)\b", status)
+                and not re.search(r"\b(disabled|unloaded|not\s+(?:enabled|loaded))\b", status)
+            ):
+                if pid not in ids:
+                    ids.append(pid)
+                if path and path not in paths:
+                    paths.append(path)
+        return ids, paths
+
+    def plugins(self):
+        return self._parse_plugins()[0]
+
+    def _plugin_paths(self):
+        return self._parse_plugins()[1]
+
+    def mcp(self):
+        rc, raw = self.run("mcp", "list")
+        if rc != 0:
+            return {}
+        out = {}
+        for line in raw.splitlines():
+            m = re.match(r"^([^:\n]+?):\s+\S+.*\s+-\s+(.+)$", line.strip())
+            if m:
+                status = m.group(2).lower()
+                out[m.group(1).strip()] = (
+                    bool(re.search(r"\bconnected\b", status))
+                    and not re.search(r"\b(?:dis|not\s+)connected\b", status)
+                )
+        return out
+
+    def user_skill_dirs(self):
+        return [self.home / ".claude" / "skills"]
+
+    def skill_roots(self):
+        roots = list(self.user_skill_dirs())
+        cache_root = self.home / ".claude" / "plugins" / "cache"
+        for pid in self.plugins():
+            if "@" not in pid:
+                continue
+            plugin, _, marketplace = pid.partition("@")
+            plugin_cache = cache_root / marketplace / plugin
+            if plugin_cache.is_dir():
+                for skill_dir in sorted(
+                    plugin_cache.glob("*/skills"),
+                    key=lambda p: (tuple(int(x) for x in re.findall(r"\d+", p.parent.name)), p.parent.name),
+                    reverse=True,
+                ):
+                    if skill_dir.is_dir():
+                        roots.append(skill_dir)
+        for p in self._plugin_paths():
+            sdir = Path(p) / "skills"
+            if sdir.is_dir():
+                roots.append(sdir)
+        bundled = Path(__file__).resolve().parent.parent / "skills"
+        if not getattr(self.runner, "fixtures", False) and bundled.is_dir():
+            roots.append(bundled)
+        return roots
+
+    @classmethod
+    def is_envelope(cls, data):
+        return (
+            isinstance(data, dict)
+            and data.get("type") == "result"
+            and bool({"session_id", "result", "is_error"} & data.keys())
+        )
+
+    @classmethod
+    def extract_envelope(cls, data, returncode, exe, conversation_id=None, raw_err=""):
+        returned_id = _as_text(data.get("session_id")).strip()
+        conv_id = returned_id or conversation_id or ""
+        subtype = _as_text(data.get("subtype")).strip()
+        is_error = bool(data.get("is_error"))
+        resp = _as_text(data.get("result"))
+        raw_errs = data.get("errors")
+        errs = "; ".join(_as_text(x) for x in raw_errs if x is not None) if isinstance(raw_errs, list) else _as_text(raw_errs)
+        ok = (returncode == 0 and not is_error and (not subtype or subtype == "success"))
+        detail = (
+            ""
+            if ok
+            else (errs or _as_text(data.get("error")) or resp or raw_err or f"{exe} exited {returncode} (subtype={subtype or 'unknown'})").strip()
+        )
+        return {
+            "ok": ok,
+            "returned_id": returned_id,
+            "conv_id": conv_id,
+            "response": resp,
+            "detail": detail,
+        }
+
+
+ADAPTERS = {"antigravity": AntigravityAdapter, "claude": ClaudeAdapter}
+
+
+def get_adapter(harness):
+    return ADAPTERS[harness]
+
+
+def detect_session_harness(catalog, env=None):
+    env = os.environ if env is None else env
+    harnesses = catalog.get("harnesses", {})
+    if (env.get("CLAUDECODE") or env.get("CLAUDE_CODE_ENTRYPOINT")) and "claude" in harnesses:
+        return "claude"
+    if (env.get("ANTIGRAVITY_CLI_ALIAS") or any(k.startswith(("ANTIGRAVITY_", "AGY_")) and env.get(k) for k in env)) and "antigravity" in harnesses:
+        return "antigravity"
+    if "antigravity" in harnesses:
+        return "antigravity"
+    if len(harnesses) == 1:
+        return next(iter(harnesses))
+    return "antigravity"
 
 
 def detect(runner, home, env=None):

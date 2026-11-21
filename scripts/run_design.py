@@ -1,8 +1,8 @@
-"""Run the coordinator's Step 2 read-only design workers synchronously via headless `agy -p`.
+"""Run the coordinator's Step 2 read-only design workers synchronously via headless CLI workers.
 
 The architect asks for a worker with a NEED result: a builder check, an EGM design review, an EGM
 lens pass or an EGM plan review. Each call runs every deterministic action it can (check the docs
-worktree, test-launch the builder pair, run the worker via `agy -p`, save its response, restore the
+worktree, test-launch the builder pair, run the worker, save its response, restore the
 docs worktree, retry once, count runs) and exits at the first point that needs the architect.
 
 Usage:

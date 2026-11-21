@@ -1,4 +1,4 @@
-"""Test-launch pairs synchronously with `agy -p`: find which launch style each pair needs.
+"""Test-launch pairs synchronously with headless CLI workers: find which launch style each pair needs.
 
 Each pending pair is tried in DOCS_WORKTREE with its harness's launch styles in order (`slug`,
 then `flag`); the first that succeeds is recorded as LAUNCH_STYLE_<key>. Failures are appended to
@@ -74,7 +74,7 @@ class Prober:
         for idx, style in enumerate(styles):
             spec = build("probe.txt", self.r.run_dir / "specs" / f"probe-{key}-{idx}.txt")
             args = launch_args(self.catalog, pair, style)
-            result = self.runner.run(spec, args=args, worktree=self.wt)
+            result = self.runner.run(spec, pair=pair, args=args, worktree=self.wt)
             self.finish_attempt(pair)
             if result[0] == "done" and result[1] == "succeeded":
                 self.r.set(**{f"LAUNCH_STYLE_{key}": style, f"PROBE_RECHECK_{key}": None})

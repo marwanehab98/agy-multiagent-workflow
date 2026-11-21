@@ -1,4 +1,4 @@
-"""Plumbing shared by the run_*.py scripts: status codes, state file, headless `agy -p` runner, helpers."""
+"""Plumbing shared by the run_*.py scripts: status codes, state file, headless CLI worker runner, helpers."""
 import datetime
 import json
 import os
@@ -11,16 +11,20 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # -I drops the script dir from sys.path
-from harnesses import launch_args, pick_style  # noqa: E402
-from pairs import parse_pair  # noqa: E402
+from harnesses import _as_text, get_adapter, launch_args, pick_style  # noqa: E402
+from pairs import Pair, parse_pair  # noqa: E402
 
 QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR = 0, 10, 20, 21, 22, 30, 40, 2
 
 VERDICTS = ("VERDICT: PASS", "VERDICT: FIX")
 
-USAGE_RE = re.compile(r"(?i)(usageLimitReached|usage\s*limit|rate\s*limit|quota|resource_exhausted|\b429\b|5-hour limit)")
+USAGE_RE = re.compile(
+    r"(?i)(usageLimitReached|usage\s*limit|rate[_\s]*limit|quota|resource_exhausted|\b429\b|"
+    r"5-hour limit|overloaded_error|hit your limit|out of extra usage|credit balance is too low)"
+)
 RESUME_ERR_RE = re.compile(
-    r"(?i)(conversation.*(not found|invalid|expired|does not exist|unknown|missing)|cannot resume|unknown conversation)"
+    r"(?i)((conversation|session).*(not found|invalid|expired|does not exist|unknown|missing)|"
+    r"no conversation found with session id|cannot resume|unknown (conversation|session))"
 )
 
 
@@ -172,7 +176,7 @@ def bundled_skills_dir(skill_name):
     return None
 
 
-# ---------------------------------------------------------------- headless agy runner
+# ---------------------------------------------------------------- headless worker runner
 
 MAX_INLINE_PROMPT_BYTES = 65536
 DEFAULT_AGY_TIMEOUT = 1800
@@ -192,24 +196,13 @@ def _read_spec_or_text(spec_or_text):
     return str(spec_or_text), None
 
 
-ENVELOPE_PAYLOAD_KEYS = {"response", "error", "conversation_id"}
-
-
-def _is_envelope(data):
-    return (
-        isinstance(data, dict)
-        and isinstance(data.get("status"), str)
-        and bool(ENVELOPE_PAYLOAD_KEYS & data.keys())
-    )
-
-
-def _parse_json_envelope(raw_out):
+def _parse_json_envelope(raw_out, adapter):
     """Parse JSON envelope from stdout, tolerating leading status/banner lines."""
     if not raw_out:
         return None
     try:
         data = json.loads(raw_out)
-        return data if _is_envelope(data) else None
+        return data if adapter.is_envelope(data) else None
     except json.JSONDecodeError:
         pass
     lines = raw_out.splitlines()
@@ -218,7 +211,7 @@ def _parse_json_envelope(raw_out):
             candidate = "\n".join(lines[i:])
             try:
                 data = json.loads(candidate)
-                if _is_envelope(data):
+                if adapter.is_envelope(data):
                     return data
             except json.JSONDecodeError:
                 continue
@@ -230,25 +223,28 @@ def _strip_marker_formatting(line):
     return re.sub(r"^(ASK|FAILED)[`*]+\s*:", r"\1:", cleaned)
 
 
-def _as_text(val):
-    if val is None:
-        return ""
-    if isinstance(val, str):
-        return val
-    if isinstance(val, (dict, list)):
-        return json.dumps(val)
-    return str(val)
+def _as_pair(pair):
+    return pair if isinstance(pair, Pair) else parse_pair(pair)
 
 
 class AgyRunner:
-    """Run headless `agy -p` workers synchronously with `--output-format json`."""
+    """Run headless CLI workers synchronously with `--output-format json`."""
 
     def __init__(self, r):
         self.r = r
-        self.exe = r.get("AGY") or "agy"
+        self.exe = self.exe_for("antigravity")
+
+    def exe_for(self, harness):
+        adapter = get_adapter(harness)
+        return self.r.get(adapter.exe_state_key) or adapter.binary
 
     def _timeout(self):
-        raw = self.r.get("AGY_TIMEOUT") or os.environ.get("AGY_TIMEOUT")
+        raw = (
+            self.r.get("WORKER_TIMEOUT")
+            or self.r.get("AGY_TIMEOUT")
+            or os.environ.get("WORKER_TIMEOUT")
+            or os.environ.get("AGY_TIMEOUT")
+        )
         if raw is None or str(raw).strip() == "":
             return DEFAULT_AGY_TIMEOUT
         try:
@@ -270,11 +266,11 @@ class AgyRunner:
     def launch(self, pair):
         """Model/effort CLI arguments for a pair, in its recorded launch style (or fallback)."""
         catalog = json.loads(Path(self.r.need("CATALOG")).read_text(encoding="utf-8"))
-        parsed = parse_pair(pair)
+        parsed = _as_pair(pair)
         return launch_args(catalog, parsed, pick_style(catalog, self.r.s, parsed))
 
-    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None, spec_path=None):
-        """Invoke `agy -p` and return (kind, detail_or_outcome, body, conversation_id).
+    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None, spec_path=None, harness="antigravity"):
+        """Invoke a headless worker and return (kind, detail_or_outcome, body, conversation_id).
 
         kind is one of:
           'done'          -> ('done', 'succeeded'|'failed', body, conv_id)
@@ -283,16 +279,10 @@ class AgyRunner:
           'resume_failed' -> ('resume_failed', detail, '', '')
           'stopped'       -> ('stopped', detail, '', conv_id)
         """
+        adapter = get_adapter(harness)
+        exe = self.exe_for(harness)
         cli_prompt = self._prepare_prompt(prompt_text, spec_path=spec_path)
-        cmd = [
-            self.exe,
-            "-p", cli_prompt,
-            "--output-format", "json",
-            "--dangerously-skip-permissions",
-            *args,
-        ]
-        if conversation_id:
-            cmd += ["--conversation", conversation_id]
+        cmd = adapter.build_exec_cmd(exe, cli_prompt, args, conversation_id=conversation_id)
         timeout = self._timeout()
         try:
             proc = subprocess.Popen(
@@ -316,13 +306,13 @@ class AgyRunner:
                     proc.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-                return ("stopped", f"{self.exe} timed out after {timeout}s", "", conversation_id or "")
+                return ("stopped", f"{exe} timed out after {timeout}s", "", conversation_id or "")
         except OSError as e:
-            return ("stopped", f"failed to launch {self.exe}: {e}", "", "")
+            return ("stopped", f"failed to launch {exe}: {e}", "", "")
 
         raw_out = (stdout_s or "").strip()
         raw_err = (stderr_s or "").strip()
-        data = _parse_json_envelope(raw_out)
+        data = _parse_json_envelope(raw_out, adapter)
 
         if not isinstance(data, dict):
             combined = "\n".join(x for x in (raw_out, raw_err) if x).strip()
@@ -330,30 +320,28 @@ class AgyRunner:
                 return ("usage", combined[:800], "", "")
             if conversation_id and RESUME_ERR_RE.search(combined):
                 return ("resume_failed", combined[:800], "", "")
-            return ("stopped", f"{self.exe} exited {proc.returncode}: {combined[:800]}", "", "")
+            return ("stopped", f"{exe} exited {proc.returncode}: {combined[:800]}", "", "")
 
-        returned_conv_id = _as_text(data.get("conversation_id")).strip()
-        conv_id = returned_conv_id or conversation_id or ""
-        status = _as_text(data.get("status")).strip()
-        resp = _as_text(data.get("response"))
-        err = _as_text(data.get("error"))
+        env = adapter.extract_envelope(data, proc.returncode, exe, conversation_id=conversation_id, raw_err=raw_err)
+        conv_id = env["conv_id"]
 
-        if status != "SUCCESS" or proc.returncode != 0:
-            detail = (err or resp or raw_err or f"{self.exe} exited {proc.returncode} (status={status})").strip()
+        if not env["ok"]:
+            detail = env["detail"]
             if USAGE_RE.search(detail):
                 return ("usage", detail, "", conv_id)
             if conversation_id and RESUME_ERR_RE.search(detail):
                 return ("resume_failed", detail, "", "")
             return ("stopped", detail, "", conv_id)
 
-        if conversation_id and returned_conv_id and returned_conv_id != conversation_id:
+        if conversation_id and env["returned_id"] and env["returned_id"] != conversation_id:
             return (
                 "resume_failed",
-                f"conversation {conversation_id} was not resumed (started {returned_conv_id})",
+                f"conversation {conversation_id} was not resumed (started {env['returned_id']})",
                 "",
                 "",
             )
 
+        resp = env["response"]
         first = _strip_marker_formatting(first_nonempty_line(resp))
         if first.startswith("ASK:"):
             return ("ask", conv_id, resp, conv_id)
@@ -361,20 +349,25 @@ class AgyRunner:
             return ("done", "failed", resp, conv_id)
         return ("done", "succeeded", resp, conv_id)
 
-    def run(self, spec, pair=None, args=None, worktree=None):
+    def run(self, spec, pair=None, args=None, worktree=None, harness=None):
         prompt_text, spec_path = _read_spec_or_text(spec)
+        target_harness = harness or (_as_pair(pair).harness if pair else "antigravity")
         launch = list(args) if args is not None else self.launch(pair)
-        return self.exec_prompt(prompt_text, launch, worktree, spec_path=spec_path)
+        return self.exec_prompt(prompt_text, launch, worktree, spec_path=spec_path, harness=target_harness)
 
     def try_resume(self, spec_or_text, pair, worktree, conversation_id):
         if not conversation_id:
             return None
         prompt_text, spec_path = _read_spec_or_text(spec_or_text)
+        target_harness = _as_pair(pair).harness
         res = self.exec_prompt(prompt_text, self.launch(pair), worktree, conversation_id=conversation_id,
-                               spec_path=spec_path)
+                               spec_path=spec_path, harness=target_harness)
         if res[0] == "resume_failed":
             return None
         return res
+
+
+WorkerRunner = AgyRunner
 
 
 def save_body(body_or_msg, out, header=None, append=False):

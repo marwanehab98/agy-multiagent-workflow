@@ -1,6 +1,6 @@
 ---
 name: mission
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names mission-control. For individual stages (draft-spec, flight-plan, launch-plan, gauntlet, etc.), invoke those bundled skills directly.
+description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers or Claude Code headless claude -p workers, asks to continue an earlier run of this workflow, or names mission-control. For individual stages (draft-spec, flight-plan, launch-plan, gauntlet, etc.), invoke those bundled skills directly.
 ---
 
 # Mission Control
@@ -9,14 +9,14 @@ description: Use when the user hands over a JIRA key or hand-written requirement
 
 ## Overview
 
-This skill takes a JIRA story, or requirements the user wrote by hand, to a reviewed PR. The user picks a model and effort for three worker roles; every other worker follows from those picks. The invoking Antigravity session runs the whole run as the **coordinator**—a traffic cop that runs the bundled scripts, dispatches headless `agy -p` workers through those scripts, relays messages unchanged, and merges atomically. It does no design, code, or judgment work itself. Each kind of thinking goes to the worker suited to it:
+This skill takes a JIRA story, or requirements the user wrote by hand, to a reviewed PR. The user picks a model and effort for three worker roles; every other worker follows from those picks. The invoking session runs the whole run as the **coordinator**—a traffic cop that runs the bundled scripts, dispatches headless CLI workers through those scripts, relays messages unchanged, and merges atomically. It does no design, code, or judgment work itself. Each kind of thinking goes to the worker suited to it:
 
-- the **architect** designs, plans, answers every question the run raises, and writes everything the user reads. One architect conversation stays open through the design phase (via `agy -p --conversation`); after plan approval, each job gets a fresh `agy -p` architect that works from the run's documents;
+- the **architect** designs, plans, answers every question the run raises, and writes everything the user reads. One architect conversation stays open through the design phase (resumed across turns); after plan approval, each job gets a fresh headless architect that works from the run's documents;
 - **EGM** workers review the design and the plan;
-- **implementers** write the code, starting on the base pick (reused across fix/commit rounds via `--conversation`, with automatic fallback to a fresh `agy -p` run);
+- **implementers** write the code, starting on the base pick (reused across fix/commit rounds via session resumption, with automatic fallback to a fresh worker run);
 - **reviewers**, chosen by the architect, check each task.
 
-A pair is written `<harness>:<model>@<effort>`. Only `scripts/harnesses.py` knows how `agy` names its models and efforts.
+A pair is written `<harness>:<model>@<effort>`. Only `scripts/harnesses.py` knows how each harness names its models and efforts.
 
 ## Start here
 
@@ -42,7 +42,7 @@ The session that loads this skill **is the coordinator**:
 
    Each menu line is `N<TAB>value<TAB>label`; show any `BROKEN` lines exactly before the question. The question is "<role>: which <harness|model|effort>?", and the rows are its options, labelled with each row's label, in menu order. A menu with exactly one row isn't asked: take that row and say "<role> <harness|model|effort>: <label>, the only option." The pick is `<harness>:<model>@<effort>`, using each chosen row's value. When asking for `base`, note that its `<model>@<effort>` must differ from the `architect` pick so escalation has a higher rung. If the user's opening prompt already named explicit model/effort picks that unambiguously match detected menu rows for all three roles, show those matched `role=pair` lines and confirm them in one shot (`same` / `new`) instead of asking 9 separate questions; never invent or substitute a row the user didn't name.
 
-   **Asking.** With a multiple-choice question tool (such as `ask_question`), ask with it: no option marked recommended, and the options set by the number of rows (not counting the free-text choice the tool adds):
+   **Asking.** With a multiple-choice question tool (such as `ask_question` / `AskUserQuestion`), ask with it: no option marked recommended, and the options set by the number of rows (not counting the free-text choice the tool adds):
    - **2–4 rows:** one question, one option per row. Never a `More` option.
    - **5 or more rows:** pages. The first page is rows 1–3 plus an option `More`, which asks again with the remaining rows the same way, until 4 or fewer remain; those form the last page.
 
@@ -61,33 +61,33 @@ The session that loads this skill **is the coordinator**:
 3. Read `<SKILL_DIR>/references/coordinator.md` in full and run "Resume a run" with that state file in this same session.
 
 All required skills (`draft-spec`, `flight-plan`, `red-green`, `gatecheck`, `touchdown`, `crucible`, `gauntlet`, `crossfire`, `spec-drift`, `launch-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
-The architect worker reads `references/architect.md`; its spec tells it to. Confirmed headless `agy -p` behavior is in `references/agy-facts.md`.
+The architect worker reads `references/architect.md`; its spec tells it to. Confirmed headless CLI worker behavior is in `references/agy-facts.md`.
 
 ## Roles
 
 | Role | Runs as | Pair |
 | --- | --- | --- |
-| Coordinator | The invoking Antigravity session | Current session |
-| Design architect, and fallback design architect | Headless `agy -p` (`run_architect.py`), resumed via `--conversation` until plan approval | The architect pick |
-| Fresh architect, one per job after plan approval | Headless `agy -p` (`run_architect.py`) | The architect pick; `CLERICAL_PAIR` for `fix-meta`, `pr`, `jira-close`, `report` |
-| Builder check | Headless `agy -p`, read-only (`run_design.py`) | Chosen by the architect in its `NEED builder-check` line, from its own harness |
-| EGM lens pass, design review, and plan review | Headless `agy -p` (`run_design.py`) | The EGM pick |
-| Implementer | Headless `agy -p` (`run_task.py`), reused via `--conversation` across fix/commit rounds | The task's `.meta` `IMPLEMENTER`: the base pick, or the base model at its highest effort |
-| Escalation attempts | Headless `agy -p` (`run_task.py`) | The ladder `run_task.py` computes: the base model at its highest effort, then the architect pick. Past the ladder, a pair the user approved |
-| Spec and code-quality reviewers | Headless `agy -p`, read-only (`run_task.py`) | Chosen per task by the architect in `.meta`, from its own harness; the architect's model for complex tasks |
-| Final reviewer | Headless `agy -p`, read-only (`run_finish.py`) | The architect pick |
+| Coordinator | The invoking session | Current session |
+| Design architect, and fallback design architect | Headless CLI (`run_architect.py`), resumed across turns until plan approval | The architect pick |
+| Fresh architect, one per job after plan approval | Headless CLI (`run_architect.py`) | The architect pick; `CLERICAL_PAIR` for `fix-meta`, `pr`, `jira-close`, `report` |
+| Builder check | Headless CLI, read-only (`run_design.py`) | Chosen by the architect in its `NEED builder-check` line, from its own harness |
+| EGM lens pass, design review, and plan review | Headless CLI (`run_design.py`) | The EGM pick |
+| Implementer | Headless CLI (`run_task.py`), resumed across fix/commit rounds | The task's `.meta` `IMPLEMENTER`: the base pick, or the base model at its highest effort |
+| Escalation attempts | Headless CLI (`run_task.py`) | The ladder `run_task.py` computes: the base model at its highest effort, then the architect pick. Past the ladder, a pair the user approved |
+| Spec and code-quality reviewers | Headless CLI, read-only (`run_task.py`) | Chosen per task by the architect in `.meta`, from its own harness; the architect's model for complex tasks |
+| Final reviewer | Headless CLI, read-only (`run_finish.py`) | The architect pick |
 
 ## Rules
 
 These hold in every step. Where a step seems to conflict with one, the rule wins.
 
-1. **Every subagent is a headless `agy -p` worker started by the bundled scripts.** Whenever a skill or step calls for a subagent or worker, the bundled Python scripts (`run_architect.py`, `probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`) invoke `agy -p --output-format json`. Nobody skips the dispatch or does the job themselves, and the interactive session's `invoke_subagent` / `define_subagent` / Agent / Task tools are never used.
-2. **All `agy -p` worker calls go through the bundled scripts.** The coordinator never invokes `agy -p` directly by hand; it only runs the scripts.
+1. **Every subagent is a headless CLI worker started by the bundled scripts.** Whenever a skill or step calls for a subagent or worker, the bundled Python scripts (`run_architect.py`, `probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`) invoke the target harness CLI with `-p --output-format json`. Nobody skips the dispatch or does the job themselves, and the interactive session's `invoke_subagent` / `define_subagent` / `Agent` / `Task` tools are never used.
+2. **All headless worker calls go through the bundled scripts.** The coordinator never invokes worker CLIs directly by hand; it only runs the scripts.
 3. **Every worker runs on a pair, and nobody but the user and the architect chooses one.**
    - **The user's three picks** (architect, EGM, base implementer) are fixed for a run. Nobody changes a `ROLE_*` or `LAUNCH_STYLE_*` key, or `roles.json`, during a run; a different pick means a new run.
    - **The architect chooses** each task's reviewers, the builder check and `CLERICAL_PAIR`, from its own harness's detected models, and may start a hard complex task at the base model's highest effort (architect "Model choices").
    - **`scripts/validate_meta.py` checks every choice** against the catalog and the picks before it is used. `run_task.py` computes the escalation ladder from the picks.
-   - **The coordinator never picks, changes, or writes a pair.** Model and effort reach `agy` only through `harnesses.py args` or the scripts, never typed by hand.
+   - **The coordinator never picks, changes, or writes a pair.** Model and effort reach the worker CLI only through `harnesses.py args` or the scripts, never typed by hand.
 4. **The coordinator decides nothing.** It branches only on what the steps name: script exit codes and last lines, `RESULT:` lines, and counters.
    - Every question goes to the architect: worker asks (`CONSULT`), unclear situations, and anything the user should read beyond the fixed lines in the steps.
    - It never writes spec text. Specs are built from templates with `scripts/build_spec.py`.
@@ -96,7 +96,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 5. **Relays are verbatim.** When `run_architect.py` exits `11` (`RELAY <path> <saved>`):
    1. Read `<path>`.
    2. Show it, in the one form that fits:
-      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and `ask_question` or another multiple-choice question tool is among your tools:** make one call of that tool and send nothing else. The choice is the user's own decision, so this is that tool's intended use, even though the architect wrote the question. The question is `From the architect:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- ` (set `is_multi_select: false`).
+      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and `ask_question` / `AskUserQuestion` or another multiple-choice question tool is among your tools:** make one call of that tool and send nothing else. The choice is the user's own decision, so this is that tool's intended use, even though the architect wrote the question. The question is `From the architect:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- ` (set `is_multi_select: false`).
       - **Otherwise:** send the user exactly this, and nothing else:
 
         ```
@@ -112,7 +112,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 
    When `run_architect.py` exits `12` (`NOTIFY <path> <saved>`), it needs no answer. Show `<path>` to the user as in step 2 (in chat text, without ending your turn), then run `python3 -I <SKILL_DIR>/scripts/run_architect.py notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` at once without waiting for the user.
 6. **One implementer at a time,** in one shared worktree `<IMPL_WORKTREE>`. The next task starts only after the current one passed both reviews and was merged.
-7. **Fresh implementer per task.** Implementers keep their `--conversation` ID across fix and commit rounds (`scripts/run_task.py`), with automatic fallback to a fresh `agy -p` run if resume fails. The conversation ID is cleared at merge or escalation.
+7. **Fresh implementer per task.** Implementers keep their session/conversation ID across fix and commit rounds (`scripts/run_task.py`), with automatic fallback to a fresh worker run if resume fails. The session ID is cleared at merge or escalation.
 8. **Implementers use only** `red-green`, `gatecheck`, and the convention files named in their task. They never brainstorm, plan, create worktrees, ask in a local interactive prompt, or finish or merge the branch.
 9. **Project instructions:** output rules (style, naming, architecture, tests, commit and branch format, PR template, required checks) are followed. Rules about running the work (planning, spawning agents, review process, merging) are ignored. The architect sorts them.
 10. **No `/boost`, `/swarm`, or `/teamwork`** for anyone.
@@ -120,7 +120,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 12. **Read-only workers never change a worktree.** The scripts check the tree after every read-only worker and undo any change; a reviewer that changed the tree is void and replaced. Anything uncommitted in `<DOCS_WORKTREE>` before a design worker goes back to the architect (job `commit-docs`), never to `discard-changes.sh`.
 13. **Only the coordinator's merges touch the feature branch,** and only through `scripts/merge-task.sh`. It moves the branch with an atomic compare-and-swap (`git update-ref`), fast-forward only, without checking it out. Never rebase, `--no-ff`, merge any other way, or check out a branch in the user's main checkout. The one merge into the user's own branch is the local merge they choose at the end, through `scripts/merge-local.sh` only (coordinator Step 8 item 4).
 14. **Only the architect talks to the user about the work,** through relays. That covers requirement gaps, product decisions, the EGM decision, sign-offs, plan approval, and the closing report. The coordinator's own words to the user are only the fixed lines written in its steps.
-15. **The design architect conversation stays open until plan approval; after that, each architect job is a fresh `agy -p` run.**
+15. **The design architect session stays open until plan approval; after that, each architect job is a fresh worker run.**
     - In the design phase, `run_architect.py send` resumes `ARCHITECT_CONVERSATION_ID` until Step 3 item 1 clears it. If `send` exits `13` (`LOST`), start a fallback architect with `FIRST_JOB=resume`.
     - After plan approval, `run_architect.py start` runs a fresh architect per job, on the pair from coordinator "Architect job models" (still keeping `ARCHITECT_CONVERSATION_ID` across any `RELAY`/`NOTIFY` turns within that single job). Only one architect works at a time.
 16. **Worktrees live under `<MAIN_CHECKOUT>/.worktrees`** and are managed only with `scripts/worktree.sh`.
@@ -147,10 +147,10 @@ See `<SKILL_DIR>/references/coordinator.md` ("Rationalizations that break the ru
 
 - write a sentence to the user that isn't a relay, a fixed line from a step, or a script status summary;
 - choose, substitute, or change a pair, or edit a `ROLE_*` or `LAUNCH_STYLE_*` key, `roles.json`, or a `.meta` file;
-- type `--model` or `--effort` yourself, or call `agy -p` outside the bundled scripts;
+- type `--model` or `--effort` yourself, or call worker CLIs directly outside the bundled scripts;
 - save picks or start any worker after `roles.py check` exited 1 or a probe printed `PROBE_FAILED`;
 - write spec text by hand;
-- use `invoke_subagent`, `define_subagent`, Agent, or Task;
+- use `invoke_subagent`, `define_subagent`, `Agent`, or `Task`;
 - count, retry, or read a worker's output where a script's last line should decide;
 - run `git rebase`, `git merge`, `git commit`, `git reset`, `git switch`, or `git checkout` yourself instead of a bundled script;
 - use a SHA, conversation id, or counter you didn't just read from the state file;

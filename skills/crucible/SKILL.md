@@ -22,8 +22,8 @@ hypotheses by combining **interactive clarifying questions** with an automated
 ## Delegation
 
 A Goldfish runs in a fresh context with no conversation history. Spawn each
-subagent with Antigravity's `invoke_subagent` (or `define_subagent` + `invoke_subagent` when named subagents are not pre-registered), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless `agy -p` worker started by `mission` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
+If running inside a headless CLI worker started by `mission` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
 
 ## Asset Resolution
 
@@ -44,7 +44,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     multiple chat turns until the problem statement and boundaries are
     thoroughly clear. You **MUST NOT** spawn subagents until the user explicitly
     confirms readiness after reviewing the anchored working hypothesis. You are
-    **STRICTLY FORBIDDEN** from using structured question tools (`ask_question`)
+    **STRICTLY FORBIDDEN** from using structured question tools (`ask_question` / `AskUserQuestion`)
     or supplying pre-canned multiple-choice candidate answers during open-ended
     questioning.
 3.  **Parallel Goldfish Reviews**: You **MUST** evaluate the feature concept
@@ -78,7 +78,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     apologize," "I am sorry," "Forgive me") when challenged or corrected.
     Instead, outline the corrected technical logic or trade-offs directly.
 13. **Interaction Invariants**: All interactive gates (structured question tools
-    such as `ask_question`, if your harness has one, or plain chat) MUST contain
+    such as `ask_question` / `AskUserQuestion`, if your harness has one, or plain chat) MUST contain
     strictly one question (`len(questions) == 1`), be the sole tool call in the
     turn, and provide clear, action-oriented options without `(Recommended)`
     prefixes.
@@ -107,7 +107,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     launching subagents after a single response. Continue asking targeted,
     open-ended clarifying questions across multiple chat turns as needed until
     the problem statement, constraints, and target behavior are thoroughly
-    defined. Do NOT use structured question tools (`ask_question`) and do NOT
+    defined. Do NOT use structured question tools (`ask_question` / `AskUserQuestion`) and do NOT
     provide candidate multiple-choice options during problem exploration. Ask
     open-ended questions directly in chat:
 
@@ -123,7 +123,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 3.  **Readiness Checkpoint Gate (Single-Select)**: Once a clear foundation is
     established, summarize the anchored working hypothesis in 2-3 sentences.
     Present an explicit single-select confirmation gate (using a structured
-    question tool such as `ask_question` if your harness has one, or plain
+    question tool such as `ask_question` / `AskUserQuestion` if your harness has one, or plain
     chat):
 
     ```json
@@ -220,7 +220,7 @@ The `concepts_brief.md` artifact follows this structure:
     artifact and confirm their alignment.
 2.  **Step 4 Handoff Gate Modal (Single-Select)**: Once approved, present the
     standardized handoff choices (using a structured question tool such as
-    `ask_question` if your harness has one, or plain chat):
+    `ask_question` / `AskUserQuestion` if your harness has one, or plain chat):
 
     ```json
     {

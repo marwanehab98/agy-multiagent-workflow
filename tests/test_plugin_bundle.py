@@ -55,6 +55,15 @@ class PluginBundleTests(unittest.TestCase):
         self.assertTrue((ROOT / "THIRD_PARTY_NOTICES.md").is_file())
         self.assertFalse((ROOT / "SKILL.md").exists(), "root SKILL.md should live under skills/mission/")
 
+    def test_claude_plugin_manifest_matches_root_manifest(self):
+        root_manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
+        claude_path = ROOT / ".claude-plugin" / "plugin.json"
+        self.assertTrue(claude_path.is_file(), ".claude-plugin/plugin.json missing")
+        claude_manifest = json.loads(claude_path.read_text(encoding="utf-8"))
+        self.assertEqual(claude_manifest["name"], "mission-control")
+        for key in ("version", "license", "repository", "author"):
+            self.assertEqual(claude_manifest[key], root_manifest[key], key)
+
     def test_all_expected_skills_and_frontmatter(self):
         skills_dir = ROOT / "skills"
         found = {p.name for p in skills_dir.iterdir() if p.is_dir()}

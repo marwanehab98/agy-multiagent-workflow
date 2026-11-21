@@ -1,6 +1,6 @@
-"""Run the per-task loop (coordinator Steps 4-7) synchronously via headless `agy -p`.
+"""Run the per-task loop (coordinator Steps 4-7) synchronously via headless CLI workers.
 
-Each call runs every deterministic action it can (start workers via `agy -p`, save their results,
+Each call runs every deterministic action it can (start workers, save their results,
 check the tree, run the gate, run both reviews, count rounds, merge) and exits at the first point
 that needs the architect or the user. All its state lives in the coordinator's state.json, so a
 call after a crash or a context compaction carries on.
@@ -26,8 +26,8 @@ Exit 64  bad usage
 Rules the loop enforces:
 - Uncommitted files after an implementer settles get one commit worker per implement or fix round
   (COMMIT_ROUNDS_<id>); whatever it leaves uncommitted is removed with discard-changes.sh and logged.
-- One task at a time. A fresh implementer per task, kept across fix/commit rounds via `--conversation`
-  (falling back to a fresh `agy -p` run if resume fails).
+- One task at a time. A fresh implementer per task, kept across fix/commit rounds via session resumption
+  (falling back to a fresh worker run if resume fails).
 - The gate (gate.py) runs before every review; a failing gate goes straight to a fix round with the log.
 - Stage 1 review, then Stage 2. After a gate fix passes, the review resumes at REVIEW_STAGE_<id>.
 - Escalate after two fix rounds for one stage (STAGE_FIX_ROUNDS_<id>_S<n>, reset when that stage passes),

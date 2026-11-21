@@ -218,6 +218,64 @@ class InstallTests(unittest.TestCase):
         self.assertNotEqual(rc, 0)
         self.assertEqual((self.target / "VERSION").read_text(), before)
 
+    def test_harness_option_installs_into_claude_skills_folder(self):
+        rc, out = self.harness_install("--harness", "claude")
+        self.assertEqual(rc, 0, out)
+        skills_root = self.d / "home" / ".claude" / "skills"
+        dest = skills_root / "mission"
+        self.assertTrue((dest / "SKILL.md").is_file())
+        self.assertTrue((dest / "scripts" / "run_task.py").is_file())
+        self.assertTrue((dest / "references" / "coordinator.md").is_file())
+        self.assertTrue((dest / "agents" / "zoom_out.md").is_file())
+        self.assertTrue((dest / ".managed-skills").is_file())
+        for name in (
+            "launch-plan", "draft-spec", "flight-plan", "red-green",
+            "gatecheck", "touchdown",
+            "crucible", "gauntlet", "crossfire", "spec-drift",
+        ):
+            self.assertTrue((skills_root / name / "SKILL.md").is_file(), name)
+
+    def test_no_option_updates_both_antigravity_and_claude_when_both_installed(self):
+        self.assertEqual(self.harness_install("--harness", "antigravity")[0], 0)
+        self.assertEqual(self.harness_install("--harness", "claude")[0], 0)
+        agy_root = self.d / "home" / ".gemini" / "config" / "skills"
+        claude_root = self.d / "home" / ".claude" / "skills"
+        (agy_root / "draft-spec" / "marker").write_text("old-agy\n")
+        (claude_root / "draft-spec" / "marker").write_text("old-claude\n")
+        rc, out = self.harness_install()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.count("INSTALLED"), 2)
+        self.assertIn(".gemini/config/skills/mission", out)
+        self.assertIn(".claude/skills/mission", out)
+        agy_backups = list((self.backups / "antigravity").iterdir())
+        claude_backups = list((self.backups / "claude").iterdir())
+        self.assertEqual(len(agy_backups), 1)
+        self.assertEqual(len(claude_backups), 1)
+        self.assertTrue((agy_backups[0] / "draft-spec" / "marker").is_file())
+        self.assertTrue((claude_backups[0] / "draft-spec" / "marker").is_file())
+        self.assertFalse((agy_root / "draft-spec" / "marker").exists())
+        self.assertFalse((claude_root / "draft-spec" / "marker").exists())
+
+    def test_target_install_includes_claude_plugin_manifest_when_committed(self):
+        # Verify install.sh's --target bundle copy includes .claude-plugin/plugin.json from a committed ref.
+        mini = self.d / "mini-repo"
+        mini.mkdir()
+        shutil.copy2(INSTALL, mini / "install.sh")
+        (mini / "plugin.json").write_text((REPO / "plugin.json").read_text(encoding="utf-8"))
+        (mini / ".claude-plugin").mkdir()
+        (mini / ".claude-plugin" / "plugin.json").write_text((REPO / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        (mini / "skills" / "mission").mkdir(parents=True)
+        (mini / "skills" / "mission" / "SKILL.md").write_text("---\nname: mission\ndescription: x\n---\n")
+        g = lambda *a: sh("git", "-C", str(mini), "-c", "user.email=t@t", "-c", "user.name=t", *a)
+        g("init", "-q", "-b", "main")
+        g("add", ".")
+        g("commit", "-qm", "init")
+        target2 = self.d / "target2"
+        r = sh("bash", str(mini / "install.sh"), "--target", str(target2), "--backups", str(self.backups), "--skip-tests")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((target2 / ".claude-plugin" / "plugin.json").is_file())
+        self.assertTrue((target2 / "plugin.json").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

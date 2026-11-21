@@ -1,4 +1,4 @@
-"""Run the architect via headless `agy -p` and manage design-phase `--conversation` turns.
+"""Run the architect via headless CLI worker and manage design-phase session turns.
 
 Usage:
   python3 -I run_architect.py start --state <S> --spec <file> --pair <pair> [--keep-open]
@@ -6,7 +6,7 @@ Usage:
   python3 -I run_architect.py reply --state <S> --file <from-user.md> --pair <pair>
   python3 -I run_architect.py notify-ack --state <S> --pair <pair>
 
-All commands run `agy -p` in DOCS_WORKTREE, save the verbatim response to
+All commands run in DOCS_WORKTREE, save the verbatim response to
 <RUN_DIR>/results/architect-{n}.md (never overwriting an earlier file), and branch on line 1:
   Exit 0   RESULT <saved_file>                Response started with RESULT: (not RELAY/NOTIFY)
   Exit 11  RELAY <relay_path> <saved_file>    Response started with RESULT: RELAY <path>

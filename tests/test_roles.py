@@ -8,6 +8,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "roles.py"
 CATALOG = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
+CATALOG_MULTI = Path(__file__).resolve().parent / "fixtures" / "catalog_multi.json"
 GOOD = dict(architect="antigravity:big@max", egm="antigravity:g@high", base="antigravity:g@high")
 
 
@@ -188,6 +189,32 @@ class RolesTests(unittest.TestCase):
         rc, out = self.roles("check", "--mode", "launch-plan")
         self.assertEqual(rc, 1)
         self.assertIn("MISSING session antigravity launch-plan", out)
+
+    def test_multi_harness_menu_and_mixed_check(self):
+        self.catalog.write_text(CATALOG_MULTI.read_text())
+        rc, out = self.roles("menu")
+        self.assertEqual(rc, 0)
+        self.assertEqual([l.split("\t")[:2] for l in out.splitlines()], [["1", "antigravity"], ["2", "claude"]])
+
+        rc, out = self.roles(
+            "check", "--session-harness", "claude",
+            jira="yes", architect="claude:opus@high", egm="antigravity:g@high", base="antigravity:g@high",
+        )
+        self.assertEqual(rc, 0, out)
+        self.assertIn("OK session claude", out)
+        self.assertIn("OK architect claude:opus@high", out)
+        self.assertIn("OK egm antigravity:g@high", out)
+        self.assertIn("OK base antigravity:g@high", out)
+
+        cat = json.loads(CATALOG_MULTI.read_text())
+        cat["harnesses"]["claude"]["skills"].pop("mission")
+        self.catalog.write_text(json.dumps(cat))
+        rc, out = self.roles(
+            "check", "--session-harness", "claude",
+            jira="no", architect="claude:opus@high", egm="antigravity:g@high", base="antigravity:g@high",
+        )
+        self.assertEqual(rc, 1)
+        self.assertIn("MISSING session claude mission in claude: put it in /home/u/.claude/skills", out)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # mission-control
 
-A self-contained, multi-skill Antigravity plugin for spec-driven development and multi-agent execution via headless `agy -p` workers. Zero external Superpowers or EGM plugin dependencies are required.
+A self-contained, multi-skill plugin for Antigravity and Claude Code supporting spec-driven development and multi-agent execution via headless `agy -p` and `claude -p` workers (including mixed cross-harness runs). Zero external Superpowers or EGM plugin dependencies are required.
 
 Each workflow stage is exposed as its own independently invocable skill, alongside the full end-to-end `mission` orchestrator and `launch-plan`.
 
@@ -8,8 +8,8 @@ Each workflow stage is exposed as its own independently invocable skill, alongsi
 
 | Skill | When to use | Execution style |
 | --- | --- | --- |
-| `mission` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Coordinator + headless `agy -p` workers |
-| `launch-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through Steps 3–8 | Coordinator + headless `agy -p` workers |
+| `mission` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Coordinator + headless `agy -p` / `claude -p` workers |
+| `launch-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through Steps 3–8 | Coordinator + headless `agy -p` / `claude -p` workers |
 | `draft-spec` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
 | `flight-plan` | Break a spec or design doc into TDD tasks and verification steps | Interactive in-session |
 | `crucible` | Ideation + 7-lens Goldfish stress-testing (`concepts_brief.md`) | Fresh-context subagent lenses |
@@ -34,12 +34,27 @@ Validate locally before installing:
 agy plugin validate --strict .
 ```
 
-### Option 2: Direct Skills-Folder Release (`install.sh`)
+### Option 2: Claude Code Plugin
+
+`mission-control` includes `.claude-plugin/plugin.json` for Claude Code plugin discovery:
+
+```sh
+claude plugin install https://github.com/marwanehab98/mission-control
+```
+
+Or load directly from a local checkout:
+
+```sh
+claude --plugin-dir /path/to/mission-control
+```
+
+### Option 3: Direct Skills-Folder Release (`install.sh`)
 
 `install.sh` tests the target git ref in a clean copy first and never installs uncommitted work.
 
 ```sh
 bash install.sh --harness antigravity    # install all 11 skills into ~/.gemini/config/skills
+bash install.sh --harness claude         # install all 11 skills into ~/.claude/skills
 bash install.sh                          # update every harness that already has mission-control
 bash install.sh --target <dir>           # install the full plugin bundle into a custom directory
 bash install.sh --ref <commit>           # install an older version (rollback)

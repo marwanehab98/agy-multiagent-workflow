@@ -16,8 +16,8 @@ Reviews and validates a design document through specialized reviewer personas.
 ## Delegation
 
 A Goldfish runs in a fresh context with no conversation history. Spawn each
-subagent with Antigravity's `invoke_subagent` (or `define_subagent` + `invoke_subagent` when named subagents are not pre-registered), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless `agy -p` worker started by `mission` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
+If running inside a headless CLI worker started by `mission` (`lens.txt`, `egm.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
 
 ## Asset Resolution
 
@@ -31,7 +31,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 2. **Plain-English Standard**: Write briefs, summaries, and communications in direct, jargon-free plain English. Explain mechanisms concretely; avoid promotional adjectives (*seamless*, *robust*, *blazingly fast*) and decorative adverbs (*seamlessly*, *effortlessly*, *literally*, *drastically*, *obviously*).
 3. **Stress-Test & Critique First**: Never agree by default or echo framing reflexively. Lead with weaknesses, edge cases, blind spots, and the strongest counter-arguments before noting merits; only agree after objective scrutiny.
 4. **No Flattery or Apologies**: Never use validating filler ("brilliant," "great," "smart," "correct," "perfect," "excellent," "spot-on") or polite apologies ("I apologize," "I am sorry," "Forgive me"). State corrected technical logic and trade-offs directly.
-5. **Interaction Invariants**: Every interactive gate (structured question tool such as `ask_question`, or plain chat) MUST ask strictly one question (`len(questions) == 1`), be the sole tool call in the turn, and offer clear action-oriented options without `(Recommended)` prefixes.
+5. **Interaction Invariants**: Every interactive gate (structured question tool such as `ask_question` / `AskUserQuestion`, or plain chat) MUST ask strictly one question (`len(questions) == 1`), be the sole tool call in the turn, and offer clear action-oriented options without `(Recommended)` prefixes.
 
 ## Inputs
 
@@ -50,7 +50,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
   - Explain to the user that the target design document path is required to
     analyze its structure and discover the semantic split.
   - Prompt the user in chat for the path via a regular text message (do NOT
-    use structured question tools such as `ask_question`, as providing an
+    use structured question tools such as `ask_question` / `AskUserQuestion`, as providing an
     arbitrary file path is an open-ended text input, not a choice between
     fixed options) and end your turn.
 2. Once `TargetFile` is provided, verify if `GoldfishContext` is provided (an
@@ -92,7 +92,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     preset or subflow and bypass the interactive preset selection gate.
   - Otherwise (if `Step` was omitted), you **MUST** present the Curated
     Pipeline Presets single-select gate to the user (using a structured
-    question tool such as `ask_question` if your harness has one, or plain
+    question tool such as `ask_question` / `AskUserQuestion` if your harness has one, or plain
     chat).
 2. **Modal Invariants & Wire Payload**:
 
@@ -162,7 +162,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
   - **Ambiguous Boundary / Multiple Candidate Headers**: If multiple
     conflicting headers or non-standard structures exist:
     - Present a single-select gate (using a structured question tool such
-      as `ask_question` with `len(questions) == 1`, or plain chat)
+      as `ask_question` / `AskUserQuestion` with `len(questions) == 1`, or plain chat)
       proposing the most likely split line as Option 0, with Option 1
       allowing custom line ranges via write-in.
   - **No Implementation Plan Found**: If the document contains only a
@@ -194,7 +194,7 @@ Once the semantic split and execution preset are confirmed:
 ### Subflow Checkpoint Gates & Pause/Resume Protocol
 
 All interactive review stages conclude with an explicit single-select gate
-(using a structured question tool such as `ask_question` with
+(using a structured question tool such as `ask_question` / `AskUserQuestion` with
 `len(questions) == 1`, `is_multi_select: false`, sole tool call in turn, or
 plain chat):
 

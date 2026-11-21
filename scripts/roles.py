@@ -2,14 +2,14 @@
 
 Usage:
   python3 -I roles.py menu --catalog C [--harness H [--model M]]
-  python3 -I roles.py check --catalog C --jira yes|no --architect P --egm P --base P
+  python3 -I roles.py check --catalog C --jira yes|no --architect P --egm P --base P [--session-harness H]
   python3 -I roles.py remembered --roles F --catalog C
   python3 -I roles.py save --roles F --architect P --egm P --base P
   python3 -I roles.py to-state --roles F --state S --catalog C
 
 `menu` prints `N<TAB>value<TAB>label` lines (harnesses, then that harness's models, then a
 model's efforts); broken harnesses follow as `BROKEN <name>: <reason>`.
-`check` verifies the coordinator session's required skills on Antigravity plus each of the 3
+`check` verifies the coordinator session's required skills on the session harness plus each of the 3
 worker roles (`architect`, `egm`, `base`), printing one `OK`, `UNKNOWN`, or `MISSING` line per finding.
 A base pick equal to the architect pick is UNKNOWN: the architect never implements first.
 A NOTE follows when architect and base share harness and model, and another when the architect is then
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from harnesses import top_effort  # noqa: E402
+from harnesses import detect_session_harness, top_effort  # noqa: E402
 from pairs import EFFORTS, parse_pair  # noqa: E402
 import state as state_file  # noqa: E402
 
@@ -78,20 +78,17 @@ def where(h, item):
     return f": put it in {' or '.join(h['skill_dirs'])}{plugin}"
 
 
-def session_harness_name(catalog):
-    harnesses = catalog.get("harnesses", {})
-    if "antigravity" in harnesses:
-        return "antigravity"
-    if len(harnesses) == 1:
-        return next(iter(harnesses))
-    return "antigravity"
+def session_harness_name(catalog, override=None):
+    if override:
+        return override
+    return detect_session_harness(catalog)
 
 
-def check(catalog, jira, picks, mode="full"):
+def check(catalog, jira, picks, mode="full", session_harness=None):
     session_req = EXECUTE_SESSION_REQUIRES if mode == "launch-plan" else SESSION_REQUIRES
     role_reqs = EXECUTE_REQUIRES if mode == "launch-plan" else REQUIRES
     lines, bad = [], False
-    sess_name = session_harness_name(catalog)
+    sess_name = session_harness_name(catalog, override=session_harness)
     sess_h = catalog["harnesses"].get(sess_name)
     if sess_h is None:
         lines.append(f"UNKNOWN session {sess_name} harness {sess_name} not detected")
@@ -193,6 +190,7 @@ def main(argv=None):
     c.add_argument("--catalog", required=True)
     c.add_argument("--jira", required=True, choices=["yes", "no"])
     c.add_argument("--mode", choices=["full", "launch-plan"], default="full")
+    c.add_argument("--session-harness")
     add_picks(c)
     r = sub.add_parser("remembered")
     r.add_argument("--roles", required=True)
@@ -219,7 +217,8 @@ def main(argv=None):
                 print(e)
                 return 1
         elif a.cmd == "check":
-            lines, bad = check(load_catalog(a.catalog), a.jira == "yes", {x: getattr(a, x) for x in ROLES}, mode=a.mode)
+            lines, bad = check(load_catalog(a.catalog), a.jira == "yes", {x: getattr(a, x) for x in ROLES},
+                               mode=a.mode, session_harness=a.session_harness)
             print("\n".join(lines))
             return 1 if bad else 0
         elif a.cmd == "remembered":

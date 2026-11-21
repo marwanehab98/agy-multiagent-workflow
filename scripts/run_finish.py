@@ -1,5 +1,5 @@
 """Run the coordinator's Step 8 items 1-3 (starting-state check, final review, final-fix rounds,
-verification, drift check) synchronously via headless `agy -p`.
+verification, drift check) synchronously via headless CLI workers.
 
 Usage:
   python3 -I run_finish.py --state <RUN_DIR>/state.json advance

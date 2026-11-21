@@ -1,6 +1,6 @@
 ---
 name: launch-plan
-description: Use when you already have an implementation plan (a markdown plan file, or tasks/*.meta and run-values.txt) and want to execute it via Antigravity / Gemini headless agy -p workers, gates, two-stage reviews, final verification, and PR or local merge without running draft-spec or design steps.
+description: Use when you already have an implementation plan (a markdown plan file, or tasks/*.meta and run-values.txt) and want to execute it via Antigravity / Gemini headless agy -p or Claude Code (claude -p) workers, gates, two-stage reviews, final verification, and PR or local merge without running draft-spec or design steps.
 ---
 
 # Execute Plan (Multi-Agent Execution Pipeline)
@@ -11,7 +11,7 @@ description: Use when you already have an implementation plan (a markdown plan f
 
 This skill runs the **execution, review, verification, and finishing stages** (Coordinator Steps 3–8) starting from an existing plan, without running draft-spec or design reviews.
 
-The invoking Antigravity session acts as the **coordinator** and delegates every step to the bundled deterministic scripts (`run_architect.py`, `probe.py`, `run_task.py`, `run_finish.py`), which run synchronous headless `agy -p` workers. All Coordinator Rules (Rules 1–21 in `<SKILL_DIR>/skills/mission/SKILL.md`, or `<SKILL_DIR>/SKILL.md` in a flat install) apply throughout.
+The invoking session acts as the **coordinator** and delegates every step to the bundled deterministic scripts (`run_architect.py`, `probe.py`, `run_task.py`, `run_finish.py`), which run synchronous headless CLI workers. All Coordinator Rules (Rules 1–21 in `<SKILL_DIR>/skills/mission/SKILL.md`, or `<SKILL_DIR>/SKILL.md` in a flat install) apply throughout.
 
 `SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/`:
 - In a plugin or repo checkout (`.../skills/launch-plan/SKILL.md`): two directories above this file (the parent of `skills/`).
@@ -46,7 +46,7 @@ Read `<SKILL_DIR>/references/coordinator.md` in full, then run Step 1 items 2–
 - `REQUIREMENTS_FILE=none`
 - `RUN_NOTES=none`
 - `EGM_REQUESTED=no`
-- `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, `AGY=agy` (or `command -v agy`)
+- `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>` (harness binaries such as `AGY` are resolved automatically by `scripts/harnesses.py` unless explicitly overridden)
 - In item 6, set `PHASE=design` and `RUN_MODE=launch-plan` (Step 4 updates `PHASE` to `execution` once plan artifacts are ready).
 - In item 7, pass `--mode launch-plan` to `roles.py check`, then run `roles.py to-state` as normal.
 - In item 8, run `PROBE --set step1` as normal.

@@ -56,7 +56,7 @@ independently testable deliverable.
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **For agentic workers:** Use `launch-plan` (multi-agent execution via headless `agy -p` workers) or execute inline task-by-task following `red-green` and `gatecheck`. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Use `launch-plan` (multi-agent execution via headless CLI workers) or execute inline task-by-task following `red-green` and `gatecheck`. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** [One sentence describing what this builds]
 
@@ -188,7 +188,7 @@ them to review the plan and choose an execution method before implementation.
 
 **"Plan complete and saved to `docs/plans/<filename>.md`. Please review the plan. Which execution approach would you prefer?**
 
-- **Multi-agent (`launch-plan`)** - Runs each task sequentially in an isolated worktree with headless `agy -p` implementers, automated gate checks, two-stage independent reviews, final verification, and PR/merge handling. Most thorough; gives fresh contexts per task and review.
+- **Multi-agent (`launch-plan`)** - Runs each task sequentially in an isolated worktree with headless CLI implementers, automated gate checks, two-stage independent reviews, final verification, and PR/merge handling. Most thorough; gives fresh contexts per task and review.
 - **Inline (this session)** - Implement each task directly in this session following `red-green`, verify with `gatecheck`, and finish with `touchdown`. Cheapest and fastest for small standalone plans.
 
 **For this plan I recommend <one of the two>, because <one sentence from the plan: how much the tasks depend on each other's interfaces, how many there are, what a shipped mistake would cost>. Optionally run `crossfire` first for a readiness check, or choose an execution approach. Does the plan capture what you want, and which approach should we use?"**

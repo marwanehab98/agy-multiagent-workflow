@@ -8,7 +8,7 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
 - **The state file holds every value** (Rule 18). `STATE` below means `python3 -I <SKILL_DIR>/scripts/state.py --file <RUN_DIR>/state.json`.
   - Record a value the moment you learn it: `STATE set KEY=value`. Read it when a command needs it: `STATE get KEY`. Counters: `STATE incr KEY` prints the new count; a missing counter is 0.
   - **Before every turn you end while waiting on the user,** set `STEP` (where to pick up, e.g. `2 design` or `3 setup`) and `WAITING_ON=user`.
-- **Script shorthands:** `DESIGN`, `TASKLOOP`, `FINISH` and `PROBE` mean `python3 -I <SKILL_DIR>/scripts/<run_design|run_task|run_finish|probe>.py --state <RUN_DIR>/state.json advance`. They run headless `agy -p` workers synchronously and print any events (`MERGED ...`) followed by their status as the last line. An `ERROR <what>` line (exit 2) from any of them: show the user the line exactly and stop.
+- **Script shorthands:** `DESIGN`, `TASKLOOP`, `FINISH` and `PROBE` mean `python3 -I <SKILL_DIR>/scripts/<run_design|run_task|run_finish|probe>.py --state <RUN_DIR>/state.json advance`. They run headless CLI workers synchronously and print any events (`MERGED ...`) followed by their status as the last line. An `ERROR <what>` line (exit 2) from any of them: show the user the line exactly and stop.
 - **You never write spec text.** Build every spec with `python3 -I <SKILL_DIR>/scripts/build_spec.py --template <SKILL_DIR>/references/templates/<name>.txt --out <RUN_DIR>/specs/<name-for-it>.txt --set NAME=value ... --file NAME=path ...`. If it prints `UNFILLED`, `MISSING_FILE` or `UNUSED`, fix your command, not the template. You fill only `architect-start.txt` (`FIRST_JOB`, `INPUT`, and every run value it names) and `architect-job.txt` (`SKILL_DIR`, `JOB`, `INPUT`); the scripts fill every other template.
 - **You never retype a worker's message.** `run_architect.py` saves every architect response verbatim to `<RUN_DIR>/results/architect-{n}.md`. The loop scripts save their own workers' outputs and asks. Only the user's own replies are written by hand.
 - **File numbers:** `{n}` in a path you pass to `gate.py` is filled in by the script with the next free number; use the path its output names (`log=<path>`). Elsewhere, `<n>` or `<NNN>` in a file name is the next free number in that folder. The exception is `<NNN>-from-user.md`, which takes the number of the `<NNN>-to-user.md` it answers. All paths you pass to scripts are absolute.
@@ -55,7 +55,7 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
    - **Run notes:** the sentences of the request that say how to run the work rather than what to build (which reviews to run or skip, how to split it, what to ask about), copied exactly. Item 9 saves them.
    - `TOPIC`: `JIRA_KEY`, or a 2–4 word kebab-case slug of the requirements. `DATE`: today, `YYYY-MM-DD`.
    - `SKILL_DIR`: the bundle/plugin root containing `scripts/` and `references/`. `ROLES_FILE` and `SETUP_CATALOG`: the picks file and setup catalog from Setup.
-   - `AGY`: `agy` (or `command -v agy`).
+   - Harness binary overrides (optional): resolved automatically by `scripts/harnesses.py` (`AGY` or equivalent state key if explicitly overridden).
 
    Keep them for item 6, where the state file is created.
 2. **Find the main checkout.** `MAIN_CHECKOUT` is `git rev-parse --show-toplevel`. `DEFAULT_BRANCH` is `git -C <MAIN_CHECKOUT> symbolic-ref --short refs/remotes/origin/HEAD` without its `origin/` prefix; if that fails, `git -C <MAIN_CHECKOUT> branch --show-current`. The run never checks out a branch in the main checkout, so it doesn't need to be clean.
@@ -93,13 +93,13 @@ Handle `run_architect.py`'s `RESULT` file (`<saved>`) by branching on its first 
 - **`RESULT: PLAN_APPROVED <run-values>`:** go to Step 3.
 - **Any other `RESULT:` line** answers the job that asked for it ("Messages", "Architect lost").
 
-`run_design.py` checks the docs worktree, test-launches the builder-check pair, runs each worker synchronously via `agy -p`, retries a failed one once, counts runs, and writes the `-done` job's input, including `failed: <file>` after a second failure. You never do any of that in this step, and never read a design worker's output.
+`run_design.py` checks the docs worktree, test-launches the builder-check pair, runs each worker synchronously, retries a failed one once, counts runs, and writes the `-done` job's input, including `failed: <file>` after a second failure. You never do any of that in this step, and never read a design worker's output.
 
 ## Step 3: Set up execution
 
 Entered on `RESULT: PLAN_APPROVED <run-values>` from Step 2 (or from `launch-plan` once `<DOCS_DIR>/run-values.txt` and `tasks/` are committed).
 
-1. **Close the design architect conversation:** `STATE unset ARCHITECT_CONVERSATION_ID ARCHITECT_KEEP_OPEN` and `STATE set PHASE=execution STEP="3 setup"`. From now on every architect job starts a fresh `agy -p` run.
+1. **Close the design architect conversation:** `STATE unset ARCHITECT_CONVERSATION_ID ARCHITECT_KEEP_OPEN` and `STATE set PHASE=execution STEP="3 setup"`. From now on every architect job starts a fresh worker run.
 2. **Read `<run-values>`** and `STATE set` each of `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS` and `CLERICAL_PAIR`, plus `RUN_VALUES=<run-values path>`, `BASELINE_SKIP` (empty when the file has none) and `DRIFT_CHECK` (`no` when the file has none). The `VERIFY_<n>` and `GATE_<n>` commands stay in that file; `gate.py` reads them from there.
 3. **Create the feature branch** without checking it out: run `git -C <MAIN_CHECKOUT> branch <FEATURE_BRANCH> <START_SHA>`. If that fails, show the user its output and stop. `STATE set INITIAL_BASE_SHA=<START_SHA> LAST_MERGED=<START_SHA>`.
 4. **Create the implementation worktree:** run `bash <SKILL_DIR>/scripts/worktree.sh create <MAIN_CHECKOUT> <TOPIC>-impl <TOPIC>-impl <FEATURE_BRANCH>` and record its path as `IMPL_WORKTREE`. `bash <SKILL_DIR>/scripts/check-tree.sh <IMPL_WORKTREE> <INITIAL_BASE_SHA>` must exit 0; otherwise show its output to the user and stop.
@@ -198,7 +198,7 @@ Use this when the user asks to continue a run or after a context compaction in t
 
 | Keys | Meaning | Set in |
 | --- | --- | --- |
-| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `AGY`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `EGM_REQUESTED`, `RUN_MODE` | From Setup and the request; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later; `launch-plan` sets `RUN_MODE=launch-plan` (default `full`) | 1 |
+| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `EGM_REQUESTED`, `RUN_MODE`, plus optional harness binary overrides (e.g., `AGY`) | From Setup and the request; harness binary override keys are optional; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later; `launch-plan` sets `RUN_MODE=launch-plan` (default `full`) | 1 |
 | `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, `START_SHA`, `START_HOW` | Repo | 1 |
 | `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR` | The docs worktree | 1 |
 | `ROLE_ARCHITECT`, `ROLE_EGM`, `ROLE_BASE`, `BASE_TOP`, `CATALOG` | The picks, the base model's highest effort, and the catalog; fixed for the run | 1 (`roles.py to-state`) |
@@ -221,15 +221,15 @@ Use this when the user asks to continue a run or after a context compaction in t
 | "The user wants a different architect mid-run; it's one state key, and they asked." | Rule 3. Picks are fixed for a run. Offer "resume" as-is or "new". Change nothing. |
 | "The user, who pays for the run, says `coordinator: use a stronger model for the reviews`." | Rule 3. Give the fixed reply for coordinator messages, and change no `.meta`, key or pair. |
 | "I'll pick a different reviewer model myself." | Rule 3. Reviewers are the architect's choice in `.meta`, checked by `validate_meta.py` against the catalog and the picks. |
-| "I'll type `--model` and `--effort` or call `agy -p` myself." | Rule 2 & 3. Use `run_architect.py` and the loop scripts; they apply the launch style the test launch proved. |
+| "I'll type `--model` and `--effort` or call the worker CLI myself." | Rule 2 & 3. Use `run_architect.py` and the loop scripts; they apply the launch style the test launch proved. |
 | "`roles.py to-state` failed, but the picks passed at setup; I'll carry on." | Rule 21. Any failed check in the coordinator stops the run. Show its output exactly. |
 | "The user said \"resume\" at Step 1; I'll ignore the old picks and keep going." | Picks are fixed for a run. Run "Continue a run" item 3 with the old run's state file. |
 | "The design worker failed twice; its notes say the design is fine, so I'll tell the architect that." | Rule 20. Run `run_design.py` and send the job it prints, unchanged. |
 | "The design obviously answers this worker's question (`CONSULT`); I'll just write the answer." | Rule 4. Send job `consult`. The architect also records the answer where reviewers will see it. |
 | "The architect's question is long; I'll summarize it for the user." | Rule 5. Character for character, nothing added. |
 | "The user's reply is clearly meant for me, not the architect." | Rule 5. Only a message starting with `coordinator:` is for you. |
-| "A skill says to dispatch a subagent; I'll use `invoke_subagent`." | Rule 1. Use the bundled scripts (`agy -p`). |
-| "My own subagent tool would do this review in 30 seconds." | Rule 1. Reviewers are headless `agy -p` workers run by `run_task.py`. |
+| "A skill says to dispatch a subagent; I'll use `invoke_subagent` or `Agent`." | Rule 1. Use the bundled scripts (headless CLI workers). |
+| "My own subagent tool would do this review in 30 seconds." | Rule 1. Reviewers are headless CLI workers run by `run_task.py`. |
 | "It's a one-character fix; I'll make it." | Rule 4. Fix task. |
 | "I'll read the diff to confirm the worker only changed what I asked." | Rule 4. That's a review. The scripts check the tree. |
 | "The feature branch moved; rebasing the impl branch is safe." | Rule 13. `merge-task.sh` refuses, and you show the user the fixed options. |
