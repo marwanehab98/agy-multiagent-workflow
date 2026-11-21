@@ -172,7 +172,7 @@ Use this when the user asks to continue a run or after a context compaction in t
    - **No state file, or no `ROLE_ARCHITECT` in it:** say exactly "ERROR OLD_FORMAT_RUN remove <RUN_DIR> and start a new run" and stop.
    - **No `RUN_NOTES` in it:** `STATE set RUN_NOTES=none`.
 2. **Check and re-probe the picks.** The run keeps its `ROLE_*` picks; never change one.
-   1. Run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`, then `roles.py check` as in Step 1 item 7, with `--catalog <CATALOG>` and the three `ROLE_*` values. Stop on exit 1.
+   1. Run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`, then `roles.py check` as in Step 1 item 7, with `--catalog <CATALOG>`, `--mode <RUN_MODE>` (default `full` when `RUN_MODE` is unset), and the three `ROLE_*` values. Stop on exit 1.
    2. Run `PROBE --set resume`. On `PROBE_FAILED`, do as in Step 1 item 8.
 3. Pick up at the first of these that holds:
    - **`OPEN_USAGE_PROMPT` is `yes`:** re-show the architect usage-limit prompt ("Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.") and wait. On "retry", unset `OPEN_USAGE_PROMPT` and re-run `ARCH <LAST_ARCH_OP>` with `LAST_ARCH_ARG` (using `LAST_JOB` and "Architect job models" for `<the job's pair>`, and adding `--keep-open` if `PHASE=design` and `LAST_ARCH_OP=start`), then handle its exit code and route any returned `RESULT <saved>` via the `LAST_JOB` / `STEP` routing rules below.
@@ -194,7 +194,7 @@ Use this when the user asks to continue a run or after a context compaction in t
 
 | Keys | Meaning | Set in |
 | --- | --- | --- |
-| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `AGY`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `EGM_REQUESTED` | From Setup and the request; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later | 1 |
+| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `AGY`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `EGM_REQUESTED`, `RUN_MODE` | From Setup and the request; `run_design.py` sets `EGM_REQUESTED=yes` when the user chooses EGM later; `execute-plan` sets `RUN_MODE=execute-plan` (default `full`) | 1 |
 | `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, `START_SHA`, `START_HOW` | Repo | 1 |
 | `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR` | The docs worktree | 1 |
 | `ROLE_ARCHITECT`, `ROLE_EGM`, `ROLE_BASE`, `BASE_TOP`, `CATALOG` | The picks, the base model's highest effort, and the catalog; fixed for the run | 1 (`roles.py to-state`) |

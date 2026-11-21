@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent.parent
@@ -122,7 +123,9 @@ class DetectTests(unittest.TestCase):
         base = fixture_runner()
         def live_like_runner(cmd):
             return base(cmd)
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, unittest.mock.patch.object(
+            harnesses.shutil, "which", return_value="/usr/bin/agy"
+        ):
             home = Path(td)
             override = home / ".gemini" / "config" / "skills" / "egm-review"
             override.mkdir(parents=True)

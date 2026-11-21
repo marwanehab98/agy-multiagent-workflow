@@ -139,19 +139,20 @@ class Design:
             raise
         self.set_phase("dispatch")
 
-    def egm_skills(self):
+    def egm_skills(self, skill_name="egm-review"):
         r = self.r
-        if not r.get("EGM_SKILLS"):
-            harness = parse_pair(r.need("ROLE_EGM")).harness
-            rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
-                           "--skill", "egm-review")
-            if rc == 0:
-                r.set(EGM_SKILLS=str(Path(out).parent))
-            elif (HERE.parent / "skills" / "egm-review" / "SKILL.md").is_file():
-                r.set(EGM_SKILLS=str(HERE.parent / "skills"))
-            else:
-                raise Done(ERROR, f"ERROR EGM_SKILLS {out}")
-        return r.need("EGM_SKILLS")
+        harness = parse_pair(r.need("ROLE_EGM")).harness
+        rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
+                       "--skill", skill_name)
+        if rc == 0:
+            skills_dir = str(Path(out).parent)
+        elif (HERE.parent / "skills" / skill_name / "SKILL.md").is_file():
+            skills_dir = str(HERE.parent / "skills")
+        else:
+            raise Done(ERROR, f"ERROR EGM_SKILLS {out}")
+        if skill_name == "egm-review":
+            r.set(EGM_SKILLS=skills_dir)
+        return skills_dir
 
     def dispatch(self):
         r = self.r
@@ -164,7 +165,8 @@ class Design:
             build("builder-check.txt", spec, {"DESIGN_FILE": args[0], "OUTPUT_FILE": out})
             pair = args[1]
         else:
-            skills = self.egm_skills()
+            skill_map = {"egm": "egm-review", "lens": "egm-brainstorm", "plan-review": "egm-review-loop"}
+            skills = self.egm_skills(skill_map[kind])
             pair = r.need("ROLE_EGM")
             if kind == "egm":
                 build("egm.txt", spec, {"EGM_SKILLS": skills, "DESIGN_FILE": args[0], "OUTPUT_FILE": args[1]})

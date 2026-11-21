@@ -264,6 +264,22 @@ class Lens(Design):
         self.assertEqual(last, f"ARCHITECT_JOB lens-done {first}")
         self.assertEqual(len(self.calls()), 1)
 
+    def test_lens_resolves_egm_brainstorm_independently_of_egm_review_override(self):
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["antigravity"]["skills"]["egm-review"] = "/override/skills/egm-review"
+        cat["harnesses"]["antigravity"]["skills"].pop("egm-brainstorm", None)
+        cat_path = self.tmp / "override-cat.json"
+        cat_path.write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
+        self.behave("write-output", "write-output")
+        self.need(f"NEED egm design.md {FINDINGS}")
+        self.assertEqual(self.st("EGM_SKILLS"), "/override/skills")
+        sh("git", "-C", str(self.docs_wt), "add", "-f", FINDINGS)
+        sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "findings")
+        last, _ = self.lens_need()
+        self.assertEqual(last, f"ARCHITECT_JOB lens-done {self.run_dir / 'lens-1.md'}")
+        self.assertIn(str(SKILL / "skills" / "egm-brainstorm" / "SKILL.md"), self.calls()[1]["prompt"])
+
 
 class PlanReview(Design):
     def review_need(self, expect=(20, "ARCHITECT_JOB")):
@@ -280,6 +296,22 @@ class PlanReview(Design):
         self.assertEqual(last, "ARCHITECT_JOB plan-review-done Plan review limit reached; "
                                f"finish triage with {self.run_dir / 'plan-review-2.md'}")
         self.assertEqual(len(self.calls()), 2)
+
+    def test_plan_review_resolves_egm_review_loop_from_its_own_dir(self):
+        (self.tmp / "plan.md").write_text("plan\n")
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["antigravity"]["skills"]["egm-review"] = "/override/skills/egm-review"
+        cat["harnesses"]["antigravity"]["skills"]["egm-review-loop"] = "/other/skills/egm-review-loop"
+        cat_path = self.tmp / "split-cat.json"
+        cat_path.write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
+        self.behave("write-output", "write-output")
+        self.need(f"NEED egm design.md {FINDINGS}")
+        sh("git", "-C", str(self.docs_wt), "add", "-f", FINDINGS)
+        sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "findings")
+        last, _ = self.review_need()
+        self.assertEqual(last, f"ARCHITECT_JOB plan-review-done {self.run_dir / 'plan-review-1.md'}")
+        self.assertIn("/other/skills/egm-review-loop/SKILL.md", self.calls()[1]["prompt"])
 
 
 if __name__ == "__main__":

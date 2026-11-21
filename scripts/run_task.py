@@ -104,6 +104,8 @@ class Loop:
                 result = self.runner.try_resume(spec, pair, self.r.impl, conv)
                 if result is not None:
                     reused = True
+                elif kind == "fix":
+                    self._discard_or_error(self.r.need(f"WORKER_HEAD_{t}"))
         if result is None:
             result = self.runner.run(spec, pair=pair, worktree=self.r.impl)
         if result[3]:

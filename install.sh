@@ -87,7 +87,7 @@ fi
 
 release="$work/release"
 mkdir -p "$release"
-for part in plugin.json THIRD_PARTY_NOTICES.md assets skills references scripts agents resources docs; do
+for part in SKILL.md plugin.json THIRD_PARTY_NOTICES.md assets skills references scripts agents resources docs; do
   [ -e "$work/$part" ] && cp -a "$work/$part" "$release/"
 done
 find "$release" -name __pycache__ -prune -exec rm -rf {} +
@@ -116,8 +116,10 @@ for i in "${!targets[@]}"; do
     mkdir -p "$dest"
     snap="$keep/$(date +%Y%m%d-%H%M%S)-$$"
     count=0
+    has_bundled_skills=0
     for sdir in "$release"/skills/*; do
       [ -d "$sdir" ] || continue
+      has_bundled_skills=1
       sname=$(basename "$sdir")
       count=$((count + 1))
       if [ -e "$dest/$sname" ]; then
@@ -126,9 +128,19 @@ for i in "${!targets[@]}"; do
         backup="$snap"
       fi
     done
+    if [ "$has_bundled_skills" -eq 0 ] && [ -e "$dest/$name" ]; then
+      mkdir -p "$snap"
+      mv "$dest/$name" "$snap/$name"
+      backup="$snap"
+    fi
     # Install main orchestrator + shared runtime into $dest/$name
     mkdir -p "$dest/$name"
-    cp -a "$release/skills/$name/." "$dest/$name/"
+    if [ -d "$release/skills/$name" ]; then
+      cp -a "$release/skills/$name/." "$dest/$name/"
+    elif [ -f "$release/SKILL.md" ]; then
+      cp -a "$release/SKILL.md" "$dest/$name/"
+      count=1
+    fi
     for part in plugin.json THIRD_PARTY_NOTICES.md assets references scripts agents resources docs VERSION; do
       [ -e "$release/$part" ] && cp -a "$release/$part" "$dest/$name/"
     done

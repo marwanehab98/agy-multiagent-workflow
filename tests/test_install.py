@@ -61,6 +61,39 @@ class InstallTests(unittest.TestCase):
         rc, out = self.install("--ref", "HEAD~1")
         self.assertEqual(rc, 0, out)
         self.assertIn(older, (self.target / "VERSION").read_text())
+        self.assertTrue(
+            (self.target / "SKILL.md").is_file()
+            or (self.target / "skills" / "agy-multiagent-workflow" / "SKILL.md").is_file()
+        )
+
+    def _legacy_skill_commit(self):
+        return sh("git", "-C", str(REPO), "log", "-n", "1", "--format=%H", "--diff-filter=AM", "--", "SKILL.md").stdout.strip()
+
+    def test_legacy_pre_plugin_rollback_works_with_target_and_harness_modes(self):
+        legacy = self._legacy_skill_commit()
+        if not legacy:
+            self.skipTest("shallow checkout lacks a pre-plugin commit with root SKILL.md")
+
+        # --target rollback to legacy single-skill layout
+        rc, out = self.install("--ref", legacy)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(legacy, (self.target / "VERSION").read_text())
+        self.assertTrue((self.target / "SKILL.md").is_file())
+
+        # --harness antigravity rollback to legacy single-skill layout preserves backup and installs SKILL.md
+        rc, out = self.harness_install("--harness", "antigravity")
+        self.assertEqual(rc, 0, out)
+        skills_root = self.d / "home" / ".gemini" / "config" / "skills"
+        dest = skills_root / "agy-multiagent-workflow"
+        (dest / "marker").write_text("new\n")
+        rc, out = self.harness_install("--ref", legacy, "--harness", "antigravity")
+        self.assertEqual(rc, 0, out)
+        self.assertIn(legacy, (dest / "VERSION").read_text())
+        self.assertTrue((dest / "SKILL.md").is_file())
+        self.assertFalse((dest / "marker").exists())
+        kept = list((self.backups / "antigravity").iterdir())
+        self.assertEqual(len(kept), 1)
+        self.assertTrue((kept[0] / "agy-multiagent-workflow" / "marker").is_file())
 
     def test_backups_are_capped_at_five(self):
         for _ in range(7):

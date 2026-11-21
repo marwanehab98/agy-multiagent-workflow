@@ -66,6 +66,24 @@ class GateAndFixes(Base):
         self.assertEqual(calls[2]["conversation"], "conv_impl_1")
         self.assertEqual(calls[3]["conversation"], "")
 
+    def test_fix_silent_new_conversation_cleans_stray_edits_before_fallback(self):
+        stray = self.impl / "stray_fix.txt"
+        self.behave(
+            {"do": "commit", "conv_id": "conv_impl_1"},
+            "fix",
+            {"do": "response", "conv_id": "conv_fresh", "text": "contextless\n", "edit": str(stray)},
+            "commit",
+            "pass",
+            "pass",
+        )
+        self.expect(0, "QUEUE_EMPTY")
+        self.assertFalse(stray.exists())
+        calls = self.calls()
+        self.assertEqual(calls[2]["conversation"], "conv_impl_1")
+        self.assertEqual(calls[3]["conversation"], "")
+        changed = sh("git", "-C", str(self.impl), "show", "--stat", "--format=", self.st("LAST_MERGED"))
+        self.assertNotIn("stray_fix.txt", changed)
+
     def test_two_fix_rounds_then_escalate_then_next_rung(self):
         self.behave("commit", "fix", "commit", "fix", "commit", "fix")
         last, _ = self.expect(20, "ESCALATE")

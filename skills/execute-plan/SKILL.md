@@ -47,7 +47,7 @@ Read `<SKILL_DIR>/references/coordinator.md` in full, then run Step 1 items 2–
 - `RUN_NOTES=none`
 - `EGM_REQUESTED=no`
 - `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, `AGY=agy` (or `command -v agy`)
-- In item 6, set `PHASE=design` (Step 4 updates it to `execution` once plan artifacts are ready).
+- In item 6, set `PHASE=design` and `RUN_MODE=execute-plan` (Step 4 updates `PHASE` to `execution` once plan artifacts are ready).
 - In item 7, pass `--mode execute-plan` to `roles.py check`, then run `roles.py to-state` as normal.
 - In item 8, run `PROBE --set step1` as normal.
 
