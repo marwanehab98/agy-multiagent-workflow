@@ -193,3 +193,5 @@ halt):
     loop has completed after [N] rounds ([converged | accepted at cap | halted]).
 Open findings are in the report. Would you like to proceed to
     the next stage, or do you have any final questions?"*
+
+<!-- Adapted from google/elephant-goldfish-model (Apache-2.0); modified for mission-control. See THIRD_PARTY_NOTICES.md. -->

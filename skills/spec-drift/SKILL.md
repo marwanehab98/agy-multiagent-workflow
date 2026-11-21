@@ -62,3 +62,5 @@ implement the specifications described by those designs or READMEs.
         of the code, not relying on memory.
     -   Process the files sequentially to ensure the tool output buffer doesn't
         overflow.
+
+<!-- Adapted from google/elephant-goldfish-model (Apache-2.0); modified for mission-control. See THIRD_PARTY_NOTICES.md. -->

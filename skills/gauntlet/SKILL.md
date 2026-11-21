@@ -390,3 +390,5 @@ plain chat):
   - After fixes are applied, re-read `TargetFile` to recalculate line
     bounds, and conclude the review session (or re-run Stage 9, max 1
     re-audit).
+
+<!-- Adapted from google/elephant-goldfish-model (Apache-2.0); modified for mission-control. See THIRD_PARTY_NOTICES.md. -->

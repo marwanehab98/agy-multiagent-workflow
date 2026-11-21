@@ -148,3 +148,9 @@ Each install records a `VERSION` file naming its commit. Replaced versions are k
 bash tests/run_all.sh
 agy plugin validate --strict --json .
 ```
+
+---
+
+## License & Attributions
+
+Licensed under the [MIT License](LICENSE). Selected bundled skills, agent personas, and document standards are adapted from upstream open-source projects — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for full license texts and attributions.

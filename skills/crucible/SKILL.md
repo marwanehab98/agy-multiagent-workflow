@@ -261,3 +261,5 @@ The `concepts_brief.md` artifact follows this structure:
     *   **Option 3: `Conclude draft-spec and keep brief for later`**:
         *   Conclude the session gracefully. Remind the user that
             `concepts_brief.md` remains saved for future reference.
+
+<!-- Adapted from google/elephant-goldfish-model (Apache-2.0); modified for mission-control. See THIRD_PARTY_NOTICES.md. -->
