@@ -1,9 +1,9 @@
 ---
 name: mission
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names agy-multiagent-workflow. For individual stages (draft-spec, flight-plan, launch-plan, gauntlet, etc.), invoke those bundled skills directly.
+description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names mission-control. For individual stages (draft-spec, flight-plan, launch-plan, gauntlet, etc.), invoke those bundled skills directly.
 ---
 
-# Agy multi-agent workflow
+# Mission Control
 
 **After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full and `<SKILL_DIR>/references/coordinator.md`, then pick up from the run's state file. A summary of the rules is not the rules.
 
@@ -26,7 +26,7 @@ The session that loads this skill **is the coordinator**:
 - **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`draft-spec`, `flight-plan`, `launch-plan`, `crucible`, `gauntlet`, `crossfire`, `spec-drift`, `red-green`, `gatecheck`, `touchdown`) directly.
 - **Otherwise:** run Setup below, then go straight to `references/coordinator.md` Step 1 in this same session.
 
-`SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/` (two directories above this `SKILL.md` in a plugin or repo checkout, or this skill's folder in a flat `install.sh --harness` install). `CFG` is `$HOME/.config/agy-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
+`SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/` (two directories above this `SKILL.md` in a plugin or repo checkout, or this skill's folder in a flat `install.sh --harness` install). `CFG` is `$HOME/.config/mission-control`, and `CATALOG` is `<CFG>/catalog.json`.
 
 ### Setup
 

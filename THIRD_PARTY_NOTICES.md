@@ -50,10 +50,10 @@ SOFTWARE.
 Source repository: https://github.com/google/elephant-goldfish-model
 Upstream commit: `7d1b721e51448518cc9b0336465041230200dd10`
 Vendored and adapted components:
-- `skills/egm-brainstorm/SKILL.md` — adapted for Antigravity standalone & headless worker execution and plugin-relative asset paths.
-- `skills/egm-review/SKILL.md` — adapted for Antigravity standalone & headless worker execution, inline finding resolution, and plugin-relative asset paths.
-- `skills/egm-review-loop/SKILL.md` — adapted for Antigravity standalone & headless worker execution, inline finding resolution, and plugin-relative asset paths.
-- `skills/egm-drift-report/SKILL.md` — adapted to remove unused Codex/Claude harness doc pointers.
+- `skills/crucible/SKILL.md` (from `egm-brainstorm`) — adapted for Antigravity standalone & headless worker execution and plugin-relative asset paths.
+- `skills/gauntlet/SKILL.md` (from `egm-review`) — adapted for Antigravity standalone & headless worker execution, inline finding resolution, and plugin-relative asset paths.
+- `skills/crossfire/SKILL.md` (from `egm-review-loop`) — adapted for Antigravity standalone & headless worker execution, inline finding resolution, and plugin-relative asset paths.
+- `skills/spec-drift/SKILL.md` (from `egm-drift-report`) — adapted to remove unused Codex/Claude harness doc pointers.
 - `agents/` (`codebase_details.md`, `comprehension.md`, `design_critic.md`, `implementation_readiness.md`, `inventive_catalyst.md`, `structural.md`, `style.md`, `synthesizer.md`, `zoom_out.md`)
 - `resources/execution_instructions.md` and `resources/document_standards/*.md`
 

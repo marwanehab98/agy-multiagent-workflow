@@ -467,7 +467,7 @@ class Drift(Finish):
 
     def test_drift_falls_back_to_flat_harness_sibling_skills_when_missing_from_catalog(self):
         flat_root = self.tmp / "flat-skills"
-        pkg = flat_root / "agy-multiagent-workflow"
+        pkg = flat_root / "mission-control"
         shutil.copytree(SKILL / "scripts", pkg / "scripts")
         shutil.copytree(SKILL / "references", pkg / "references")
         (flat_root / "spec-drift").mkdir(parents=True)

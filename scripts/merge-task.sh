@@ -29,7 +29,7 @@ if ! git -C "$repo" merge-base --is-ancestor "$old" "$new"; then
   echo "NOT_FAST_FORWARD branch=$branch target=$new does not contain $old"
   exit 3
 fi
-git -C "$repo" update-ref -m "agy-multiagent-workflow: fast-forward to reviewed $new" "$ref" "$new" "$old" \
+git -C "$repo" update-ref -m "mission-control: fast-forward to reviewed $new" "$ref" "$new" "$old" \
   || { echo "NOT_FAST_FORWARD branch=$branch moved during the update"; exit 3; }
 echo "MERGED head=$new"
 exit 0

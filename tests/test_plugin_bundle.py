@@ -50,7 +50,7 @@ FORBIDDEN_REFS = re.compile(
 class PluginBundleTests(unittest.TestCase):
     def test_manifest_and_notices_exist(self):
         manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["name"], "agy-multiagent-workflow")
+        self.assertEqual(manifest["name"], "mission-control")
         self.assertTrue((ROOT / manifest["logo"]).is_file())
         self.assertTrue((ROOT / "THIRD_PARTY_NOTICES.md").is_file())
         self.assertFalse((ROOT / "SKILL.md").exists(), "root SKILL.md should live under skills/mission/")

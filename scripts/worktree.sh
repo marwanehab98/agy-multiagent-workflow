@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Manage git worktrees for agy-multiagent-workflow without Orca.
+# Manage git worktrees for mission-control without Orca.
 #
 # Usage:
 #   bash worktree.sh create <main_checkout> <name> <branch> <base_ref>

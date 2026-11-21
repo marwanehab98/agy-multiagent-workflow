@@ -23,7 +23,7 @@ fi
 top=$(git -C "$repo" rev-parse --show-toplevel)
 holder=$(git -C "$repo" worktree list --porcelain | awk -v r="$ref" '/^worktree /{w=substr($0,10)} $0=="branch "r{print w}')
 if [ -z "$holder" ]; then
-  git -C "$repo" update-ref -m "agy-multiagent-workflow: user merged $feature" "$ref" "$new" "$old" \
+  git -C "$repo" update-ref -m "mission-control: user merged $feature" "$ref" "$new" "$old" \
     || { echo "MERGE_FAILED $target moved during the update"; exit 2; }
   echo "MERGED $target=$new"
   exit 0

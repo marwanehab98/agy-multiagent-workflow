@@ -88,9 +88,8 @@ def session_harness_name(catalog):
 
 
 def check(catalog, jira, picks, mode="full"):
-    plan_mode = mode in ("launch-plan", "execute-plan")
-    session_req = EXECUTE_SESSION_REQUIRES if plan_mode else SESSION_REQUIRES
-    role_reqs = EXECUTE_REQUIRES if plan_mode else REQUIRES
+    session_req = EXECUTE_SESSION_REQUIRES if mode == "launch-plan" else SESSION_REQUIRES
+    role_reqs = EXECUTE_REQUIRES if mode == "launch-plan" else REQUIRES
     lines, bad = [], False
     sess_name = session_harness_name(catalog)
     sess_h = catalog["harnesses"].get(sess_name)
@@ -193,7 +192,7 @@ def main(argv=None):
     c = sub.add_parser("check")
     c.add_argument("--catalog", required=True)
     c.add_argument("--jira", required=True, choices=["yes", "no"])
-    c.add_argument("--mode", choices=["full", "launch-plan", "execute-plan"], default="full")
+    c.add_argument("--mode", choices=["full", "launch-plan"], default="full")
     add_picks(c)
     r = sub.add_parser("remembered")
     r.add_argument("--roles", required=True)

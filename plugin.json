@@ -1,14 +1,14 @@
 {
-  "name": "agy-multiagent-workflow",
-  "displayName": "Agy Multi-Agent Workflow",
+  "name": "mission-control",
+  "displayName": "Mission Control",
   "version": "1.0.0",
-  "description": "Self-contained multi-agent workflow suite for Antigravity: standalone brainstorming, planning, TDD, EGM reviews, verification, branch finishing, plan execution, and full end-to-end orchestration via headless agy -p workers.",
+  "description": "Self-contained multi-agent workflow suite for Antigravity: standalone spec drafting, planning, TDD, adversarial reviews, verification, branch landing, plan execution, and full end-to-end orchestration via headless agy -p workers.",
   "logo": "assets/logo.svg",
   "category": "Developer Tools",
   "keywords": [
     "multi-agent",
     "workflow",
-    "brainstorming",
+    "mission-control",
     "planning",
     "tdd",
     "code-review",
@@ -18,6 +18,6 @@
   "author": {
     "name": "Marwan Ehab"
   },
-  "repository": "https://github.com/marwanehab98/agy-multiagent-workflow",
+  "repository": "https://github.com/marwanehab98/mission-control",
   "license": "MIT"
 }

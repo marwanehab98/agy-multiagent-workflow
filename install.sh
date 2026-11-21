@@ -7,9 +7,9 @@
 #   --ref      the commit, tag or branch to release (default HEAD); an older ref is a rollback
 #   --harness  install every bundled skill into that harness's skills folder (repeatable; names from
 #              `python3 scripts/harnesses.py install-dirs`). Without --harness or --target, every harness
-#              that already has agy-multiagent-workflow installed is updated.
+#              that already has mission-control installed is updated.
 #   --target   install the full plugin bundle into this exact folder instead
-#   --backups  where replaced installs are kept, per harness (default ~/.local/share/agy-multiagent-workflow/backups);
+#   --backups  where replaced installs are kept, per harness (default ~/.local/share/mission-control/backups);
 #              the newest 5 of each are kept
 #   --skip-tests  install without running that ref's test suite first
 #   --home, --harness-fixtures  for tests: the home folder and captured CLI output harnesses.py uses
@@ -18,16 +18,16 @@
 #   --target: plugin.json, THIRD_PARTY_NOTICES.md, assets/, skills/, scripts/, references/, agents/, resources/, docs/, VERSION.
 #   --harness / update: each skill under skills/<name>/ into <skills_dir>/<name>/, plus shared runtime
 #             (scripts/, references/, agents/, resources/, assets/, docs/, plugin.json, THIRD_PARTY_NOTICES.md, VERSION)
-#             inside <skills_dir>/agy-multiagent-workflow/.
+#             inside <skills_dir>/mission-control/.
 # Exit 0: INSTALLED <sha> ... .  Exit 1: tests failed or the ref is unknown; nothing changed.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")" && pwd)
-name=agy-multiagent-workflow
+name=mission-control
 ref=HEAD
 target=""
 harnesses=()
-backups="$HOME/.local/share/agy-multiagent-workflow/backups"
+backups="$HOME/.local/share/mission-control/backups"
 run_tests=1
 dirs_args=()
 while [ $# -gt 0 ]; do

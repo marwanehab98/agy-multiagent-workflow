@@ -17,7 +17,7 @@ The invoking Antigravity session acts as the **coordinator** and delegates every
 - In a plugin or repo checkout (`.../skills/launch-plan/SKILL.md`): two directories above this file (the parent of `skills/`).
 - In a flat `install.sh --harness` install (`<skills_dir>/launch-plan/SKILL.md`): the sibling `<skills_dir>/mission` folder.
 
-`CFG` is `$HOME/.config/agy-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
+`CFG` is `$HOME/.config/mission-control`, and `CATALOG` is `<CFG>/catalog.json`.
 
 ## Start here
 

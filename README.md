@@ -1,4 +1,4 @@
-# agy-multiagent-workflow
+# mission-control
 
 A self-contained, multi-skill Antigravity plugin for spec-driven development and multi-agent execution via headless `agy -p` workers. Zero external Superpowers or EGM plugin dependencies are required.
 
@@ -25,7 +25,7 @@ Each workflow stage is exposed as its own independently invocable skill, alongsi
 ### Option 1: Antigravity Plugin (recommended)
 
 ```sh
-agy plugin install https://github.com/marwanehab98/agy-multiagent-workflow
+agy plugin install https://github.com/marwanehab98/mission-control
 ```
 
 Validate locally before installing:
@@ -40,13 +40,13 @@ agy plugin validate --strict .
 
 ```sh
 bash install.sh --harness antigravity    # install all 11 skills into ~/.gemini/config/skills
-bash install.sh                          # update every harness that already has agy-multiagent-workflow
+bash install.sh                          # update every harness that already has mission-control
 bash install.sh --target <dir>           # install the full plugin bundle into a custom directory
 bash install.sh --ref <commit>           # install an older version (rollback)
 python3 scripts/harnesses.py install-dirs  # detected harnesses and their skills folders
 ```
 
-Each install records a `VERSION` file naming its commit. Replaced versions are kept in `~/.local/share/agy-multiagent-workflow/backups/<harness>` (newest 5 each).
+Each install records a `VERSION` file naming its commit. Replaced versions are kept in `~/.local/share/mission-control/backups/<harness>` (newest 5 each).
 
 ## Tests
 

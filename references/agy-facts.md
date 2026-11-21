@@ -1,6 +1,6 @@
 # Confirmed headless `agy` behavior
 
-Part of agy-multiagent-workflow. Checked against the official Antigravity CLI headless mode documentation (`https://antigravity.google/docs/cli/headless/`). Re-check after any `agy` CLI update, since flags and defaults change.
+Part of mission-control. Checked against the official Antigravity CLI headless mode documentation (`https://antigravity.google/docs/cli/headless/`). Re-check after any `agy` CLI update, since flags and defaults change.
 
 ## Headless invocation (`agy -p`)
 

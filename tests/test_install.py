@@ -19,7 +19,7 @@ def sh(*cmd, cwd=None, env=None):
 class InstallTests(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp(prefix="install-"))
-        self.target = self.d / "skills" / "agy-multiagent-workflow"
+        self.target = self.d / "skills" / "mission-control"
         self.backups = self.d / "backups"
         self.head = sh("git", "-C", str(REPO), "rev-parse", "HEAD").stdout.strip()
 
@@ -65,7 +65,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(
             (self.target / "SKILL.md").is_file()
             or (self.target / "skills" / "mission" / "SKILL.md").is_file()
-            or (self.target / "skills" / "agy-multiagent-workflow" / "SKILL.md").is_file()
+            or (self.target / "skills" / "mission-control" / "SKILL.md").is_file()
         )
 
     def _legacy_skill_commit(self):
@@ -93,7 +93,7 @@ class InstallTests(unittest.TestCase):
         (custom / "SKILL.md").write_text("---\nname: my-custom-skill\n---\n")
         rc, out = self.harness_install("--ref", legacy, "--harness", "antigravity")
         self.assertEqual(rc, 0, out)
-        legacy_dest = skills_root / "agy-multiagent-workflow"
+        legacy_dest = skills_root / "mission-control"
         self.assertIn(legacy, (legacy_dest / "VERSION").read_text())
         self.assertTrue((legacy_dest / "SKILL.md").is_file())
         self.assertFalse(modern_dest.exists())

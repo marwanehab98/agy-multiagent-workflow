@@ -1,6 +1,6 @@
 # Coordinator: the whole run
 
-Part of agy-multiagent-workflow. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) hold throughout.
+Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) hold throughout.
 
 ## How you work
 
