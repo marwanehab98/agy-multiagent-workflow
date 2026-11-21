@@ -106,9 +106,15 @@ Vague name, tests mock not code
 </Bad>
 
 **Requirements:**
-- One behavior
+- One behavior (or one table-driven test covering related cases of that behavior)
 - Clear name
 - Real code (no mocks unless unavoidable)
+
+**Keep tests lean:**
+- Test **public behaviors and contracts**, not private helpers already exercised through public paths.
+- Use **table-driven / parameterized tests** for multiple inputs or boundary cases instead of duplicating test functions with repeated setup.
+- Cover realistic failure modes and meaningful boundaries — skip trivial getters, type-system guarantees, framework wiring, and exhaustive redundant permutations.
+- See `writing-good-tests.md` in this skill folder for anti-patterns (no change-detectors, no mirror assertions).
 
 ### Verify RED - Watch It Fail
 
@@ -294,14 +300,14 @@ Extract validation for multiple fields if needed.
 
 Before marking work complete:
 
-- [ ] Every new function/method has a test
+- [ ] Every new public behavior/contract has a test (don't duplicate tests for private helpers already covered through public paths)
 - [ ] Watched each test fail before implementing
 - [ ] Each test failed for expected reason (feature missing, not typo)
 - [ ] Wrote minimal code to pass each test
 - [ ] All tests pass
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
-- [ ] Edge cases and errors covered
+- [ ] Key edge cases and realistic failure modes covered (prefer table-driven tests; no redundant permutations)
 
 Can't check all boxes? You skipped TDD. Start over.
 
