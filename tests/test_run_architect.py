@@ -114,6 +114,40 @@ class RunArchitectTests(Base):
         self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
         self.assertIn("does not exist", Path(last.split()[1]).read_text())
 
+    def test_missing_notify_target_file_returns_failed_1(self):
+        missing = self.run_dir / "missing-notify.md"
+        self.behave({"do": "response", "text": f"RESULT: NOTIFY {missing}\n", "conv_id": "arch_notify"})
+        rc, last = self.arch("start", "--state", str(self.state), "--spec", str(self.spec),
+                             "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 1)
+        self.assertTrue(last.startswith("FAILED "), last)
+        self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
+        self.assertIn("does not exist", Path(last.split()[1]).read_text())
+
+    def test_stopped_on_fresh_job_clears_stale_conversation_id(self):
+        s = self.st()
+        s["ARCHITECT_CONVERSATION_ID"] = "stale_conv"
+        self.state.write_text(json.dumps(s))
+        self.behave("stopped")
+        rc, last = self.arch("start", "--state", str(self.state), "--spec", str(self.spec),
+                             "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 1)
+        self.assertTrue(last.startswith("FAILED "), last)
+        self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
+
+    def test_relay_without_conversation_id_returns_failed_1(self):
+        relay = self.run_dir / "relay-empty.md"
+        relay.write_text("Pick.\n")
+        # Use raw_stdout so fake_agy emits empty conversation_id instead of conv_seq
+        self.behave({"do": "response", "raw_stdout": json.dumps({
+            "conversation_id": "", "status": "SUCCESS", "response": f"RESULT: RELAY {relay}\n", "error": ""
+        }), "rc": 0})
+        rc, last = self.arch("start", "--state", str(self.state), "--spec", str(self.spec),
+                             "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 1)
+        self.assertTrue(last.startswith("FAILED "), last)
+        self.assertIn("requires a conversation_id", Path(last.split()[1]).read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

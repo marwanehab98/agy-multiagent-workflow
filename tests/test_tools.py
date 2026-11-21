@@ -82,6 +82,22 @@ class GateTests(unittest.TestCase):
         log = (self.d / "gates" / "baseline-1.log").read_text()
         self.assertIn("\ufffd", log)
 
+    def test_nested_git_repo_created_by_command_is_cleaned(self):
+        self.rv.write_text("VERIFY_1=mkdir -p sub && git -C sub init -q\n")
+        rc, out = self.gate()
+        self.assertEqual(rc, 0, out)
+        self.assertFalse((self.wt / "sub").exists())
+
+    def test_gate_timeout_is_logged_and_fails(self):
+        self.rv.write_text(f"VERIFY_1={sys.executable} -c \"import time; time.sleep(5)\"\n")
+        rc, out = py(GATE, "--run-values", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
+                     "--log", str(self.d / "gates" / "baseline-{n}.log"), "--prefix", "VERIFY",
+                     env={"GATE_TIMEOUT": "1"})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("VERIFY_1 timed out", out)
+        log = (self.d / "gates" / "baseline-1.log").read_text()
+        self.assertIn("timed out after 1s", log)
+
 
 class MergeLocalTests(unittest.TestCase):
     """The user's "merge locally" choice at the end of a run: fast-forward only, never losing their work."""

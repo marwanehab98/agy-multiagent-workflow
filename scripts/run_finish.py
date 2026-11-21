@@ -91,6 +91,11 @@ class Finish:
             raise Done(ERROR, f"ERROR TREE_NOT_CLEAN {out}")
         self.set_phase("review")
 
+    def _discard_or_error(self, head):
+        rc, out = tool("discard-changes.sh", self.r.impl, head)
+        if rc != 0:
+            raise Done(ERROR, f"ERROR RESET {out}")
+
     # -- item 2: the final review
     def do_review(self):
         r = self.r
@@ -103,7 +108,7 @@ class Finish:
                       "AC_IDS": ac_ids(r.need("DESIGN_FILE"), r.need("DECISIONS_LOG"))},
                      {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG")})
         pair = r.need("ROLE_ARCHITECT")
-        r.set(FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair)
+        self.set_phase("reviewing", FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair)
         result = self.runner.run(spec, pair=pair, worktree=r.impl)
         r.log(f"final review {n} dispatched {pair}")
         self.settle_review(result)
@@ -112,21 +117,21 @@ class Finish:
         r = self.r
         head = r.need("FIN_HEAD")
         if result[0] == "usage":
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             self.prompt("usage-limit",
                         f"The final reviewer hit its model's usage limit: {result[1]}\n"
                         "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.", ["retry", "stop"])
         if result[0] == "stopped":
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             return self.void("stopped without a verdict")
         if result[0] == "ask":
             rc, _ = tool("check-tree.sh", r.impl, head)
             if rc != 0:
-                tool("discard-changes.sh", r.impl, head)
+                self._discard_or_error(head)
                 return self.void("changed the worktree")
             return self.ask_consult("final-review", r.need("FIN_PAIR"), r.need("FIN_SPEC"), result[1], result[2])
         if result[1] != "succeeded":
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             return self.void("failed without a verdict")
         n = r.need("FINAL_N")
         out = Path(r.need("FIN_OUT"))
@@ -134,7 +139,7 @@ class Finish:
         verdict = pick_verdict(out, settle)
         rc, _ = tool("check-tree.sh", r.impl, head)
         if rc != 0:
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             verdict.rename(next_free(r.run_dir / "verdicts", "final-void-{n}.md"))
             return self.void("changed the worktree")
         last = verdict_line(verdict)
@@ -192,12 +197,12 @@ class Finish:
                             encoding="utf-8")
             r.set(DRIFT_DONE="yes")
             self.job("drift-done", f"failed: {note}")
-        out = r.run_dir / "drift-1.md"
+        out = next_free(r.run_dir, "drift-{n}.md")
         spec = build("drift.txt", next_free(r.run_dir / "specs", "drift-{n}.txt"),
                      {"EGM_SKILLS": skills, "DESIGN_FILE": r.need("DESIGN_FILE"),
                       "DECISIONS_LOG": r.need("DECISIONS_LOG"), "OUTPUT_FILE": out})
         pair = r.need("ROLE_EGM")
-        r.set(FIN_OUT=out, FIN_SPEC=spec, FIN_PAIR=pair)
+        self.set_phase("drifting", FIN_OUT=out, FIN_SPEC=spec, FIN_PAIR=pair)
         result = self.runner.run(spec, pair=pair, worktree=r.impl)
         r.log(f"drift check dispatched {pair}")
         self.settle_drift(result)
@@ -207,7 +212,7 @@ class Finish:
         head = r.need("LAST_MERGED")
         rc, _ = tool("check-tree.sh", r.impl, head)
         if rc != 0:
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             r.log("drift check changed the worktree; changes discarded")
             if result[0] == "ask":
                 result = ("stopped", "drift check changed the worktree before asking", "", result[3])
@@ -219,7 +224,7 @@ class Finish:
                         "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.",
                         ["retry", "stop"])
         out = Path(r.need("FIN_OUT"))
-        ok = result[0] == "done" and result[1] == "succeeded" and out.is_file() and out.read_text().strip()
+        ok = result[0] == "done" and result[1] == "succeeded" and out.is_file() and out.read_text(encoding="utf-8").strip()
         if ok:
             r.set(DRIFT_DONE="yes", WAITING_ON=None)
             r.log(f"drift check settled succeeded {out}")
@@ -381,6 +386,14 @@ class Finish:
                 raise Done(CONSULT, f"CONSULT {self.r.need('FIN_ASK_FILE')}")
             if phase.startswith("prompt:"):
                 raise Done(PROMPT, f"PROMPT {self.r.need('FIN_PROMPT_FILE')} {self.r.need('FIN_PROMPT_ACCEPT')}")
+            if phase == "reviewing":
+                self._discard_or_error(self.r.need("LAST_MERGED"))
+                self.do_review()
+                continue
+            if phase == "drifting":
+                self._discard_or_error(self.r.need("LAST_MERGED"))
+                self.do_drift()
+                continue
             handler = {"start": self.do_start, "review": self.do_review, "verify": self.do_verify,
                        "probe": self.do_probe, "drift": self.do_drift}.get(phase)
             if handler is None:

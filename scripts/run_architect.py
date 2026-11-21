@@ -37,9 +37,13 @@ def _handle_response(r, result, keep_open):
     saved = next_free(r.run_dir / "results", "architect-{n}.md")
     if kind == "stopped":
         save_body(detail, saved)
+        if not keep_open:
+            r.set(ARCHITECT_CONVERSATION_ID=None)
         return RC_FAILED, f"FAILED {saved}"
     if kind == "done" and detail == "failed":
         save_body(body, saved)
+        if not keep_open:
+            r.set(ARCHITECT_CONVERSATION_ID=None)
         return RC_FAILED, f"FAILED {saved}"
 
     save_body(body, saved)
@@ -50,8 +54,12 @@ def _handle_response(r, result, keep_open):
             if not keep_open:
                 r.set(ARCHITECT_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
-        if conv_id:
-            r.set(ARCHITECT_CONVERSATION_ID=conv_id)
+        if not conv_id:
+            save_body("\nERROR: RELAY requires a conversation_id to receive the user's reply", saved, append=True)
+            if not keep_open:
+                r.set(ARCHITECT_CONVERSATION_ID=None)
+            return RC_FAILED, f"FAILED {saved}"
+        r.set(ARCHITECT_CONVERSATION_ID=conv_id)
         return RC_RELAY, f"RELAY {words[2]} {saved}"
     if len(words) >= 3 and words[:2] == ["RESULT:", "NOTIFY"]:
         if not Path(words[2]).is_file():
@@ -59,8 +67,12 @@ def _handle_response(r, result, keep_open):
             if not keep_open:
                 r.set(ARCHITECT_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
-        if conv_id:
-            r.set(ARCHITECT_CONVERSATION_ID=conv_id)
+        if not conv_id:
+            save_body("\nERROR: NOTIFY requires a conversation_id to continue after SHOWN.", saved, append=True)
+            if not keep_open:
+                r.set(ARCHITECT_CONVERSATION_ID=None)
+            return RC_FAILED, f"FAILED {saved}"
+        r.set(ARCHITECT_CONVERSATION_ID=conv_id)
         return RC_NOTIFY, f"NOTIFY {words[2]} {saved}"
     if len(words) >= 2 and words[0] == "RESULT:":
         if keep_open and conv_id:

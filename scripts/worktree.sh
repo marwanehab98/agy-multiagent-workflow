@@ -69,7 +69,7 @@ case "$op" in
           merged=0
           if git -C "$main_abs" merge-base --is-ancestor "refs/heads/$branch" HEAD 2>/dev/null; then
             merged=1
-          elif upstream=$(git -C "$main_abs" rev-parse --verify -q "refs/heads/$branch@{upstream}" 2>/dev/null); then
+          elif upstream=$(git -C "$main_abs" rev-parse --verify -q "$branch@{upstream}" 2>/dev/null); then
             git -C "$main_abs" merge-base --is-ancestor "refs/heads/$branch" "$upstream" 2>/dev/null && merged=1
           fi
           if [ $merged -eq 0 ]; then

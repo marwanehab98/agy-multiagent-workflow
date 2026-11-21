@@ -73,6 +73,16 @@ bash "$SK/discard-changes.sh" "$WT_KEEP" "$H2" >/dev/null; expect 0 $? "discard-
 [ ! -e "$WT_KEEP/nested" ] && ok "nested git dir removed" || bad "nested git dir remained"
 bash "$SK/worktree.sh" remove . "$WT_KEEP" >/dev/null; expect 0 $? "remove worktree without deleting branch"
 git branch --list T-keep | grep -q T-keep && ok "branch preserved without --delete-branch" || bad "branch deleted unexpectedly"
+WT_UP=$(bash "$SK/worktree.sh" create . T-up T-up "$BASE")
+(cd "$WT_UP" && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m up)
+git push -q origin T-up:T-up && git branch --set-upstream-to=origin/T-up T-up >/dev/null
+bash "$SK/worktree.sh" remove . "$WT_UP" --delete-branch >/dev/null; expect 0 $? "remove worktree with branch merged into upstream"
+[ ! -d "$WT_UP" ] && ok "upstream-merged worktree removed" || bad "upstream-merged worktree still exists"
+git branch --list T-up | grep -q T-up && bad "T-up branch still exists" || ok "T-up branch deleted"
+WT_DET=$(bash "$SK/worktree.sh" create . T-det T-det "$BASE")
+git -C "$WT_DET" checkout -q --detach HEAD
+bash "$SK/worktree.sh" remove . "$WT_DET" --delete-branch >/dev/null; expect 0 $? "remove detached worktree with --delete-branch"
+[ ! -d "$WT_DET" ] && ok "detached worktree removed" || bad "detached worktree still exists"
 
 echo "--- gate"
 git worktree add -q ../impl -b impl2 "$H2"

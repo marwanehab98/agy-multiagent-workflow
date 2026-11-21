@@ -224,6 +224,47 @@ class TreeAndWorkers(Base):
         self.expect(20, "ESCALATE")
         self.assertIn("**FAILED:** missing tool xyz", (self.run_dir / "verdicts" / "01-history.md").read_text())
 
+    def test_colon_outside_bold_markers_and_pretty_envelope(self):
+        self.behave(
+            {"do": "response", "stdout_prefix": "Banner line", "pretty": True,
+             "text": "**ASK**: Colon outside bold?", "conv_id": "conv_pretty"},
+            "commit",
+            "pass",
+            "pass",
+        )
+        self.expect(22, "CONSULT")
+        ans = self.tmp / "ans.md"
+        ans.write_text("Yes.\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+
+        self.behave({"do": "response", "text": "**FAILED**: missing colon-outside tool\n", "pretty": True})
+        (self.run_dir / "queue.txt").write_text("02\n")
+        self.expect(20, "ESCALATE")
+        self.assertIn("**FAILED**: missing colon-outside tool",
+                      (self.run_dir / "verdicts" / "02-history.md").read_text())
+
+    def test_non_json_error_with_trailing_json_preserves_usage_detection(self):
+        self.behave(
+            {"do": "response", "raw_stdout": "Fatal: usageLimitReached\n{\"code\": 429}", "rc": 1},
+            "commit", "pass", "pass",
+        )
+        last, _ = self.expect(30, "PROMPT")
+        self.assertIn("usageLimitReached", Path(last.split()[1]).read_text())
+        self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+
+    def test_structured_error_dict_does_not_crash(self):
+        self.behave({"do": "response", "status": "ERROR", "rc": 1, "error": {"code": 500, "msg": "boom"}})
+        self.expect(20, "ESCALATE")
+        self.assertIn("boom", (self.run_dir / "verdicts" / "01-history.md").read_text())
+
+    def test_agy_timeout_triggers_stopped_and_escalates(self):
+        s = self.st()
+        s["AGY_TIMEOUT"] = "1"
+        self.state.write_text(json.dumps(s))
+        self.behave({"do": "response", "sleep": 3, "text": "late\n"})
+        self.expect(20, "ESCALATE")
+        self.assertIn("timed out after 1s", (self.run_dir / "verdicts" / "01-history.md").read_text())
+
 
 class Prompts(Base):
     def test_usage_limit_prompts_then_retry_restarts(self):
@@ -394,6 +435,70 @@ class Prompts(Base):
         self.expect(0, "QUEUE_EMPTY")
         self.assertFalse((self.impl / "stray_mid_review.txt").exists())
         self.assertEqual(self.st("VOIDS_01_S1"), "0")
+
+    def test_resume_interrupted_impl_cleans_and_restarts(self):
+        s = self.st()
+        spec = self.run_dir / "specs" / "01-implement.txt"
+        spec.write_text("Impl task 01.\n")
+        s.update({
+            "CURRENT_TASK": "01",
+            "LOOP_01": "impl",
+            "PAIR_01": "antigravity:g@high",
+            "BASE_SHA_01": self.base,
+            "LAST_IMPL_SPEC_01": str(spec),
+            "IMPLEMENT_SPEC_01": str(spec),
+            "IMPL_CONVERSATION_ID_01": "stale_impl_conv",
+        })
+        self.state.write_text(json.dumps(s))
+        (self.impl / "half_impl.txt").write_text("partial\n")
+        self.behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        self.assertFalse((self.impl / "half_impl.txt").exists())
+        self.assertEqual(self.calls()[0]["conversation"], "")
+
+    def test_resume_interrupted_committing_preserves_dirty_files_and_reuses(self):
+        s = self.st()
+        spec = self.run_dir / "specs" / "01-commit-1.txt"
+        spec.write_text("Commit uncommitted files.\n")
+        s.update({
+            "CURRENT_TASK": "01",
+            "LOOP_01": "committing",
+            "PAIR_01": "antigravity:g@high",
+            "BASE_SHA_01": self.base,
+            "LAST_IMPL_SPEC_01": str(spec),
+            "IMPL_CONVERSATION_ID_01": "conv_commit_resume",
+            "COMMIT_ROUNDS_01": "1",
+        })
+        self.state.write_text(json.dumps(s))
+        (self.impl / "dirty_keep.txt").write_text("keep me\n")
+        self.behave("commit-all", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        self.assertEqual(self.calls()[0]["conversation"], "conv_commit_resume")
+        changed = sh("git", "-C", str(self.impl), "show", "--stat", "--format=", self.st("LAST_MERGED"))
+        self.assertIn("dirty_keep.txt", changed)
+
+    def test_escalation_attempt_resets_no_verdict_counter(self):
+        s = self.st()
+        s.update({
+            "CURRENT_TASK": "01",
+            "LOOP_01": "escalating",
+            "ATTEMPT_01": "1",
+            "PAIR_01": "antigravity:g@high",
+            "BASE_SHA_01": self.base,
+            "NO_VERDICT_01_S1": "2",
+            "VOIDS_01_S1": "2",
+            "ESC_INPUT_01": "task 01",
+        })
+        (self.run_dir / "specs" / "01-implement.txt").write_text("Impl 01.\n")
+        self.state.write_text(json.dumps(s))
+        note = self.tmp / "note.md"
+        note.write_text("n\n")
+        # Attempt 2: commit, then first noverdict should get a retry (pass) rather than immediate fix
+        self.behave("commit", "noverdict", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY", "--architect-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g@xhigh"))
+        self.assertEqual(self.st("TOTAL_FIX_ROUNDS_01"), "0")
+        self.assertEqual(self.st("NO_VERDICT_01_S1"), "0")
 
 
 class PicksAndLadder(Base):

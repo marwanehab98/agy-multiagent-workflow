@@ -409,6 +409,27 @@ class Drift(Finish):
         last, _ = self.expect(20, "ARCHITECT_JOB", "--reply", "retry")
         self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
 
+    def test_drift_retry_uses_fresh_file_after_stale_partial_write(self):
+        (self.run_dir / "drift-1.md").write_text("stale content from crashed attempt 1\n")
+        self.behave("pass", "fail", "fail")
+        last, _ = self.expect(20, "ARCHITECT_JOB")
+        self.assertTrue(last.startswith("ARCHITECT_JOB drift-done failed: "), last)
+
+    def test_resume_interrupted_reviewing_and_drifting_cleans_worktree(self):
+        self.state.write_text(json.dumps({**self.st(), "FIN_PHASE": "reviewing"}))
+        (self.impl / "stray_fin_review.txt").write_text("oops\n")
+        self.behave("pass", "write-output")
+        last, _ = self.expect(20, "ARCHITECT_JOB")
+        self.assertFalse((self.impl / "stray_fin_review.txt").exists())
+        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
+
+        self.state.write_text(json.dumps({**self.st(), "FIN_PHASE": "drifting"}))
+        (self.impl / "stray_drift.txt").write_text("oops\n")
+        self.behave("write-output")
+        last, _ = self.expect(20, "ARCHITECT_JOB")
+        self.assertFalse((self.impl / "stray_drift.txt").exists())
+        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-2.md'}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

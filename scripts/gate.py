@@ -120,7 +120,7 @@ def main():
 
     # Build and test output that is not gitignored would look like a reviewer's edit later.
     git(a.worktree, "reset", "--hard", want)
-    git(a.worktree, "clean", "-fd")
+    git(a.worktree, "clean", "-ffd")
     dirty = git(a.worktree, "status", "--porcelain", "--untracked-files=all").stdout.strip()
     if dirty or git(a.worktree, "rev-parse", "HEAD").stdout.strip() != want:
         print(f"NOT_RESTORED\n{dirty}")

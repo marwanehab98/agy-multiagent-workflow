@@ -173,13 +173,14 @@ Use this when the user asks to continue a run or after a context compaction in t
    1. Run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`, then `roles.py check` as in Step 1 item 7, with `--catalog <CATALOG>` and the three `ROLE_*` values. Stop on exit 1.
    2. Run `PROBE --set resume`. On `PROBE_FAILED`, do as in Step 1 item 8.
 3. Pick up at the first of these that holds:
-   - **`OPEN_USAGE_PROMPT` is `yes`:** re-show the architect usage-limit prompt ("Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.") and wait. On "retry", unset `OPEN_USAGE_PROMPT` and re-run `ARCH <LAST_ARCH_OP>` with `LAST_ARCH_ARG` (using `LAST_JOB` and "Architect job models" for `<the job's pair>`), then continue per `STEP`.
-   - **`OPEN_RELAY` is set:** show `<OPEN_RELAY>` to the user again as in Rule 5, and wait. When the user replies, run `ARCH reply` using `LAST_JOB` and "Architect job models" for `<the job's pair>`; once `ARCH reply` returns `0` (`RESULT <saved>`), route `<saved>` according to `STEP`:
+   - **`OPEN_USAGE_PROMPT` is `yes`:** re-show the architect usage-limit prompt ("Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.") and wait. On "retry", unset `OPEN_USAGE_PROMPT` and re-run `ARCH <LAST_ARCH_OP>` with `LAST_ARCH_ARG` (using `LAST_JOB` and "Architect job models" for `<the job's pair>`, and adding `--keep-open` if `PHASE=design` and `LAST_ARCH_OP=start`), then continue per `STEP`.
+   - **`OPEN_RELAY` is set:** show `<OPEN_RELAY>` to the user again as in Rule 5, and wait. When the user replies, write their answer to `<RELAY_DIR>/<NNN>-from-user.md`, unset `OPEN_RELAY`, and run `ARCH reply` using `LAST_JOB` and "Architect job models" for `<the job's pair>`; once `ARCH reply` returns `0` (`RESULT <saved>`), if `LAST_JOB=user-message` (expecting `RESULT: NOTED`), continue at `STEP` passing `--docs-moved` on the next `DESIGN`, `TASKLOOP`, `FINISH`, or `PROBE` call; otherwise route `<saved>` according to `STEP`:
      - `2 design`: branch per Step 2;
      - `3 setup`: continue Step 3 from the failing item (`baseline-failed` -> item 5; `fix-meta` -> item 7);
      - `run_design ...`: pass `--result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `DESIGN` and branch per Step 2;
      - `run_task ...`: pass `--architect-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `TASKLOOP` and branch per Step 4;
-     - `run_finish ...` or `8 ...`: pass `--architect-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `FINISH` and branch per Step 8.
+     - `run_finish ...`: pass `--architect-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `FINISH` and branch per Step 8;
+     - `8 <n>`: continue Step 8 at item `<n>` with `<saved>`.
    - **`STEP` is `2 design`:** run "Architect lost" to start a fallback design architect (`FIRST_JOB=resume`) and resend `LAST_JOB` with `LAST_JOB_INPUT`.
    - **`STEP` is `3 setup`:** redo Step 3 from item 2, skipping item 3 if `INITIAL_BASE_SHA` is set, item 4 if `IMPL_WORKTREE` is set, and item 5 if `BASELINE_OK` is `yes`.
    - **`STEP` is `8 <n>`:** continue Step 8 at item `<n>`.

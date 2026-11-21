@@ -182,13 +182,20 @@ def _read_spec_or_text(spec_or_text):
     return str(spec_or_text), None
 
 
+ENVELOPE_KEYS = {"status", "response", "error", "conversation_id"}
+
+
+def _is_envelope(data):
+    return isinstance(data, dict) and bool(ENVELOPE_KEYS & data.keys())
+
+
 def _parse_json_envelope(raw_out):
     """Parse JSON envelope from stdout, tolerating leading status/banner lines."""
     if not raw_out:
         return None
     try:
         data = json.loads(raw_out)
-        return data if isinstance(data, dict) else None
+        return data if _is_envelope(data) else None
     except json.JSONDecodeError:
         pass
     lines = raw_out.splitlines()
@@ -197,7 +204,7 @@ def _parse_json_envelope(raw_out):
             candidate = "\n".join(lines[i:])
             try:
                 data = json.loads(candidate)
-                if isinstance(data, dict):
+                if _is_envelope(data):
                     return data
             except json.JSONDecodeError:
                 continue
@@ -205,7 +212,18 @@ def _parse_json_envelope(raw_out):
 
 
 def _strip_marker_formatting(line):
-    return line.strip().lstrip("`* \t")
+    cleaned = line.strip().lstrip("`* \t")
+    return re.sub(r"^(ASK|FAILED)[`*]+\s*:", r"\1:", cleaned)
+
+
+def _as_text(val):
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    return str(val)
 
 
 class AgyRunner:
@@ -229,7 +247,7 @@ class AgyRunner:
         if len(prompt_text.encode("utf-8")) <= MAX_INLINE_PROMPT_BYTES:
             return prompt_text
         if spec_path is not None and spec_path.is_file():
-            target = spec_path
+            target = spec_path.resolve()
         else:
             target = next_free(self.r.run_dir / "specs", "large-prompt-{n}.txt")
             target.write_text(prompt_text, encoding="utf-8")
@@ -289,10 +307,10 @@ class AgyRunner:
                 return ("resume_failed", combined[:800], "", "")
             return ("stopped", f"{self.exe} exited {proc.returncode}: {combined[:800]}", "", "")
 
-        conv_id = data.get("conversation_id") or conversation_id or ""
-        status = data.get("status", "")
-        resp = data.get("response") or ""
-        err = data.get("error") or ""
+        conv_id = _as_text(data.get("conversation_id")).strip() or conversation_id or ""
+        status = _as_text(data.get("status")).strip()
+        resp = _as_text(data.get("response"))
+        err = _as_text(data.get("error"))
 
         if status != "SUCCESS" or proc.returncode != 0:
             detail = (err or resp or raw_err or f"{self.exe} exited {proc.returncode} (status={status})").strip()

@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -40,7 +41,7 @@ def main():
     p.add_argument("--model", default="")
     p.add_argument("--effort", default="")
     p.add_argument("--conversation", default="")
-    ns, rest = p.parse_known_args()
+    ns = p.parse_args()
 
     world_path = Path(os.environ["FAKE_AGY_WORLD"])
     w = json.loads(world_path.read_text(encoding="utf-8"))
@@ -59,11 +60,11 @@ def main():
     def save_world():
         world_path.write_text(json.dumps(w), encoding="utf-8")
 
-    def emit(rc, payload, prefix=""):
+    def emit(rc, payload, prefix="", pretty=False):
         save_world()
         if prefix:
             print(prefix)
-        print(json.dumps(payload))
+        print(json.dumps(payload, indent=2 if pretty else None))
         return rc
 
     effective_prompt = ns.prompt or ""
@@ -128,19 +129,30 @@ def main():
         return emit(0, {"conversation_id": conv_id, "status": "SUCCESS", "response": text})
 
     if do == "response":
+        if isinstance(beh, dict) and beh.get("sleep"):
+            save_world()
+            time.sleep(float(beh["sleep"]))
         if isinstance(beh, dict) and beh.get("edit"):
             p_edit = Path(beh["edit"])
             p_edit.parent.mkdir(parents=True, exist_ok=True)
             p_edit.write_text(beh.get("edit_text", "edited\n"), encoding="utf-8")
+        if isinstance(beh, dict) and ("raw_stdout" in beh or "raw_stderr" in beh):
+            save_world()
+            if beh.get("raw_stdout"):
+                print(beh["raw_stdout"])
+            if beh.get("raw_stderr"):
+                print(beh["raw_stderr"], file=sys.stderr)
+            return beh.get("rc", 1)
         status = beh.get("status", "SUCCESS") if isinstance(beh, dict) else "SUCCESS"
         rc = beh.get("rc", 0 if status == "SUCCESS" else 1) if isinstance(beh, dict) else 0
         prefix = beh.get("stdout_prefix", "") if isinstance(beh, dict) else ""
+        pretty = bool(beh.get("pretty")) if isinstance(beh, dict) else False
         return emit(rc, {
             "conversation_id": conv_id,
             "status": status,
             "response": beh.get("text", "") if isinstance(beh, dict) else "",
             "error": beh.get("error", "") if isinstance(beh, dict) else "",
-        }, prefix=prefix)
+        }, prefix=prefix, pretty=pretty)
 
     if do == "commit":
         f = Path(f"work_{seq}.txt")

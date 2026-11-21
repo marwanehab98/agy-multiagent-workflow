@@ -241,30 +241,35 @@ class Loop:
         r.log(f"{t} stage{stage} reviewer dispatched {pair}")
         self.after_review(t, stage, result)
 
+    def _discard_or_error(self, head):
+        rc, out = tool("discard-changes.sh", self.r.impl, head)
+        if rc != 0:
+            raise Done(ERROR, f"ERROR RESET {out}")
+
     def after_review(self, t, stage, result):
         r = self.r
         head = r.need(f"WORKER_HEAD_{t}")
         if result[0] == "usage":
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             self.prompt_usage(t, f"review{stage}", result[1])
         if result[0] == "stopped":
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             return self.void_review(t, stage, "stopped without a verdict")
         if result[0] == "ask":
             rc, _ = tool("check-tree.sh", r.impl, head)
             if rc != 0:
-                tool("discard-changes.sh", r.impl, head)
+                self._discard_or_error(head)
                 return self.void_review(t, stage, "changed the worktree")
             self.ask_consult(t, f"review{stage}", r.need(f"REVIEW_PAIR_{t}"),
                              r.need(f"REVIEW_SPEC_{t}"), result[1], result[2], stage=str(stage))
         if result[1] != "succeeded":
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             return self.void_review(t, stage, "failed without a verdict")
         settle = save_body(result[2], next_free(r.run_dir / "results", f"{t}-s{stage}-settle-{{n}}.md"))
         verdict = pick_verdict(Path(r.need(f"REVIEW_OUT_{t}")), settle)
         rc, _ = tool("check-tree.sh", r.impl, head)
         if rc != 0:
-            tool("discard-changes.sh", r.impl, head)
+            self._discard_or_error(head)
             verdict.rename(next_free(r.run_dir / "verdicts", f"{t}-void-s{stage}-{{n}}.md"))
             return self.void_review(t, stage, "changed the worktree")
         last = verdict_line(verdict)
@@ -450,6 +455,8 @@ class Loop:
                  f"IMPL_CONVERSATION_ID_{t}": None,
                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
+                 f"NO_VERDICT_{t}_S1": 0, f"NO_VERDICT_{t}_S2": 0,
+                 f"VOIDS_{t}_S1": 0, f"VOIDS_{t}_S2": 0,
                  f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0})
         r.log(f"{t} escalation attempt {a} on {pair} from {sha}")
         return self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
