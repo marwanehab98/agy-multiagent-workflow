@@ -8,4 +8,5 @@ Design decisions that apply (these override anything else where they differ):
 
 Project conventions to check against: {{CONVENTION_PATHS}}
 Evaluate correctness, edge cases, type safety, architectural fit, conformance to the project conventions, and TDD test quality.
-Write your review to {{OUTPUT_FILE}}: only a severity-graded list of Critical, Important, and Minor issues, each with file and line. Its last line must be exactly "VERDICT: FIX" if there is any Critical or Important issue, otherwise "VERDICT: PASS". Then settle as worker_done, and make the last line of your settle message that same VERDICT line, whatever format your other instructions suggest for the settle message.
+If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
+Write your review to {{OUTPUT_FILE}}: only a severity-graded list of Critical, Important, and Minor issues, each with file and line. Its last line must be exactly "VERDICT: FIX" if there is any Critical or Important issue, otherwise "VERDICT: PASS". End your response with that exact same VERDICT line.

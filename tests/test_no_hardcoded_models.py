@@ -1,26 +1,21 @@
-"""No model or harness names outside the adapters (design anti-goal; Global Constraints).
+"""No model names outside the adapter (Global Constraints).
 
-Only scripts/harnesses.py may name a model or harness; everything else gets them from the picks
-and the detected catalog. SKILL.md's frontmatter description is exempt (ruling R9): its harness words
-only decide when the skill loads, and users say "run this through Antigravity". PENDING lists paths
-still being rewritten; it is empty since Task 11 rewrote architect.md and the templates.
+Only scripts/harnesses.py may name a model; everything else gets them from the picks
+and the detected catalog. SKILL.md's frontmatter description is exempt for trigger words.
 """
 import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|flash|hydrogen|argon|gemini|antigravity|agy|claude)\b")
-EXEMPT = re.compile(r"\bCLAUDE\.md\b")  # the project instructions file, exactly as spelled; not a harness name
+NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|flash|hydrogen|argon|gemini|claude)\b")
+EXEMPT = re.compile(r"\bCLAUDE\.md\b")  # the project instructions file, exactly as spelled; not a model/harness name
 CHECKED = ["SKILL.md", "references/coordinator.md", "references/architect.md", "references/templates", "scripts"]
 ALLOWED = {"scripts/harnesses.py"}
-PENDING = set()
 
 
 def files():
     for entry in CHECKED:
-        if entry in PENDING:
-            continue
         path = ROOT / entry
         found = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
         for p in found:
@@ -43,14 +38,14 @@ def description_line(path):
 
 
 class NoHardcodedModels(unittest.TestCase):
-    def test_pattern_covers_claude_and_flash_but_not_claude_md(self):
+    def test_pattern_covers_models_but_not_claude_md(self):
         for line in ("start a claude worker", "use Claude here", "gemini-3-flash", "Flash is cheap"):
             self.assertTrue(NAMES.search(EXEMPT.sub("", line)), line)
         for line in ("read CLAUDE.md first", "the project's CLAUDE.md and AGENTS.md"):
             self.assertFalse(NAMES.search(EXEMPT.sub("", line)), line)
         self.assertTrue(NAMES.search(EXEMPT.sub("", "read claude.md first")))  # only the exact spelling is exempt
 
-    def test_no_model_or_harness_names(self):
+    def test_no_model_names(self):
         hits = []
         for rel, p in files():
             exempt = description_line(p) if rel == "SKILL.md" else None
@@ -58,12 +53,12 @@ class NoHardcodedModels(unittest.TestCase):
                 if n != exempt and NAMES.search(EXEMPT.sub("", line)):
                     hits.append(f"{rel}:{n}: {line.strip()[:120]}")
         if hits:
-            self.fail("model or harness names found:\n" + "\n".join(hits))
+            self.fail("model names found:\n" + "\n".join(hits))
 
     def test_description_keeps_harness_trigger_words(self):
         n = description_line(ROOT / "SKILL.md")
         line = (ROOT / "SKILL.md").read_text(encoding="utf-8").splitlines()[n - 1]
-        for word in ("Orca", "Antigravity", "Gemini"):
+        for word in ("Antigravity", "Gemini", "agy"):
             self.assertIn(word, line)
 
     def test_checked_paths_exist(self):

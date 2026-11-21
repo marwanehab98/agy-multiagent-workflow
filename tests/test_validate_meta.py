@@ -8,7 +8,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "validate_meta.py"
 CATALOG = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 DEFAULT = dict(TITLE="t", TIER="standard", SPEC_TYPE="checklist", ACS="AC-1",
-               IMPLEMENTER="ag:g@high", REVIEW_1="cl:small@high", REVIEW_2="cl:small@high")
+               IMPLEMENTER="antigravity:g@high", REVIEW_1="antigravity:small@high", REVIEW_2="antigravity:small@high")
 
 
 class ValidateMetaTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class ValidateMetaTests(unittest.TestCase):
         self.state()
 
     def state(self, **over):
-        s = {"CATALOG": str(CATALOG), "ROLE_ARCHITECT": "cl:big@high", "ROLE_BASE": "ag:g@high",
+        s = {"CATALOG": str(CATALOG), "ROLE_ARCHITECT": "antigravity:big@high", "ROLE_BASE": "antigravity:g@high",
              "BASE_TOP": "xhigh", **over}
         self.state_path.write_text(json.dumps(s))
 
@@ -67,15 +67,15 @@ class ValidateMetaTests(unittest.TestCase):
         self.assertProblem("01: missing TIER")
 
     def test_reviewer_effort_not_detected_is_rejected(self):
-        self.meta("01", REVIEW_1="cl:small@ultra")
-        self.assertProblem("REVIEW_1 'cl:small@ultra'", "low medium high xhigh max")
+        self.meta("01", REVIEW_1="antigravity:small@ultra")
+        self.assertProblem("REVIEW_1 'antigravity:small@ultra'", "low medium high xhigh max")
 
     def test_reviewer_model_not_detected(self):
-        self.meta("01", REVIEW_2="cl:tiny@high")
-        self.assertProblem("REVIEW_2 'cl:tiny@high'", "small")
+        self.meta("01", REVIEW_2="antigravity:tiny@high")
+        self.assertProblem("REVIEW_2 'antigravity:tiny@high'", "small")
 
     def test_reviewer_from_other_harness_rejected(self):
-        self.meta("01", REVIEW_1="ag:g@high")
+        self.meta("01", REVIEW_1="other:g@high")
         self.assertProblem("architect's harness")
 
     def test_bad_pair_shape(self):
@@ -83,34 +83,34 @@ class ValidateMetaTests(unittest.TestCase):
         self.assertProblem("REVIEW_1", "bad pair")
 
     def test_complex_review2_matches_architect_model_any_effort(self):
-        self.meta("01", TIER="complex", REVIEW_2="cl:big@low")
+        self.meta("01", TIER="complex", REVIEW_2="antigravity:big@low")
         self.assertOK()
-        self.meta("01", TIER="complex", REVIEW_2="cl:small@max")
+        self.meta("01", TIER="complex", REVIEW_2="antigravity:small@max")
         self.assertProblem("REVIEW_2")
 
     def test_complex_judgment_needs_review1_on_architect_model(self):
-        self.meta("01", TIER="complex", SPEC_TYPE="judgment", REVIEW_1="cl:small@max", REVIEW_2="cl:big@high")
+        self.meta("01", TIER="complex", SPEC_TYPE="judgment", REVIEW_1="antigravity:small@max", REVIEW_2="antigravity:big@high")
         self.assertProblem("REVIEW_1")
-        self.meta("01", TIER="complex", SPEC_TYPE="judgment", REVIEW_1="cl:big@medium", REVIEW_2="cl:big@high")
+        self.meta("01", TIER="complex", SPEC_TYPE="judgment", REVIEW_1="antigravity:big@medium", REVIEW_2="antigravity:big@high")
         self.assertOK()
 
     def test_standard_may_use_any_reviewer(self):
-        self.meta("01", REVIEW_1="cl:big@max", REVIEW_2="cl:small@low")
+        self.meta("01", REVIEW_1="antigravity:big@max", REVIEW_2="antigravity:small@low")
         self.assertOK()
 
     def test_first_implementer_options(self):
-        self.meta("01", IMPLEMENTER="ag:g@xhigh")
+        self.meta("01", IMPLEMENTER="antigravity:g@xhigh")
         self.assertOK()
-        self.meta("01", IMPLEMENTER="ag:g@low")
+        self.meta("01", IMPLEMENTER="antigravity:g@low")
         self.assertProblem("IMPLEMENTER")
-        self.meta("01", IMPLEMENTER="cl:big@high")
+        self.meta("01", IMPLEMENTER="antigravity:big@high")
         self.assertProblem("never implements first")
 
     def test_shared_model_blocks_top_start(self):
-        self.state(ROLE_ARCHITECT="ag:g@xhigh")
-        self.meta("01", IMPLEMENTER="ag:g@xhigh")
+        self.state(ROLE_ARCHITECT="antigravity:g@xhigh")
+        self.meta("01", IMPLEMENTER="antigravity:g@xhigh")
         self.assertProblem("never implements first")
-        self.meta("01", IMPLEMENTER="ag:g@high", REVIEW_1="ag:g@low", REVIEW_2="ag:g@low")
+        self.meta("01", IMPLEMENTER="antigravity:g@high", REVIEW_1="antigravity:g@low", REVIEW_2="antigravity:g@low")
         self.assertOK()
 
     def test_ladder_key_rejected(self):
@@ -128,35 +128,34 @@ class ValidateMetaTests(unittest.TestCase):
         self.assertProblem("01-summary.md not found")
 
     def test_escalation_pair_must_be_rung(self):
-        self.assertPair("ag:g@xhigh", attempt=1, ok=True)
-        self.assertPair("cl:big@high", attempt=1, ok=False)
-        self.assertPair("cl:big@high", attempt=2, ok=True)
-        self.assertPair("cl:small@low", attempt=3, ok=False)
-        self.assertPair("cl:small@low", attempt=3, past="yes", ok=True)
-        self.assertPair("cl:small@ultra", attempt=3, past="yes", ok=False)
+        self.assertPair("antigravity:g@xhigh", attempt=1, ok=True)
+        self.assertPair("antigravity:big@high", attempt=1, ok=False)
+        self.assertPair("antigravity:big@high", attempt=2, ok=True)
+        self.assertPair("antigravity:small@low", attempt=3, ok=False)
+        self.assertPair("antigravity:small@low", attempt=3, past="yes", ok=True)
+        self.assertPair("antigravity:small@ultra", attempt=3, past="yes", ok=False)
         self.assertPair("zz:g@high", attempt=3, past="yes", ok=False)
 
     def test_escalation_rung_depends_on_first_implementer(self):
-        self.meta("01", IMPLEMENTER="ag:g@xhigh")
+        self.meta("01", IMPLEMENTER="antigravity:g@xhigh")
         rc, out = self.run_cli("pair", "--state", str(self.state_path), "--task-meta", str(self.tasks / "01.meta"),
-                               "--pair", "cl:big@high", "--attempt", "1", "--past-ladder", "no")
+                               "--pair", "antigravity:big@high", "--attempt", "1", "--past-ladder", "no")
         self.assertEqual(rc, 0, out)
 
     def test_first_rung_is_base_top_unless_architect_shares_it(self):
-        self.state(ROLE_ARCHITECT="ag:g@xhigh", ROLE_BASE="ag:g@high")
-        self.assertPair("ag:g@xhigh", attempt=1, ok=True)
-        self.assertPair("ag:g@high", attempt=1, ok=False)
+        self.state(ROLE_ARCHITECT="antigravity:g@xhigh", ROLE_BASE="antigravity:g@high")
+        self.assertPair("antigravity:g@xhigh", attempt=1, ok=True)
+        self.assertPair("antigravity:g@high", attempt=1, ok=False)
 
     def test_harness_pair(self):
         def hp(pair):
             return self.run_cli("harness-pair", "--state", str(self.state_path), "--pair", pair)
-        self.assertEqual(hp("cl:small@low")[0], 0)
-        self.assertEqual(hp("cl:small@ultra")[0], 1)
-        rc, out = hp("ag:g@high")
+        self.assertEqual(hp("antigravity:small@low")[0], 0)
+        self.assertEqual(hp("antigravity:small@ultra")[0], 1)
+        rc, out = hp("other:g@high")
         self.assertEqual(rc, 1)
         self.assertIn("architect's harness", out)
 
-    # coverage logic (ported from tests/test_scripts.sh)
     def design(self):
         f = self.d / "design.md"
         f.write_text("AC-1 does x\nAC-2 does y\nAC-3 does z\n")

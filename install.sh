@@ -8,7 +8,7 @@
 #              `python3 scripts/harnesses.py install-dirs`). Without --harness or --target, every harness that
 #              already has the skill is updated, so a release never adds it to a new harness by itself.
 #   --target   install into this exact folder instead
-#   --backups  where replaced installs are kept, per harness (default ~/.local/share/orca-multiagent-workflow/backups);
+#   --backups  where replaced installs are kept, per harness (default ~/.local/share/agy-multiagent-workflow/backups);
 #              the newest 5 of each are kept
 #   --skip-tests  install without running that ref's test suite first
 #   --home, --harness-fixtures  for tests: the home folder and captured CLI output harnesses.py uses
@@ -18,11 +18,11 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")" && pwd)
-name=orca-multiagent-workflow
+name=agy-multiagent-workflow
 ref=HEAD
 target=""
 harnesses=()
-backups="$HOME/.local/share/orca-multiagent-workflow/backups"
+backups="$HOME/.local/share/agy-multiagent-workflow/backups"
 run_tests=1
 dirs_args=()
 while [ $# -gt 0 ]; do

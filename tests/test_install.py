@@ -18,7 +18,7 @@ def sh(*cmd, cwd=None, env=None):
 class InstallTests(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp(prefix="install-"))
-        self.target = self.d / "skills" / "orca-multiagent-workflow"
+        self.target = self.d / "skills" / "agy-multiagent-workflow"
         self.backups = self.d / "backups"
         self.head = sh("git", "-C", str(REPO), "rev-parse", "HEAD").stdout.strip()
 
@@ -65,20 +65,18 @@ class InstallTests(unittest.TestCase):
                "--backups", str(self.backups), "--skip-tests", *extra)
         return r.returncode, (r.stdout + r.stderr).strip()
 
-    def test_harness_option_installs_into_that_harness_skills_folder(self):
+    def test_harness_option_installs_into_antigravity_skills_folder(self):
         rc, out = self.harness_install("--harness", "antigravity")
         self.assertEqual(rc, 0, out)
-        dest = self.d / "home" / ".gemini" / "config" / "skills" / "orca-multiagent-workflow"
+        dest = self.d / "home" / ".gemini" / "config" / "skills" / "agy-multiagent-workflow"
         self.assertTrue((dest / "SKILL.md").is_file())
-        self.assertFalse((self.d / "home" / ".claude" / "skills" / "orca-multiagent-workflow").exists())
 
-    def test_no_option_updates_only_harnesses_that_already_have_it(self):
-        self.harness_install("--harness", "claude")
+    def test_no_option_updates_existing_antigravity_install(self):
+        self.harness_install("--harness", "antigravity")
         rc, out = self.harness_install()
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.count("INSTALLED"), 1)
-        self.assertIn(".claude/skills/orca-multiagent-workflow", out)
-        self.assertFalse((self.d / "home" / ".gemini" / "config" / "skills" / "orca-multiagent-workflow").exists())
+        self.assertIn(".gemini/config/skills/agy-multiagent-workflow", out)
 
     def test_no_option_and_no_existing_install_asks_for_a_harness(self):
         rc, out = self.harness_install()

@@ -1,21 +1,21 @@
-"""Harness adapters: the one place that knows how each harness's CLI behaves (design 2.4).
+"""Harness adapter for Antigravity (`agy` CLI).
 
 Usage:
   python3 -I harnesses.py detect --out <file> [--fixtures DIR --home DIR]
-  python3 -I harnesses.py args (--state <state.json> | --catalog <file>) --pair <pair>   # Orca launch args, one line
+  python3 -I harnesses.py args (--state <state.json> | --catalog <file>) --pair <pair>   # agy CLI model/effort args
   python3 -I harnesses.py skill-dir --catalog <file> --harness H --skill NAME
   python3 -I harnesses.py top-effort --catalog <file> --harness H --model M
   python3 -I harnesses.py install-dirs [--fixtures DIR --home DIR]   # name<TAB>skills folder<TAB>found|missing
 
-`detect` runs each harness's own CLI and writes a catalog:
-  {"detected_at": iso, "harnesses": {name: {orca_agent, binary, version, styles, models,
+`detect` runs `agy` CLI commands and writes a catalog:
+  {"detected_at": iso, "harnesses": {name: {binary, version, styles, models,
    skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str,
    skill_dirs: [folder], plugin_cmd: str, mcp_cmd: str}}}
 skill_dirs, plugin_cmd and mcp_cmd say where a missing requirement belongs (roles.py check prints them).
 A harness whose binary is missing is left out; one whose model list parses empty is
 recorded with `broken` set to the start of the raw output.
 `args --state` reads CATALOG and the LAUNCH_STYLE_ keys from a run's state file; `args --catalog` (before
-any run exists, e.g. the setup handoff) uses the pair's harness's first launch style.
+any run exists) uses the harness's first launch style.
 Exit 0 ok. Exit 1 not found (skill-dir, top-effort) or bad input. Exit 64 bad usage.
 """
 import argparse
@@ -32,12 +32,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from pairs import EFFORTS, parse_pair, pair_key  # noqa: E402
 
-EXTRA_MODELS = ["haiku"]  # Claude Code has no command that lists models; the test launch proves each one
-# Models Orca launches with no --effort: its claude agent lists no effort option for them and refuses
-# `--effort` with invalid_argument, although `claude` itself accepts one (live test 2026-11-15).
-# They get the single effort `default`, which launches without --effort.
-NO_EFFORT_MODELS = {"haiku"}
-
 
 def real_runner(cmd):
     try:
@@ -52,10 +46,6 @@ FIXTURE_FILES = {
     ("agy", "plugin", "list"): "agy_plugin_list.txt",
     ("agy", "mcp", "list"): "agy_mcp_list.txt",
     ("agy", "--version"): "agy_version.txt",
-    ("claude", "--help"): "claude_help.txt",
-    ("claude", "plugin", "list"): "claude_plugin_list.txt",
-    ("claude", "mcp", "list"): "claude_mcp_list.txt",
-    ("claude", "--version"): "claude_version.txt",
 }
 
 
@@ -73,7 +63,7 @@ def fixture_runner(fixtures, overrides=None):
 
 
 class Adapter:
-    name = orca_agent = binary = ""
+    name = binary = ""
     styles = []
     version_cmd = ["--version"]
 
@@ -123,69 +113,8 @@ class Adapter:
         return found
 
 
-class ClaudeAdapter(Adapter):
-    name, orca_agent, binary = "claude", "claude", "claude"
-    styles = ["flag"]
-    models_cmd = ("--help",)
-
-    def _option_text(self, flag):
-        """The help text of one option: its line plus the continuation lines up to the next option."""
-        lines, out, on = self.run("--help")[1].splitlines(), [], False
-        for line in lines:
-            if re.match(rf"\s+(?:-\w, )?{re.escape(flag)}\b", line):
-                on = True
-            elif on and re.match(r"\s+-", line):
-                break
-            if on:
-                out.append(line)
-        return " ".join(out)
-
-    def models(self):
-        aliases = re.findall(r"'([A-Za-z0-9][\w.\-]*)'", self._option_text("--model"))
-        names = list(dict.fromkeys(aliases + EXTRA_MODELS)) if aliases else []
-        m = re.search(r"\(([^)]*)\)", self._option_text("--effort"))
-        efforts = [e.strip() for e in m.group(1).split(",") if e.strip() in EFFORTS] if m else []
-        return [{"model": n, "label": n, "efforts": efforts if efforts and n not in NO_EFFORT_MODELS else ["default"]}
-                for n in names]
-
-    def plugins(self):
-        names, cur = [], None
-        for line in self.run("plugin", "list")[1].splitlines():
-            m = re.match(r"\s*❯\s*([^@\s]+)@", line)
-            if m:
-                cur = m.group(1)
-            elif cur and re.search(r"Status:\s*✔\s*(enabled|loaded)", line) and cur not in names:
-                names.append(cur)
-        return names
-
-    def mcp(self):
-        out = {}
-        for line in self.run("mcp", "list")[1].splitlines():
-            m = re.match(r"(.+?):\s.* - ", line)
-            if m:
-                out[m.group(1).strip()] = "✔ Connected" in line
-        return out
-
-    def homes(self):
-        homes = [Path(self.env["CLAUDE_CONFIG_DIR"])] if self.env.get("CLAUDE_CONFIG_DIR") else []
-        homes.append(self.home / ".claude")
-        return list(dict.fromkeys(homes))
-
-    def user_skill_dirs(self):
-        return [h / "skills" for h in self.homes()][:1]
-
-    def skill_roots(self):
-        homes = [h for h in self.homes() if h.is_dir()]
-        roots = [h / "skills" for h in homes]
-        enabled = self.plugins()
-        for h in homes:
-            for p in enabled:
-                roots += sorted(h.glob(f"plugins/cache/*/{p}/*/skills"))
-        return roots
-
-
 class AntigravityAdapter(Adapter):
-    name, orca_agent, binary = "antigravity", "antigravity", "agy"
+    name, binary = "antigravity", "agy"
     styles = ["slug", "flag"]
     models_cmd = ("models",)
 
@@ -225,7 +154,7 @@ class AntigravityAdapter(Adapter):
         return self.user_skill_dirs() + [base / "plugins" / p / "skills" for p in self.plugins()]
 
 
-ADAPTERS = {"claude": ClaudeAdapter, "antigravity": AntigravityAdapter}
+ADAPTERS = {"antigravity": AntigravityAdapter}
 
 
 def detect(runner, home, env=None):
@@ -237,7 +166,7 @@ def detect(runner, home, env=None):
             continue
         models = a.models()
         cat["harnesses"][name] = {
-            "orca_agent": a.orca_agent, "binary": found["binary"], "version": found["version"],
+            "binary": found["binary"], "version": found["version"],
             "styles": list(a.styles), "models": models, "skills": a.skills(), "plugins": a.plugins(),
             "mcp": a.mcp(), "broken": None if models else (a.raw_models()[:400] or "no output"),
             "skill_dirs": [str(d) for d in a.user_skill_dirs()],
@@ -254,12 +183,13 @@ def _model(catalog, harness, model):
 
 
 def launch_args(catalog, pair, style):
-    agent = catalog["harnesses"][pair.harness]["orca_agent"]
+    if pair.harness not in catalog["harnesses"]:
+        raise KeyError(f"harness {pair.harness} not in catalog")
     default = pair.effort == "default"
     if style == "slug":
-        return ["--agent", agent, "--model", pair.model if default else f"{pair.model}-{pair.effort}"]
+        return ["--model", pair.model if default else f"{pair.model}-{pair.effort}"]
     if style == "flag":
-        return ["--agent", agent, "--model", pair.model] + ([] if default else ["--effort", pair.effort])
+        return ["--model", pair.model] + ([] if default else ["--effort", pair.effort])
     raise ValueError(f"unknown launch style {style!r}")
 
 

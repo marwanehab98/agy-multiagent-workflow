@@ -1,5 +1,4 @@
-"""gate.py and save_message.py: numbered output files, never overwriting, and baseline skips."""
-import json
+"""gate.py and merge-local.sh: numbered output files, never overwriting, baseline skips, and local merge."""
 import os
 import subprocess
 import sys
@@ -9,8 +8,7 @@ from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent.parent
 GATE = SKILL / "scripts" / "gate.py"
-SAVE = SKILL / "scripts" / "save_message.py"
-FAKE = SKILL / "tests" / "fake_orca.py"
+MERGE_LOCAL = SKILL / "scripts" / "merge-local.sh"
 
 
 def sh(*cmd, cwd=None):
@@ -69,48 +67,6 @@ class GateTests(unittest.TestCase):
 
     def test_empty_skip_skips_nothing(self):
         self.assertEqual(self.gate("--skip", "")[0], 1)
-
-
-class SaveMessageTests(unittest.TestCase):
-    def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="save-"))
-        self.world = self.d / "world.json"
-        msg = {"id": "msg_1", "type": "worker_done", "sequence": 1, "subject": "done",
-               "body": "RESULT: NOTED\nsummary", "payload": json.dumps({"dispatchId": "ctx_1", "outcome": "succeeded"})}
-        self.world.write_text(json.dumps({"seq": 1, "messages": [msg], "tasks": {}, "dispatches": {},
-                                          "behaviors": [], "calls": []}))
-        self.orca = self.d / "orca"
-        self.orca.write_text(f'#!/bin/sh\nexec {sys.executable} -I {FAKE} "$@"\n')
-        self.orca.chmod(0o755)
-        self.results = self.d / "results"
-
-    def save(self, out, *extra):
-        return py(SAVE, "--orca", str(self.orca), "--run", "run_fake", "--out", out,
-                  "--dispatch", "ctx_1", "--type", "worker_done", *extra, env={"FAKE_ORCA_WORLD": str(self.world)})
-
-    def test_placeholder_takes_the_next_free_number(self):
-        self.results.mkdir()
-        (self.results / "architect-1.md").write_text("first job\n")
-        rc, out = self.save(str(self.results / "architect-{n}.md"))
-        self.assertEqual(rc, 0, out)
-        self.assertTrue(out.startswith(f"SAVED {self.results / 'architect-2.md'} "))
-        self.assertEqual((self.results / "architect-1.md").read_text(), "first job\n")
-
-    def test_existing_file_is_never_overwritten(self):
-        self.results.mkdir()
-        (self.results / "architect-1.md").write_text("first job\n")
-        rc, out = self.save(str(self.results / "architect-1.md"))
-        self.assertEqual((rc, out), (3, f"EXISTS {self.results / 'architect-1.md'}"))
-        self.assertEqual((self.results / "architect-1.md").read_text(), "first job\n")
-
-    def test_append_still_adds_to_an_existing_file(self):
-        self.results.mkdir()
-        (self.results / "log.md").write_text("first\n")
-        self.assertEqual(self.save(str(self.results / "log.md"), "--append")[0], 0)
-        self.assertEqual((self.results / "log.md").read_text(), "first\nRESULT: NOTED\nsummary\n")
-
-
-MERGE_LOCAL = SKILL / "scripts" / "merge-local.sh"
 
 
 class MergeLocalTests(unittest.TestCase):

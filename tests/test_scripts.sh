@@ -2,7 +2,7 @@
 # Exercises the skill's git and state scripts in a throwaway repo. Run: bash tests/test_scripts.sh
 set -u
 SK=$(cd "$(dirname "$0")/../scripts" && pwd)
-T=$(mktemp -d "${TMPDIR:-/tmp}/omwtest.XXXX"); cd "$T"
+T=$(mktemp -d "${TMPDIR:-/tmp}/amwtest.XXXX"); cd "$T"
 pass=0; fail=0
 ok()  { echo "PASS $1"; pass=$((pass+1)); }
 bad() { echo "FAIL $1"; fail=$((fail+1)); }
@@ -15,18 +15,22 @@ echo a > a.txt; printf 'out/\n' > .gitignore; git add .; git commit -qm init
 git remote add origin ../origin.git; git push -q origin main
 BASE=$(git rev-parse HEAD)
 
-git worktree add -q ../docs -b T-docs "$BASE"
+echo "--- worktree.sh create & remove"
+WT_DOCS=$(bash "$SK/worktree.sh" create . T-docs T-docs "$BASE")
+expect 0 $? "worktree create docs"
+[ -d "$WT_DOCS" ] && ok "docs worktree exists" || bad "docs worktree missing: $WT_DOCS"
+
 echo "--- check-tree catches an uncommitted docs file"
-mkdir -p ../docs/docs/plans; echo findings > ../docs/docs/plans/egm-review.md
-bash "$SK/check-tree.sh" ../docs "$BASE" >/dev/null; expect 2 $? "check-tree flags uncommitted docs file before dispatch"
-rm ../docs/docs/plans/egm-review.md
+mkdir -p "$WT_DOCS/docs/plans"; echo findings > "$WT_DOCS/docs/plans/egm-review.md"
+bash "$SK/check-tree.sh" "$WT_DOCS" "$BASE" >/dev/null; expect 2 $? "check-tree flags uncommitted docs file before dispatch"
+rm "$WT_DOCS/docs/plans/egm-review.md"
 
 echo "--- check-tree: renames and spaces"
-git -C ../docs mv a.txt "b file.txt"
-out=$(bash "$SK/check-tree.sh" ../docs "$BASE"); rc=$?
+git -C "$WT_DOCS" mv a.txt "b file.txt"
+out=$(bash "$SK/check-tree.sh" "$WT_DOCS" "$BASE"); rc=$?
 expect 2 $rc "rename detected"; echo "$out" | grep -q 'b file.txt' && ok "unquoted path with space" || bad "path with space: $out"
-git -C ../docs reset -q --hard "$BASE"
-bash "$SK/check-tree.sh" ../docs "$BASE" >/dev/null; expect 0 $? "clean tree"
+git -C "$WT_DOCS" reset -q --hard "$BASE"
+bash "$SK/check-tree.sh" "$WT_DOCS" "$BASE" >/dev/null; expect 0 $? "clean tree"
 
 echo "--- start-point"
 out=$(bash "$SK/start-point.sh" . main); echo "$out" | grep -q "START $BASE up-to-date" && ok "up-to-date" || bad "up-to-date: $out"
@@ -39,21 +43,31 @@ git reset -q --hard "$R"; BASE=$R
 
 echo "--- merge-task (update-ref, no checkout)"
 git branch feature "$BASE"
-git worktree add -q ../impl -b T-impl feature
-(cd ../impl && echo x > x.txt && git add x.txt && git -c user.email=t@t -c user.name=t commit -qm task1)
-H1=$(git -C ../impl rev-parse HEAD)
+WT_IMPL=$(bash "$SK/worktree.sh" create . T-impl T-impl feature)
+expect 0 $? "worktree create impl"
+(cd "$WT_IMPL" && echo x > x.txt && git add x.txt && git -c user.email=t@t -c user.name=t commit -qm task1)
+H1=$(git -C "$WT_IMPL" rev-parse HEAD)
 bash "$SK/merge-task.sh" . feature "$BASE" "$H1" >/dev/null; expect 0 $? "ff without checkout"
 [ "$(git rev-parse feature)" = "$H1" ] && ok "branch moved" || bad "branch moved"
 [ "$(git branch --show-current)" = "main" ] && ok "main checkout untouched" || bad "main checkout untouched"
 bash "$SK/merge-task.sh" . feature "$BASE" "$H1" >/dev/null; expect 3 $? "stale expected_old refused"
-git branch side "$BASE"; (cd ../impl && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m t2); H2=$(git -C ../impl rev-parse HEAD)
+git branch side "$BASE"; (cd "$WT_IMPL" && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m t2); H2=$(git -C "$WT_IMPL" rev-parse HEAD)
 bash "$SK/merge-task.sh" . feature "$H1" "$(git rev-parse side)" >/dev/null; expect 3 $? "non-ff target refused"
 git switch -q feature
 bash "$SK/merge-task.sh" . feature "$H1" "$H2" >/dev/null; expect 2 $? "refused while checked out"
 git switch -q main
 bash "$SK/branch-at.sh" . feature "$H1" >/dev/null; expect 0 $? "branch-at still at H1"
 
+echo "--- worktree.sh remove"
+bash "$SK/worktree.sh" remove . "$WT_DOCS" --delete-branch >/dev/null; expect 0 $? "remove merged docs worktree"
+[ ! -d "$WT_DOCS" ] && ok "docs worktree removed" || bad "docs worktree still exists"
+bash "$SK/worktree.sh" remove . "$WT_IMPL" --delete-branch >/dev/null 2>&1; expect 1 $? "refuses deleting unmerged branch"
+WT_KEEP=$(bash "$SK/worktree.sh" create . T-keep T-keep "$H2")
+bash "$SK/worktree.sh" remove . "$WT_KEEP" >/dev/null; expect 0 $? "remove worktree without deleting branch"
+git branch --list T-keep | grep -q T-keep && ok "branch preserved without --delete-branch" || bad "branch deleted unexpectedly"
+
 echo "--- gate"
+git worktree add -q ../impl -b impl2 "$H2"
 cat > ../rv.txt <<'EOF'
 FEATURE_BRANCH=feature
 VERIFY_1=test -f x.txt
@@ -71,7 +85,7 @@ python3 -I "$SK/gate.py" --run-values ../rv.txt --worktree ../impl --head "$H1" 
 
 echo "--- state"
 S=../state.json
-python3 -I "$SK/state.py" --file $S set BASE_SHA_02=abc ARCHITECT_DISPATCH=ctx_1 >/dev/null
+python3 -I "$SK/state.py" --file $S set BASE_SHA_02=abc ARCHITECT_CONVERSATION_ID=conv_1 >/dev/null
 [ "$(python3 -I "$SK/state.py" --file $S get BASE_SHA_02)" = abc ] && ok "set/get" || bad "set/get"
 python3 -I "$SK/state.py" --file $S incr FIX_ROUNDS_02 >/dev/null
 [ "$(python3 -I "$SK/state.py" --file $S incr FIX_ROUNDS_02)" = 2 ] && ok "incr" || bad "incr"

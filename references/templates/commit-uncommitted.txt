@@ -1,6 +1,6 @@
 Task: {{TASK_TITLE}} left uncommitted changes in this worktree.
-Do not change any code. Run the Observable Acceptance command below. If it passes, commit all uncommitted changes following the project's commit message convention and settle as worker_done (outcome succeeded). If it fails, do not commit; settle with outcome failed and the failing output.
-Use Orca's ask for any blocking question, never a local prompt.
-Do not install anything; if the acceptance command needs a missing tool, settle with outcome failed, naming it.
+Do not change any code. Run the Observable Acceptance command below. If it passes, commit all uncommitted changes following the project's commit message convention and summarize what you committed. If it fails, do not commit; respond with `FAILED: <reason>` on the first line followed by the failing output.
+If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
+Do not install anything; if the acceptance command needs a missing tool, respond with `FAILED: missing tool <name>` on the first line.
 
 {{FILE:TASK}}

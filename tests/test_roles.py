@@ -8,7 +8,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "roles.py"
 CATALOG = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
-GOOD = dict(coordinator="cl:big@high", architect="cl:big@max", egm="ag:g@high", base="ag:g@high")
+GOOD = dict(architect="antigravity:big@max", egm="antigravity:g@high", base="antigravity:g@high")
 
 
 class RolesTests(unittest.TestCase):
@@ -38,41 +38,46 @@ class RolesTests(unittest.TestCase):
 
     def test_check_all_ok(self):
         rc, out = self.roles("check")
-        self.assertEqual(rc, 0)
-        self.assertIn("OK coordinator cl:big@high", out)
-        self.assertIn("OK base ag:g@high", out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("OK session antigravity", out)
+        self.assertIn("OK architect antigravity:big@max", out)
+        self.assertIn("OK base antigravity:g@high", out)
 
-    def test_check_reports_missing_skill_with_harness(self):
-        self.edit_catalog(lambda c: c["harnesses"]["ag"]["skills"].pop("egm-review"))
-        rc, out = self.roles("check", egm="ag:g@high")
+    def test_check_reports_missing_session_and_role_skills(self):
+        self.edit_catalog(lambda c: c["harnesses"]["antigravity"]["skills"].pop("egm-review"))
+        rc, out = self.roles("check", egm="antigravity:g@high")
         self.assertEqual(rc, 1)
-        self.assertIn("MISSING egm ag:g@high egm-review in ag: put it in /home/u/.ag/config/skills, "
-                      "or enable a plugin that has it (ag plugin list)", out)
+        self.assertIn("MISSING egm antigravity:g@high egm-review in antigravity: put it in /home/u/.gemini/config/skills, "
+                      "or enable a plugin that has it (agy plugin list)", out)
+        self.edit_catalog(lambda c: c["harnesses"]["antigravity"]["skills"].pop("agy-multiagent-workflow"))
+        rc, out = self.roles("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("MISSING session antigravity agy-multiagent-workflow in antigravity:", out)
 
     def test_missing_without_where_in_an_old_catalog(self):
         def strip(c):
-            c["harnesses"]["ag"]["skills"].pop("egm-review")
+            c["harnesses"]["antigravity"]["skills"].pop("egm-review")
             for k in ("skill_dirs", "plugin_cmd", "mcp_cmd"):
-                c["harnesses"]["ag"].pop(k)
+                c["harnesses"]["antigravity"].pop(k)
         self.edit_catalog(strip)
         rc, out = self.roles("check")
         self.assertEqual(rc, 1)
-        self.assertIn("MISSING egm ag:g@high egm-review in ag\n", out + "\n")
+        self.assertIn("MISSING egm antigravity:g@high egm-review in antigravity\n", out + "\n")
 
     def test_jira_needs_connected_atlassian(self):
         self.assertEqual(self.roles("check", jira="yes")[0], 0)
-        self.edit_catalog(lambda c: c["harnesses"]["cl"]["mcp"].update({"claude_ai_Atlassian": False}))
+        self.edit_catalog(lambda c: c["harnesses"]["antigravity"]["mcp"].update({"atlassian-mcp-server": False}))
         rc, out = self.roles("check", jira="yes")
         self.assertEqual(rc, 1)
-        self.assertIn("MISSING architect cl:big@max atlassian-mcp in cl: connect an Atlassian MCP server "
-                      "(cl mcp list)", out)
+        self.assertIn("MISSING architect antigravity:big@max atlassian-mcp in antigravity: connect an Atlassian MCP server "
+                      "(agy mcp list)", out)
         self.assertEqual(self.roles("check", jira="no")[0], 0)
 
     def test_unknown_cases(self):
         def broke(c):
-            c["harnesses"]["ag"]["broken"] = "no models"
-        for pick, why in [("zz:g@high", "not detected"), ("cl:nope@high", "model nope not detected"),
-                          ("cl:big@ultra", "effort ultra not detected"), ("junk", "bad pair")]:
+            c["harnesses"]["antigravity"]["broken"] = "no models"
+        for pick, why in [("zz:g@high", "not detected"), ("antigravity:nope@high", "model nope not detected"),
+                          ("antigravity:big@ultra", "effort ultra not detected"), ("junk", "bad pair")]:
             rc, out = self.roles("check", base=pick)
             self.assertEqual(rc, 1)
             self.assertIn(f"UNKNOWN base {pick} ", out)
@@ -80,55 +85,55 @@ class RolesTests(unittest.TestCase):
         self.edit_catalog(broke)
         rc, out = self.roles("check")
         self.assertEqual(rc, 1)
-        self.assertIn("UNKNOWN egm ag:g@high harness ag is broken: no models", out)
+        self.assertIn("UNKNOWN egm antigravity:g@high harness antigravity is broken: no models", out)
 
     def test_shared_model_note(self):
-        rc, out = self.roles("check", architect="ag:g@xhigh")
+        rc, out = self.roles("check", architect="antigravity:g@xhigh")
         self.assertEqual(rc, 0)
-        self.assertIn("NOTE architect and base share ag:g; the ladder skips repeated rungs", out)
+        self.assertIn("NOTE architect and base share antigravity:g; the ladder skips repeated rungs", out)
         self.assertNotIn("NOTE", self.roles("check")[1])
 
     def test_base_equal_to_architect_is_unknown(self):
-        rc, out = self.roles("check", architect="ag:g@high", base="ag:g@high")
+        rc, out = self.roles("check", architect="antigravity:g@high", base="antigravity:g@high")
         self.assertEqual(rc, 1)
-        self.assertIn("UNKNOWN base ag:g@high is the architect pick, which never implements first; "
+        self.assertIn("UNKNOWN base antigravity:g@high is the architect pick, which never implements first; "
                       "pick another effort or model", out)
         self.assertNotIn("OK base", out)
-        self.assertIn("OK architect ag:g@high", out)
+        self.assertIn("OK architect antigravity:g@high", out)
 
     def test_same_model_other_effort_is_ok_with_note(self):
-        rc, out = self.roles("check", architect="ag:g@xhigh", base="ag:g@medium")
+        rc, out = self.roles("check", architect="antigravity:g@xhigh", base="antigravity:g@medium")
         self.assertEqual(rc, 0)
-        self.assertIn("OK base ag:g@medium", out)
-        self.assertIn("NOTE architect and base share ag:g", out)
+        self.assertIn("OK base antigravity:g@medium", out)
+        self.assertIn("NOTE architect and base share antigravity:g", out)
         self.assertNotIn("weaker", out)
 
     def test_architect_weaker_than_base_on_same_model_notes(self):
-        rc, out = self.roles("check", architect="ag:g@medium", base="ag:g@high")
+        rc, out = self.roles("check", architect="antigravity:g@medium", base="antigravity:g@high")
         self.assertEqual(rc, 0)
-        self.assertIn("NOTE the ladder's last rung, architect ag:g@medium, is a lower effort than base ag:g@high "
+        self.assertIn("NOTE the ladder's last rung, architect antigravity:g@medium, is a lower effort than base antigravity:g@high "
                       "on the same model, so escalating to it is weaker than the first attempt", out)
-        self.assertNotIn("weaker", self.roles("check", architect="ag:g@xhigh")[1])
+        self.assertNotIn("weaker", self.roles("check", architect="antigravity:g@xhigh")[1])
 
     def test_remembered_none_then_available(self):
         self.assertEqual(self.roles("remembered"), (1, "NONE"))
         self.save()
         rc, out = self.roles("remembered")
         self.assertEqual(rc, 0)
-        self.assertEqual(out.splitlines()[0], "coordinator=cl:big@high")
+        self.assertEqual(out.splitlines()[0], "architect=antigravity:big@max")
         self.assertEqual(out.splitlines()[-1], "AVAILABLE yes")
-        self.assertEqual(len(out.splitlines()), 5)
+        self.assertEqual(len(out.splitlines()), 4)
 
     def test_remembered_pick_vanished(self):
-        self.save(base="ag:gone@high")
+        self.save(base="antigravity:gone@high")
         rc, out = self.roles("remembered")
-        self.assertEqual(out.splitlines()[-1], "AVAILABLE no base ag:gone@high")
+        self.assertEqual(out.splitlines()[-1], "AVAILABLE no base antigravity:gone@high")
 
     def test_remembered_lists_every_vanished_pick(self):
-        self.save(egm="ag:gone@high", base="ag:g@nope")
+        self.save(egm="antigravity:gone@high", base="antigravity:g@nope")
         rc, out = self.roles("remembered")
         self.assertEqual(rc, 0)
-        self.assertEqual(out.splitlines()[-2:], ["AVAILABLE no egm ag:gone@high", "AVAILABLE no base ag:g@nope"])
+        self.assertEqual(out.splitlines()[-2:], ["AVAILABLE no egm antigravity:gone@high", "AVAILABLE no base antigravity:g@nope"])
 
     def test_save_writes_json_and_creates_folder(self):
         self.save()
@@ -139,26 +144,25 @@ class RolesTests(unittest.TestCase):
 
     def test_menu_lists_broken_after_numbered(self):
         def broke(c):
-            c["harnesses"]["xx"] = {**copy.deepcopy(c["harnesses"]["ag"]), "models": [], "broken": "garbled"}
+            c["harnesses"]["xx"] = {**copy.deepcopy(c["harnesses"]["antigravity"]), "models": [], "broken": "garbled"}
         self.edit_catalog(broke)
         rc, out = self.roles("menu")
         self.assertEqual(rc, 0)
         lines = out.splitlines()
-        self.assertEqual(lines[0].split("\t")[:2], ["1", "ag"])
-        self.assertEqual(lines[1].split("\t")[:2], ["2", "cl"])
-        self.assertEqual(lines[2], "BROKEN xx: garbled")
+        self.assertEqual(lines[0].split("\t")[:2], ["1", "antigravity"])
+        self.assertEqual(lines[1], "BROKEN xx: garbled")
 
     def test_menu_models_and_efforts(self):
-        rc, out = self.roles("menu", "--harness", "cl")
-        self.assertEqual([l.split("\t")[:2] for l in out.splitlines()], [["1", "big"], ["2", "small"]])
-        rc, out = self.roles("menu", "--harness", "cl", "--model", "big")
+        rc, out = self.roles("menu", "--harness", "antigravity")
+        self.assertEqual([l.split("\t")[:2] for l in out.splitlines()], [["1", "g"], ["2", "big"], ["3", "small"]])
+        rc, out = self.roles("menu", "--harness", "antigravity", "--model", "big")
         self.assertEqual([l.split("\t")[1] for l in out.splitlines()], ["low", "medium", "high", "xhigh", "max"])
 
     def test_menu_unknown_harness_or_model_names_the_known_ones(self):
         rc, out = self.roles("menu", "--harness", "agy")
-        self.assertEqual((rc, out), (1, "UNKNOWN harness agy (known: ag, cl)"))
-        rc, out = self.roles("menu", "--harness", "cl", "--model", "nope")
-        self.assertEqual((rc, out), (1, "UNKNOWN model nope for cl (known: big, small)"))
+        self.assertEqual((rc, out), (1, "UNKNOWN harness agy (known: antigravity)"))
+        rc, out = self.roles("menu", "--harness", "antigravity", "--model", "nope")
+        self.assertEqual((rc, out), (1, "UNKNOWN model nope for antigravity (known: g, big, small)"))
 
     def test_to_state_sets_roles_and_base_top(self):
         self.save()
@@ -167,8 +171,9 @@ class RolesTests(unittest.TestCase):
         rc, _ = self.roles("to-state", "--state", str(state))
         self.assertEqual(rc, 0)
         s = json.loads(state.read_text())
-        self.assertEqual((s["ROLE_COORDINATOR"], s["ROLE_ARCHITECT"], s["ROLE_EGM"], s["ROLE_BASE"]),
-                         ("cl:big@high", "cl:big@max", "ag:g@high", "ag:g@high"))
+        self.assertNotIn("ROLE_COORDINATOR", s)
+        self.assertEqual((s["ROLE_ARCHITECT"], s["ROLE_EGM"], s["ROLE_BASE"]),
+                         ("antigravity:big@max", "antigravity:g@high", "antigravity:g@high"))
         self.assertEqual((s["BASE_TOP"], s["CATALOG"], s["KEEP"]), ("xhigh", str(self.catalog), "1"))
 
 

@@ -1,10 +1,9 @@
 {
- "detected_at": "2026-11-15T00:00:00+00:00",
+ "detected_at": "2026-11-21T00:00:00+00:00",
  "harnesses": {
-  "ag": {
-   "orca_agent": "ag-agent",
-   "binary": "/bin/ag",
-   "version": "1.0",
+  "antigravity": {
+   "binary": "agy",
+   "version": "1.5.9",
    "styles": [
     "slug",
     "flag"
@@ -19,40 +18,7 @@
       "high",
       "xhigh"
      ]
-    }
-   ],
-   "skills": {
-    "orca-multiagent-workflow": "/skills/orca-multiagent-workflow",
-    "orchestration": "/skills/orchestration",
-    "orca-cli": "/skills/orca-cli",
-    "verification-before-completion": "/skills/verification-before-completion",
-    "finishing-a-development-branch": "/skills/finishing-a-development-branch",
-    "brainstorming": "/skills/brainstorming",
-    "writing-plans": "/skills/writing-plans",
-    "egm-brainstorm": "/skills/egm-brainstorm",
-    "egm-review": "/skills/egm-review",
-    "egm-review-loop": "/skills/egm-review-loop",
-    "test-driven-development": "/skills/test-driven-development"
-   },
-   "plugins": [],
-   "mcp": {
-    "claude_ai_Atlassian": true
-   },
-   "broken": null,
-   "skill_dirs": [
-    "/home/u/.ag/config/skills"
-   ],
-   "plugin_cmd": "ag plugin list",
-   "mcp_cmd": "ag mcp list"
-  },
-  "cl": {
-   "orca_agent": "cl-agent",
-   "binary": "/bin/cl",
-   "version": "2.0",
-   "styles": [
-    "flag"
-   ],
-   "models": [
+    },
     {
      "model": "big",
      "label": "Big",
@@ -77,9 +43,7 @@
     }
    ],
    "skills": {
-    "orca-multiagent-workflow": "/skills/orca-multiagent-workflow",
-    "orchestration": "/skills/orchestration",
-    "orca-cli": "/skills/orca-cli",
+    "agy-multiagent-workflow": "/skills/agy-multiagent-workflow",
     "verification-before-completion": "/skills/verification-before-completion",
     "finishing-a-development-branch": "/skills/finishing-a-development-branch",
     "brainstorming": "/skills/brainstorming",
@@ -91,14 +55,14 @@
    },
    "plugins": [],
    "mcp": {
-    "claude_ai_Atlassian": true
+    "atlassian-mcp-server": true
    },
    "broken": null,
    "skill_dirs": [
-    "/home/u/.cl/skills"
+    "/home/u/.gemini/config/skills"
    ],
-   "plugin_cmd": "cl plugin list",
-   "mcp_cmd": "cl mcp list"
+   "plugin_cmd": "agy plugin list",
+   "mcp_cmd": "agy mcp list"
   }
  }
 }

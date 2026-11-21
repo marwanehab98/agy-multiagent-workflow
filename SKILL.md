@@ -1,111 +1,100 @@
 ---
-name: orca-multiagent-workflow
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through to a reviewed PR, asks to run work through Orca, Antigravity, or Gemini workers, asks to continue an earlier run of this workflow, or names orca-multiagent-workflow; also when a handoff brief says to start or resume this workflow. Not for ordinary tasks, where the standard Superpowers skills apply.
+name: agy-multiagent-workflow
+description: Use when the user hands over a JIRA key or hand-written requirements to be taken through to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers, asks to continue an earlier run of this workflow, or names agy-multiagent-workflow. Not for ordinary tasks, where standard skills apply.
 ---
 
-# Orca multi-agent workflow
+# Agy multi-agent workflow
 
-**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full and your role's file (`references/coordinator.md` or `references/architect.md`), then pick up from the run's state file. A summary of the rules is not the rules.
+**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full and `references/coordinator.md`, then pick up from the run's state file. A summary of the rules is not the rules.
 
 ## Overview
 
-This skill takes a JIRA story, or requirements the user wrote by hand, to a reviewed PR. The user picks a harness, model and effort for four roles; every other worker follows from those picks. One coordinator session runs the whole run as a traffic cop. It starts Orca workers, relays messages unchanged, runs the bundled scripts, and merges. It does no design, code, or judgment work itself. Each kind of thinking goes to the worker suited to it:
+This skill takes a JIRA story, or requirements the user wrote by hand, to a reviewed PR. The user picks a model and effort for three worker roles; every other worker follows from those picks. The invoking Antigravity session runs the whole run as the **coordinator**—a traffic cop that runs the bundled scripts, dispatches headless `agy -p` workers through those scripts, relays messages unchanged, and merges atomically. It does no design, code, or judgment work itself. Each kind of thinking goes to the worker suited to it:
 
-- the **architect** designs, plans, answers every question the run raises, and writes everything the user reads. One architect stays open through the design phase; after plan approval, each job gets a fresh architect that works from the run's documents;
+- the **architect** designs, plans, answers every question the run raises, and writes everything the user reads. One architect conversation stays open through the design phase (via `agy -p --conversation`); after plan approval, each job gets a fresh `agy -p` architect that works from the run's documents;
 - **EGM** workers review the design and the plan;
-- **implementers** write the code, starting on the base pick;
+- **implementers** write the code, starting on the base pick (reused across fix/commit rounds via `--conversation`, with automatic fallback to a fresh `agy -p` run);
 - **reviewers**, chosen by the architect, check each task.
 
-A pair is written `<harness>:<model>@<effort>`. Only `scripts/harnesses.py` knows how a harness names its models and efforts.
+A pair is written `<harness>:<model>@<effort>`. Only `scripts/harnesses.py` knows how `agy` names its models and efforts.
 
 ## Start here
 
-The session that loads this skill is the **setup session**, whatever its harness, unless its brief makes it the coordinator.
+The session that loads this skill **is the coordinator**:
 
-- **Your brief says to run coordinator Step 1, or "Resume a run":** you are the coordinator. Read `references/coordinator.md` and do exactly that. Skip the rest of this section.
 - **The user asks to continue or resume an earlier run:** go to "Continue a run" below.
-- **Otherwise:** run setup.
+- **Otherwise:** run Setup below, then go straight to `references/coordinator.md` Step 1 in this same session.
 
-`SKILL_DIR` is this skill's base directory. `CFG` is `$HOME/.config/orca-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
+`SKILL_DIR` is this skill's base directory. `CFG` is `$HOME/.config/agy-multiagent-workflow`, and `CATALOG` is `<CFG>/catalog.json`.
 
 ### Setup
 
 1. **Detect:** run `mkdir -p <CFG>`, then `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`.
 2. **Remembered picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py remembered --roles <CFG>/roles.json --catalog <CATALOG>`.
-   - **`AVAILABLE yes`:** show the four `role=pair` lines in one block, then ask "Use these picks again?" as in "Asking" below, with the options `same` and `new`. This is a fixed prompt. "same" goes to item 4 with those picks; "new" goes to item 3.
+   - **`AVAILABLE yes`:** show the three `role=pair` lines in one block, then ask "Use these picks again?" as in "Asking" below, with the options `same` and `new`. This is a fixed prompt. "same" goes to item 4 with those picks; "new" goes to item 3.
    - **`AVAILABLE no <role> <pair>`** (one line per vanished pick): for each line, say exactly "Your last <role> pick, <pair>, isn't available any more, so pick the <role> again." and ask that role as in item 3. Keep the remembered picks that are still available, and go to item 4. Never choose a replacement yourself, however close a model looks or whatever the user delegates to you: only a row the user picks from the menu counts.
    - **`NONE`:** go to item 3.
-3. **Ask the four roles,** in this order: coordinator, architect, EGM, base implementer. For each, ask three questions in turn, as in "Asking" below. `MENU` means `python3 -I <SKILL_DIR>/scripts/roles.py menu --catalog <CATALOG>`:
+3. **Ask the three roles,** in this order: architect, EGM, base implementer. For each, ask three questions in turn, as in "Asking" below. `MENU` means `python3 -I <SKILL_DIR>/scripts/roles.py menu --catalog <CATALOG>`:
    1. harness: `MENU`;
    2. model: `MENU --harness <harness>`;
    3. effort: `MENU --harness <harness> --model <model>`.
 
    Each menu line is `N<TAB>value<TAB>label`; show any `BROKEN` lines exactly before the question. The question is "<role>: which <harness|model|effort>?", and the rows are its options, labelled with each row's label, in menu order. A menu with exactly one row isn't asked: take that row and say "<role> <harness|model|effort>: <label>, the only option." The pick is `<harness>:<model>@<effort>`, using each chosen row's value.
 
-   **Asking.** With a multiple-choice question tool (such as `AskUserQuestion`), ask with it: header `Setup`, no option marked recommended, and the options set by the number of rows (not counting the free-text choice the tool adds):
+   **Asking.** With a multiple-choice question tool (such as `ask_question`), ask with it: no option marked recommended, and the options set by the number of rows (not counting the free-text choice the tool adds):
    - **2–4 rows:** one question, one option per row. Never a `More` option.
    - **5 or more rows:** pages. The first page is rows 1–3 plus an option `More`, which asks again with the remaining rows the same way, until 4 or fewer remain; those form the last page.
 
    Without such a tool, write the question, then one line per row, `N. label`. The answer is the row the user selected, or a typed reply that is exactly a row's number, value or label; anything else, including free text that names no row, gets the same question again.
-4. **Check the picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py check --catalog <CATALOG> --jira <yes if the request has a JIRA key, else no> --coordinator <pair> --architect <pair> --egm <pair> --base <pair>`.
+4. **Check the picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py check --catalog <CATALOG> --jira <yes if the request has a JIRA key, else no> --architect <pair> --egm <pair> --base <pair>`.
    - **Exit 0:** show any `NOTE` line exactly, and go on.
-   - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't hand off (Rule 21).
+   - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't start Step 1 (Rule 21).
    - **Exit 1 with only `UNKNOWN` lines:** show them exactly, ask each named role again as in item 3, and repeat this item.
-5. **Save:** run `python3 -I <SKILL_DIR>/scripts/roles.py save --roles <CFG>/roles.json` with the same four `--<role> <pair>` options.
-6. **Hand off** to a fresh coordinator on the coordinator pick, even if this session already runs that harness and model:
-   1. `COORD_SKILL` is the output of `python3 -I <SKILL_DIR>/scripts/harnesses.py skill-dir --catalog <CATALOG> --harness <the coordinator pick's harness> --skill orca-multiagent-workflow`.
-   2. Write the brief to `<CFG>/handoff.md`:
-
-      ```text
-      You are the coordinator of an orca-multiagent-workflow run. Read <COORD_SKILL>/SKILL.md, then run <COORD_SKILL>/references/coordinator.md from Step 1. The picks file is <CFG>/roles.json and the setup catalog is <CATALOG>. The user's request, verbatim:
-      <the user's request, exactly as they wrote it>
-      ```
-
-   3. Load the `orca-cli` skill and use its handoff command for a fresh agent in the current worktree, `ORCA agent launch`, with `--prompt "$(cat <CFG>/handoff.md)"` and, in place of `--agent`, `--model` and `--effort`, the output of `python3 -I <SKILL_DIR>/scripts/harnesses.py args --catalog <CATALOG> --pair <the coordinator pick>`.
-   4. Say exactly "The coordinator now runs in <the tab or handle from the launch result>. Talk to it there." Then stop.
+5. **Save:** run `python3 -I <SKILL_DIR>/scripts/roles.py save --roles <CFG>/roles.json --architect <pair> --egm <pair> --base <pair>`.
+6. **Begin coordination in this session:** read `<SKILL_DIR>/references/coordinator.md` in full and execute it from Step 1, using `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, and the user's original request verbatim.
 
 ### Continue a run
 
 1. Find the run's state file: it is `.run/state.json` in the worktree on `refs/heads/<TOPIC>-docs` (`git worktree list --porcelain`). If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several such worktrees have a state file, list their topics as a numbered list and ask which one.
-2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's harness, model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no handoff. "resume" goes on below; "new" runs Setup.
-3. Hand off as in Setup item 6, with these changes: the pair is the state file's `ROLE_COORDINATOR`; `harnesses.py args` takes `--state <that state file>` instead of `--catalog`, and `skill-dir` takes the state file's `CATALOG`; and the brief says "run <COORD_SKILL>/references/coordinator.md "Resume a run" with the state file <path>" instead of Step 1.
+2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
+3. Read `<SKILL_DIR>/references/coordinator.md` in full and run "Resume a run" with that state file in this same session.
 
-The architect worker reads `references/architect.md`; its spec tells it to. Confirmed Orca behavior is in `references/orca-facts.md`.
+The architect worker reads `references/architect.md`; its spec tells it to. Confirmed headless `agy -p` behavior is in `references/agy-facts.md`.
 
 ## Roles
 
 | Role | Runs as | Pair |
 | --- | --- | --- |
-| Coordinator | Agent started by the setup handoff | The coordinator pick |
-| Design architect, and fallback design architect | Orca worker, kept open until plan approval | The architect pick |
-| Fresh architect, one per job after plan approval | Orca worker | The architect pick; `CLERICAL_PAIR` for `fix-meta`, `pr`, `jira-close`, `report` |
-| Builder check | Orca worker, read-only | Chosen by the architect in its `NEED builder-check` line, from its own harness |
-| EGM lens pass, design review, and plan review (and their Goldfish subagents) | Orca worker | The EGM pick |
-| Implementer | Orca worker | The task's `.meta` `IMPLEMENTER`: the base pick, or the base model at its highest effort |
-| Escalation attempts | Orca worker | The ladder `run_task.py` computes: the base model at its highest effort, then the architect pick. Past the ladder, a pair the user approved |
-| Spec and code-quality reviewers | Orca worker, read-only | Chosen per task by the architect in `.meta`, from its own harness; the architect's model for complex tasks |
-| Final reviewer | Orca worker, read-only | The architect pick |
+| Coordinator | The invoking Antigravity session | Current session |
+| Design architect, and fallback design architect | Headless `agy -p` (`run_architect.py`), resumed via `--conversation` until plan approval | The architect pick |
+| Fresh architect, one per job after plan approval | Headless `agy -p` (`run_architect.py`) | The architect pick; `CLERICAL_PAIR` for `fix-meta`, `pr`, `jira-close`, `report` |
+| Builder check | Headless `agy -p`, read-only (`run_design.py`) | Chosen by the architect in its `NEED builder-check` line, from its own harness |
+| EGM lens pass, design review, and plan review | Headless `agy -p` (`run_design.py`) | The EGM pick |
+| Implementer | Headless `agy -p` (`run_task.py`), reused via `--conversation` across fix/commit rounds | The task's `.meta` `IMPLEMENTER`: the base pick, or the base model at its highest effort |
+| Escalation attempts | Headless `agy -p` (`run_task.py`) | The ladder `run_task.py` computes: the base model at its highest effort, then the architect pick. Past the ladder, a pair the user approved |
+| Spec and code-quality reviewers | Headless `agy -p`, read-only (`run_task.py`) | Chosen per task by the architect in `.meta`, from its own harness; the architect's model for complex tasks |
+| Final reviewer | Headless `agy -p`, read-only (`run_finish.py`) | The architect pick |
 
 ## Rules
 
 These hold in every step. Where a step seems to conflict with one, the rule wins.
 
-1. **Every subagent is an Orca worker.** Whenever a skill being followed calls for a subagent, an Orca worker does that job. Nobody skips the dispatch or does the job themselves, and no harness's own subagent tool (Agent, Task, or the like) is used. Every worker belongs to the run `<RUN_ID>`; `--retry-of` is never used.
-2. **Orca commands come only from the version-matched guides** (`ORCA skills get orchestration`, the `orca-cli` guide) or `ORCA --help`. `ORCA` is the guide's placeholder for the resolved executable.
+1. **Every subagent is a headless `agy -p` worker started by the bundled scripts.** Whenever a skill or step calls for a subagent or worker, the bundled Python scripts (`run_architect.py`, `probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`) invoke `agy -p --output-format json`. Nobody skips the dispatch or does the job themselves, and the interactive session's `invoke_subagent` / `define_subagent` / Agent / Task tools are never used.
+2. **All `agy -p` worker calls go through the bundled scripts.** The coordinator never invokes `agy -p` directly by hand; it only runs the scripts.
 3. **Every worker runs on a pair, and nobody but the user and the architect chooses one.**
-   - **The user's four picks** (coordinator, architect, EGM, base implementer) are fixed for a run. Nobody changes a `ROLE_*` or `LAUNCH_STYLE_*` key, or `roles.json`, during a run; a different pick means a new run.
+   - **The user's three picks** (architect, EGM, base implementer) are fixed for a run. Nobody changes a `ROLE_*` or `LAUNCH_STYLE_*` key, or `roles.json`, during a run; a different pick means a new run.
    - **The architect chooses** each task's reviewers, the builder check and `CLERICAL_PAIR`, from its own harness's detected models, and may start a hard complex task at the base model's highest effort (architect "Model choices").
    - **`scripts/validate_meta.py` checks every choice** against the catalog and the picks before it is used. `run_task.py` computes the escalation ladder from the picks.
-   - **The coordinator never picks, changes, or writes a pair.** Agent, model and effort reach Orca only through `harnesses.py args` or the scripts, never typed by hand.
-4. **The coordinator decides nothing.** It branches only on what the steps name: script exit codes and last lines, `RESULT:` lines, worker outcomes, and counters.
-   - Every question goes to the architect: worker asks, unclear situations, and anything the user should read beyond the fixed lines in the steps.
+   - **The coordinator never picks, changes, or writes a pair.** Model and effort reach `agy` only through `harnesses.py args` or the scripts, never typed by hand.
+4. **The coordinator decides nothing.** It branches only on what the steps name: script exit codes and last lines, `RESULT:` lines, and counters.
+   - Every question goes to the architect: worker asks (`CONSULT`), unclear situations, and anything the user should read beyond the fixed lines in the steps.
    - It never writes spec text. Specs are built from templates with `scripts/build_spec.py`.
    - It never reviews or reads a diff or a worker's output, and never edits, formats, or commits code.
-   - It never retypes a worker's message: `scripts/save_message.py` saves settles and asks to files exactly as sent. Only the user's own replies are written by hand.
-5. **Relays are verbatim.** When the architect asks with the body `RELAY <path>`:
-   1. Read that file.
+   - It never retypes a worker's message: `run_architect.py` and the loop scripts save responses and asks to files verbatim. Only the user's own replies are written by hand.
+5. **Relays are verbatim.** When `run_architect.py` exits `11` (`RELAY <path> <saved>`):
+   1. Read `<path>`.
    2. Show it, in the one form that fits:
-      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and `AskUserQuestion` or another multiple-choice question tool is among your tools:** make one call of that tool and send nothing else. The choice is the user's own decision, so this is that tool's intended use, even though the architect wrote the question. Header `Architect`. The question is `From the architect:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- `.
+      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and `ask_question` or another multiple-choice question tool is among your tools:** make one call of that tool and send nothing else. The choice is the user's own decision, so this is that tool's intended use, even though the architect wrote the question. The question is `From the architect:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- ` (set `is_multi_select: false`).
       - **Otherwise:** send the user exactly this, and nothing else:
 
         ```
@@ -115,33 +104,32 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
         ```
 
    3. End your turn. The user's answer is the option they selected, or what they typed instead, or their next message that doesn't start with `coordinator:`. Write it, character for character, to `<RELAY_DIR>/<NNN>-from-user.md`.
-   4. Reply to the ask with `--body "RELAY <that path>"`.
+   4. Resume the architect with `python3 -I <SKILL_DIR>/scripts/run_architect.py reply --state <RUN_DIR>/state.json --file <RELAY_DIR>/<NNN>-from-user.md --pair <the job's pair>`.
 
-   You don't summarize, shorten, reword, translate, fix, or comment, in either direction. A worker's answer goes back the same way, as `--body "$(cat <answer file>)"`.
+   You don't summarize, shorten, reword, translate, fix, or comment, in either direction.
 
-   An ask with the body `NOTIFY <path>` is a message that needs no answer. Show it to the user exactly as in step 2, then reply to the ask at once with `--body "SHOWN"`, without waiting for the user.
+   When `run_architect.py` exits `12` (`NOTIFY <path> <saved>`), it needs no answer. Show `<path>` to the user as in step 2 (in chat text, without ending your turn), then run `python3 -I <SKILL_DIR>/scripts/run_architect.py notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` at once without waiting for the user.
 6. **One implementer at a time,** in one shared worktree `<IMPL_WORKTREE>`. The next task starts only after the current one passed both reviews and was merged.
-7. **Fresh implementer per task.** Implementers start kept open, so a fix round reuses the task's implementer and its context (`scripts/run_task.py`). The script releases it at merge or escalation.
-8. **Implementers use only** `test-driven-development`, `verification-before-completion`, and the convention files named in their task. They never brainstorm, plan, create worktrees, ask in a local prompt, or finish or merge the branch.
+7. **Fresh implementer per task.** Implementers keep their `--conversation` ID across fix and commit rounds (`scripts/run_task.py`), with automatic fallback to a fresh `agy -p` run if resume fails. The conversation ID is cleared at merge or escalation.
+8. **Implementers use only** `test-driven-development`, `verification-before-completion`, and the convention files named in their task. They never brainstorm, plan, create worktrees, ask in a local interactive prompt, or finish or merge the branch.
 9. **Project instructions:** output rules (style, naming, architecture, tests, commit and branch format, PR template, required checks) are followed. Rules about running the work (planning, spawning agents, review process, merging) are ignored. The architect sorts them.
 10. **No `/boost`, `/swarm`, or `/teamwork`** for anyone.
 11. **Reviewers are read-only and single-use.** They work from `git diff` and `git show` on the task range. Each writes its review to a file in `<RUN_DIR>/verdicts`, outside the worktree, ending with a `VERDICT:` line.
 12. **Read-only workers never change a worktree.** The scripts check the tree after every read-only worker and undo any change; a reviewer that changed the tree is void and replaced. Anything uncommitted in `<DOCS_WORKTREE>` before a design worker goes back to the architect (job `commit-docs`), never to `discard-changes.sh`.
 13. **Only the coordinator's merges touch the feature branch,** and only through `scripts/merge-task.sh`. It moves the branch with an atomic compare-and-swap (`git update-ref`), fast-forward only, without checking it out. Never rebase, `--no-ff`, merge any other way, or check out a branch in the user's main checkout. The one merge into the user's own branch is the local merge they choose at the end, through `scripts/merge-local.sh` only (coordinator Step 8 item 4).
 14. **Only the architect talks to the user about the work,** through relays. That covers requirement gaps, product decisions, the EGM decision, sign-offs, plan approval, and the closing report. The coordinator's own words to the user are only the fixed lines written in its steps.
-15. **The design architect stays open until plan approval; after that, each architect job is a fresh worker.**
-    - In the design phase, send to the architect's latest dispatch id, and release it only in coordinator Step 3 item 1. A worker reopened after release can't settle (orca-facts). If it's lost, start a fallback architect with a `resume` job.
-    - After plan approval, the coordinator starts a fresh architect per job, on the pair from coordinator "Architect job models", and releases it once its `RESULT:` line is handled. Only one architect works at a time.
-    - Only EGM workers may run subagents of their own (Goldfish).
-16. **Release every other worker** when its job is done, with `worker-release --dispatch <id>`. This is safe to repeat. Worktrees are removed separately with `ORCA worktree rm`.
+15. **The design architect conversation stays open until plan approval; after that, each architect job is a fresh `agy -p` run.**
+    - In the design phase, `run_architect.py send` resumes `ARCHITECT_CONVERSATION_ID` until Step 3 item 1 clears it. If `send` exits `13` (`LOST`), start a fallback architect with `FIRST_JOB=resume`.
+    - After plan approval, `run_architect.py start` runs a fresh architect per job, on the pair from coordinator "Architect job models" (still keeping `ARCHITECT_CONVERSATION_ID` across any `RELAY`/`NOTIFY` turns within that single job). Only one architect works at a time.
+16. **Worktrees live under `<MAIN_CHECKOUT>/.worktrees`** and are managed only with `scripts/worktree.sh`.
 17. **Run documents live only in the docs worktree.**
     - The architect's documents are in `<DOCS_DIR>` (`<DOCS_WORKTREE>/docs/plans`), committed on the never-merged `<TOPIC>-docs` branch.
     - The coordinator's working files (state, catalog, built specs, verdicts, gate logs, relays, the run log) are in `<RUN_DIR>` (`<DOCS_WORKTREE>/.run`), which is excluded from git.
     - None of these files is written in the main checkout or `<IMPL_WORKTREE>`. Workers there get what they need pasted into their specs.
-18. **Every value and counter lives in `<RUN_DIR>/state.json`,** written and read with `scripts/state.py`. A value the coordinator only remembers, or that a context summary mentions, is not a source: read it from the state file. Before ending any turn that waits, record `STEP` and `WAITING_ON`, so a compacted or restarted coordinator can pick up (coordinator "Resume a run"). After a context compaction, the coordinator and the design architect re-read their instructions in full before doing anything else.
+18. **Every value and counter lives in `<RUN_DIR>/state.json`,** written and read with `scripts/state.py`. A value the coordinator only remembers, or that a context summary mentions, is not a source: read it from the state file. Before ending any turn that waits on the user, record `STEP` and `WAITING_ON=user`, so a compacted or restarted coordinator can pick up (coordinator "Resume a run"). After a context compaction, the coordinator re-reads its instructions in full before doing anything else.
 19. **Checks run before reviews.** After every task, `scripts/gate.py` runs the run's check commands in `<IMPL_WORKTREE>` and puts the tree back. A failure goes straight to a fix round with the log, and no reviewer starts on code that fails its checks.
-20. **The loops are scripts.** `run_design.py` runs Step 2's design workers, `run_task.py` the task loop (Step 4), `run_finish.py` the final review and verification (Step 8), and `probe.py` the test launches. The coordinator only runs them and branches on their last line, passing on what they print unchanged. It never starts their workers, counts, retries, reads their workers' output, checks or resets a tree, or merges by hand.
-21. **A failed setup check or test launch stops the run before work starts.** A `MISSING` line from `roles.py check`, any failed check in the coordinator, and `probe.py`'s `PROBE_FAILED` all stop it: show the lines, or the file, exactly; save nothing, hand off nothing, start no worker. The one exception is an `UNKNOWN`-only check during setup, where the user picks those roles again (Setup item 4). No deadline, user instruction, or "it worked yesterday" changes this. The user fixes the cause, or picks again in a new run.
+20. **The loops are scripts.** `run_design.py` runs Step 2's design workers synchronously, `run_task.py` the task loop (Step 4), `run_finish.py` the final review and verification (Step 8), and `probe.py` the test launches. The coordinator only runs them and branches on their last line, passing on what they print unchanged. It never starts their workers, counts, retries, reads their workers' output, checks or resets a tree, or merges by hand.
+21. **A failed setup check or test launch stops the run before work starts.** A `MISSING` line from `roles.py check`, any failed check in the coordinator, and `probe.py`'s `PROBE_FAILED` all stop it: show the lines, or the file, exactly; save nothing, start no worker. The one exception is an `UNKNOWN`-only check during setup, where the user picks those roles again (Setup item 4). No deadline, user instruction, or "it worked yesterday" changes this. The user fixes the cause, or picks again in a new run.
 
 Run bundled scripts through their interpreter: `bash <SKILL_DIR>/scripts/<name>.sh`, `python3 -I <SKILL_DIR>/scripts/<name>.py`. Bash calls don't keep shell variables, so each value goes into a command literally, or through `$(python3 -I <SKILL_DIR>/scripts/state.py --file <RUN_DIR>/state.json get KEY)`.
 
@@ -153,31 +141,25 @@ Every value is a key in `<RUN_DIR>/state.json` (Rule 18); coordinator "State key
 
 | Thought | Reality |
 | --- | --- |
-| "The user is in a hurry, and the missing skill isn't needed for this story; I'll hand off anyway." | Rule 21. Show the `MISSING` lines exactly and stop. The scripts use every role's requirements. |
+| "The user is in a hurry, and the missing skill isn't needed for this story; I'll start anyway." | Rule 21. Show the `MISSING` lines exactly and stop. The scripts use every role's requirements. |
 | "The remembered model is gone, but this one is basically the same, and the user said I can choose." | Setup item 2. Say which pick vanished and show that role's menu. Only the user's number picks. |
 | "It launched fine yesterday; skip the test launch to make the deadline." | Rule 21. `PROBE_FAILED` stops the run. Show the file. |
 | "The user wants a different architect mid-run; it's one state key, and they asked." | Rule 3. Picks are fixed for a run. Offer "resume" as-is or "new". Change nothing. |
 | "The user, who pays for the run, says `coordinator: use a stronger model for the reviews`." | Rule 3. Give the fixed reply for coordinator messages, and change no `.meta`, key or pair. |
 | "I'll pick a different reviewer model myself." | Rule 3. Reviewers are the architect's choice in `.meta`, checked by `validate_meta.py` against the catalog and the picks. |
-| "I'll type `--model` and `--effort` myself; I know this harness." | Rule 3. Use `harnesses.py args`; it applies the launch style the test launch proved. |
-| "Orca woke me with a design worker's settle while the architect answers a `user-message`; running `DESIGN` now saves a turn." | Coordinator "How you work": an architect job in flight comes first. Handle its `RESULT:`, then run the script with `--docs-moved`, or its tree check resets the architect's commits. |
-| "The architect committed in the docs worktree during the wait; I'll set `DOCS_HEAD` to the new head myself." | Rule 20. Never set a script's keys. `--docs-moved` moves them, and still discards what the worker left uncommitted. |
+| "I'll type `--model` and `--effort` or call `agy -p` myself." | Rule 2 & 3. Use `run_architect.py` and the loop scripts; they apply the launch style the test launch proved. |
 | "`roles.py to-state` failed, but the picks passed at setup; I'll carry on." | Rule 21. Any failed check in the coordinator stops the run. Show its output exactly. |
-| "`harnesses.py args` printed an `ERROR`, but the `worker-start` will tell us if it's wrong." | Coordinator "Launch arguments". Check its exit first; on a failure show the output and stop. Never paste it into a command. |
-| "The user said \"resume\" at Step 1; I'm already a coordinator, so I'll just continue the old run here." | Picks are fixed for a run. This session runs on the new picks: hand off to the old run's own coordinator (SKILL.md "Continue a run" item 3) and stop. |
+| "The user said \"resume\" at Step 1; I'll ignore the old picks and keep going." | Picks are fixed for a run. Run "Continue a run" item 3 with the old run's state file. |
 | "The design worker failed twice; its notes say the design is fine, so I'll tell the architect that." | Rule 20. Run `run_design.py` and send the job it prints, unchanged. |
-| "The design obviously answers this worker's question; I'll just reply." | Rule 4. Send job `consult`. The architect also records the answer where reviewers will see it. |
+| "The design obviously answers this worker's question (`CONSULT`); I'll just write the answer." | Rule 4. Send job `consult`. The architect also records the answer where reviewers will see it. |
 | "The architect's question is long; I'll summarize it for the user." | Rule 5. Character for character, nothing added. |
 | "The user's reply is clearly meant for me, not the architect." | Rule 5. Only a message starting with `coordinator:` is for you. |
-| "A skill says to dispatch a subagent, but my subagent tool is banned, so I'll do it myself." | Rule 1. Start an Orca worker for it. |
-| "My own subagent tool would do this review in 30 seconds." | Rule 1. Reviewers are Orca workers. |
+| "A skill says to dispatch a subagent; I'll use `invoke_subagent`." | Rule 1. Use the bundled scripts (`agy -p`). |
+| "My own subagent tool would do this review in 30 seconds." | Rule 1. Reviewers are headless `agy -p` workers run by `run_task.py`. |
 | "It's a one-character fix; I'll make it." | Rule 4. Fix task. |
 | "I'll read the diff to confirm the worker only changed what I asked." | Rule 4. That's a review. The scripts check the tree. |
 | "The feature branch moved; rebasing the impl branch is safe." | Rule 13. `merge-task.sh` refuses, and you show the user the fixed options. |
-| "run_task.py is waiting, but I can see the reviewer passed; I'll start Stage 2 myself." | Rule 20. Run the script; it starts Stage 2. |
-| "I'll release the design architect while it's idle and reopen it later." | Rule 15. A reopened worker can't settle. Keep it open until Step 3; after that, start fresh ones. |
 | "I remember task 02's BASE_SHA and fix count; the summary says round 1." | Rule 18. `STATE get` them. Memory and summaries are not sources. |
-| "I'll paste the reviewer's verdict into the file; it's faster." | Rule 4. `save_message.py`. Retyping costs tokens and drifts. |
 | "The docs worktree has a stray file; discard-changes will tidy it." | Rule 12. `run_design.py` sends `commit-docs`. Never discard the architect's files. |
 | "To merge, I'll check out the feature branch in the main checkout." | Rule 13. `merge-task.sh` moves it with `update-ref`. |
 | "The user's deadline justifies skipping a gate." | Never. Keep the gates. The user can ask `coordinator: status`; anything more they need to hear comes from the architect. |
@@ -185,17 +167,14 @@ Every value is a key in `<RUN_DIR>/state.json` (Rule 18); coordinator "State key
 
 **Red flags.** Stop and re-read the rule if you are about to:
 
-- write a sentence to the user that isn't a relay, a fixed line from a step, or the `Waiting:` status line;
+- write a sentence to the user that isn't a relay, a fixed line from a step, or a script status summary;
 - choose, substitute, or change a pair, or edit a `ROLE_*` or `LAUNCH_STYLE_*` key, `roles.json`, or a `.meta` file;
-- type `--agent`, `--model` or `--effort` yourself;
-- save picks, hand off, or start any worker after `roles.py check` exited 1 or a probe printed `PROBE_FAILED`;
+- type `--model` or `--effort` yourself, or call `agy -p` outside the bundled scripts;
+- save picks or start any worker after `roles.py check` exited 1 or a probe printed `PROBE_FAILED`;
 - write spec text by hand;
-- use your harness's own subagent tool;
+- use `invoke_subagent`, `define_subagent`, Agent, or Task;
 - count, retry, or read a worker's output where a script's last line should decide;
 - run `git rebase`, `git merge`, `git commit`, `git reset`, `git switch`, or `git checkout` yourself instead of a bundled script;
-- write a worker's message into a file by hand;
-- use a SHA, dispatch id, or counter you didn't just read from the state file;
+- use a SHA, conversation id, or counter you didn't just read from the state file;
 - run `git diff` or `git show` on a task range;
-- release the design architect before Step 3, or start a second architect while one is working;
-- run `DESIGN`, `PROBE`, `TASKLOOP` or `FINISH` while an architect job is in flight, or skip `--docs-moved` on the first run after a `consult` or `user-message` that ran during a script's wait;
-- put the output of a failed `harnesses.py args` into a command.
+- clear `ARCHITECT_CONVERSATION_ID` before Step 3, or run two architects at once.

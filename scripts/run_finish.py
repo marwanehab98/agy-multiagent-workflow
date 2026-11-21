@@ -1,51 +1,27 @@
 """Run the coordinator's Step 8 items 1-3 (starting-state check, final review, final-fix rounds,
-verification) as a resumable state machine.
-
-Each call does every deterministic action it can (release the implementers, check the tree, start the
-final reviewer, save its settle, pick its verdict, count voids and rounds, run the VERIFY commands) and
-exits at the first point that needs a wait, the architect, the queue, or the user. All its state lives
-in the coordinator's state.json. It sets PHASE=finish when it starts, and never polls.
+verification, drift check) synchronously via headless `agy -p`.
 
 Usage:
   python3 -I run_finish.py --state <RUN_DIR>/state.json advance
   python3 -I run_finish.py --state <file> advance --architect-result <file with the RESULT line>
   python3 -I run_finish.py --state <file> advance --reply <the user's one-word reply>
-  python3 -I run_finish.py --state <file> advance --docs-moved   # continue, after an architect job
-                                                   # (consult, user-message) committed in DOCS_WORKTREE
+  python3 -I run_finish.py --state <file> advance --answer <architect answer file after CONSULT>
+  python3 -I run_finish.py --state <file> advance --docs-moved
 
 The last line of stdout is the status.
 Exit 0   VERIFIED <log>                    the VERIFY commands passed (or the user accepted a failing
                                            run); go to Step 8 item 4 with <log> as the verify log
-Exit 10  WAIT <dispatch> <kind>            end your turn; call advance again when woken. kind is
-                                           final-review, or probe (a final-fix task's reviewer pairs)
 Exit 20  ARCHITECT_JOB <job> <input>       send that architect job with INPUT=<input>. Jobs:
                                            final-review <verdict file>, verification-failed <log>,
-                                           fix-meta <validate output>. Save its RESULT line to a file and
-                                           call advance --architect-result <file>
+                                           fix-meta <validate output>, drift-done <findings|failed: file>
 Exit 21  RUN_QUEUE <F id>                  queue.txt now holds only that id: run run_task.py (Step 4);
                                            on QUEUE_EMPTY call advance again for a new final review
+Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run architect job `consult` with
+                                           INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
 Exit 40  STOP <reason>                     dispatch nothing more; coordinator Step 8 item 7
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
-
-Architect results it accepts: RESULT: FINAL_FIX <F id>, RESULT: FINAL_CLEAN, RESULT: STOP (to a
-final-review or verification-failed job) and RESULT: META_FIXED (to fix-meta). FINAL_CLEAN after a
-final review runs verification; after a failed verification it asks the user whether to open the PR anyway.
-A final reviewer that is stopped or lost, or that changes the worktree, is void and replaced; the third
-void in a row prompts. Run limits: FINAL_FIX_ROUNDS 3 (prompt), META_FAILS 3 (error).
-A FINAL_FIX task's REVIEW_1/REVIEW_2 pairs are test-launched (phase probe, in DOCS_WORKTREE) after it
-validates and before the queue is written; a failed test goes to the architect as job fix-meta with
-PROBLEM lines naming the pair, and counts toward META_FAILS like a failed validation. --docs-moved
-(ruling R13) first moves PROBE_HEAD to the docs worktree's current HEAD, so an architect's commits made
-during that probe survive its tree check.
-Drift check (DRIFT_CHECK=yes, the user's choice at the go-ahead): once, the first time verification passes,
-EGM's drift report runs on ROLE_EGM in IMPL_WORKTREE against DESIGN_FILE and DECISIONS_LOG (phases drift,
-drift-wait; one retry), then ARCHITECT_JOB drift-done <findings file> (or "failed: <file>"). The architect
-answers RESULT: FINAL_FIX <F id> (a fix task, then a new final review; no second drift check) or
-RESULT: FINAL_CLEAN (VERIFIED). Keys: DRIFT_CHECK (from run-values), DRIFT_DONE, DRIFT_RETRY.
-State keys: FIN_PHASE, FIN_DISPATCH, FIN_OUT, FIN_HEAD, FIN_JOB, FIN_LINE, FIN_FIX, FIN_LAST_VERDICT,
-FIN_VERIFY_LOG, FINAL_N, VERIFY_K, VOIDS_FINAL, NO_VERDICT_FINAL, FIN_PROMPT_FILE, FIN_PROMPT_ACCEPT.
 """
 import argparse
 import re
@@ -53,20 +29,16 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (WAIT, ESCALATE, PROMPT, STOP, ERROR, Done, Orca, Run, build, first_words, next_free,  # noqa: E402
-                    pick_verdict, poll, save_body, tool, verdict_line)
+from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, AgyRunner, Done, Run, build, first_words, next_free,  # noqa: E402
+                    pick_verdict, save_body, tool, verdict_line)
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 from pairs import parse_pair  # noqa: E402
 
 VERIFIED, RUN_QUEUE = 0, 21
-NUDGE = ("You ended your turn without settling this task. If a command you started is still running, "
-         "wait for it in the foreground until it finishes. Then finish the task and settle worker_done, "
-         "with outcome succeeded or failed.")
 
 
 def ac_ids(*files):
-    """Every AC-<n> id in the design and decisions log, in first-seen order, for the final reviewer's
-    one-line-per-criterion list (a reviewer skipped AC-7 when left to find them; live test 2026-11-15)."""
+    """Every AC-<n> id in the design and decisions log, in first-seen order."""
     seen = []
     for f in files:
         p = Path(f)
@@ -80,7 +52,7 @@ class Finish:
     def __init__(self, state_path):
         self.r = Run(state_path)
         self.r.require_new_format()
-        self.o = Orca(self.r)
+        self.runner = AgyRunner(self.r)
 
     # -- state helpers
     def phase(self):
@@ -100,12 +72,20 @@ class Finish:
         self.set_phase(f"prompt:{name}", FIN_PROMPT_FILE=f, FIN_PROMPT_ACCEPT=" ".join(accepted), WAITING_ON="user")
         raise Done(PROMPT, f"PROMPT {f} {' '.join(accepted)}")
 
+    def ask_consult(self, kind, pair, spec, conv_id, body):
+        r = self.r
+        ask = next_free(r.run_dir / "asks", f"finish-{kind}-{{n}}.md")
+        save_body(body, ask, header=f"finish phase ({kind})")
+        r.set(FIN_ASK_CONV=conv_id, FIN_ASK_KIND=kind, FIN_ASK_PAIR=pair, FIN_ASK_SPEC=spec, FIN_ASK_FILE=ask)
+        self.set_phase("consult", WAITING_ON="architect")
+        raise Done(CONSULT, f"CONSULT {ask}")
+
     # -- item 1: starting state
     def do_start(self):
         r = self.r
         r.set(PHASE="finish")
-        for key in [k for k in r.s if k.startswith("IMPL_DISPATCH_")]:
-            self.o.release(r.s[key])
+        for key in [k for k in r.s if k.startswith("IMPL_CONVERSATION_ID_")]:
+            r.set(**{key: None})
         rc, out = tool("check-tree.sh", r.impl, r.need("LAST_MERGED"))
         if rc != 0:
             raise Done(ERROR, f"ERROR TREE_NOT_CLEAN {out}")
@@ -123,48 +103,34 @@ class Finish:
                       "AC_IDS": ac_ids(r.need("DESIGN_FILE"), r.need("DECISIONS_LOG"))},
                      {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG")})
         pair = r.need("ROLE_ARCHITECT")
-        dispatch, _ = self.o.start(spec, f"Final review: {r.need('TOPIC')}", pair, r.impl)
-        r.log(f"final review {n} dispatched {dispatch} {pair}")
-        self.set_phase("wait", FIN_DISPATCH=dispatch, FIN_OUT=out, FIN_HEAD=head, WAITING_ON=dispatch)
-        raise Done(WAIT, f"WAIT {dispatch} final-review")
+        r.set(FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair)
+        result = self.runner.run(spec, pair=pair, worktree=r.impl)
+        r.log(f"final review {n} dispatched {pair}")
+        self.settle_review(result)
 
-    def do_wait(self):
+    def settle_review(self, result):
         r = self.r
-        dispatch = r.need("FIN_DISPATCH")
-        result = poll(self.o, r, dispatch)
-        if result is None:
-            raise Done(WAIT, f"WAIT {dispatch} final-review")
-        if result[0] == "idle":
-            r.set(**{f"HANDLED_SEQ_{dispatch}": result[1]})
-            n = r.incr(f"NUDGES_{dispatch}")
-            if n > 2:
-                result = ("stopped", f"worker {dispatch} ended its turn {n} times without settling")
-            else:
-                res = self.o.send(dispatch, "Finish and settle this task", NUDGE)
-                new = res.get("dispatchId") if isinstance(res, dict) else None
-                if new and new != dispatch:
-                    r.set(FIN_DISPATCH=new, WAITING_ON=new)
-                    dispatch = new
-                r.log(f"final reviewer {dispatch} idle without settling; nudge {n}")
-                raise Done(WAIT, f"WAIT {dispatch} final-review")
-        self.settle(dispatch, result)
-
-    def settle(self, dispatch, result):
-        r = self.r
+        head = r.need("FIN_HEAD")
         if result[0] == "usage":
-            self.o.release(dispatch)
             self.prompt("usage-limit",
                         f"The final reviewer hit its model's usage limit: {result[1]}\n"
                         "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.", ["retry", "stop"])
         if result[0] == "stopped":
-            self.o.release(dispatch)
+            tool("discard-changes.sh", r.impl, head)
             return self.void("stopped without a verdict")
+        if result[0] == "ask":
+            rc, _ = tool("check-tree.sh", r.impl, head)
+            if rc != 0:
+                tool("discard-changes.sh", r.impl, head)
+                return self.void("changed the worktree")
+            return self.ask_consult("final-review", r.need("FIN_PAIR"), r.need("FIN_SPEC"), result[1], result[2])
+        if result[1] != "succeeded":
+            tool("discard-changes.sh", r.impl, head)
+            return self.void("failed without a verdict")
         n = r.need("FINAL_N")
         out = Path(r.need("FIN_OUT"))
         settle = save_body(result[2], r.run_dir / "results" / f"final-settle-{n}.md")
         verdict = pick_verdict(out, settle)
-        self.o.release(dispatch)
-        head = r.need("FIN_HEAD")
         rc, _ = tool("check-tree.sh", r.impl, head)
         if rc != 0:
             tool("discard-changes.sh", r.impl, head)
@@ -230,28 +196,22 @@ class Finish:
                      {"EGM_SKILLS": skills, "DESIGN_FILE": r.need("DESIGN_FILE"),
                       "DECISIONS_LOG": r.need("DECISIONS_LOG"), "OUTPUT_FILE": out})
         pair = r.need("ROLE_EGM")
-        dispatch, _ = self.o.start(spec, f"Drift check: {r.need('TOPIC')}", pair, r.impl)
-        r.log(f"drift check dispatched {dispatch} {pair}")
-        self.set_phase("drift-wait", FIN_DISPATCH=dispatch, FIN_OUT=out, WAITING_ON=dispatch)
-        raise Done(WAIT, f"WAIT {dispatch} drift")
+        r.set(FIN_OUT=out, FIN_SPEC=spec, FIN_PAIR=pair)
+        result = self.runner.run(spec, pair=pair, worktree=r.impl)
+        r.log(f"drift check dispatched {pair}")
+        self.settle_drift(result)
 
-    def do_drift_wait(self):
+    def settle_drift(self, result):
         r = self.r
-        dispatch = r.need("FIN_DISPATCH")
-        result = poll(self.o, r, dispatch)
-        if result is None:
-            raise Done(WAIT, f"WAIT {dispatch} drift")
-        if result[0] == "idle":
-            r.set(**{f"HANDLED_SEQ_{dispatch}": result[1]})
-            if r.incr(f"NUDGES_{dispatch}") <= 1:
-                self.o.send(dispatch, "Finish and settle this task", NUDGE)
-                raise Done(WAIT, f"WAIT {dispatch} drift")
-            result = ("stopped", f"worker {dispatch} ended its turn twice without settling")
-        self.o.release(dispatch)
         head = r.need("LAST_MERGED")
-        if tool("check-tree.sh", r.impl, head)[0] != 0:
+        rc, _ = tool("check-tree.sh", r.impl, head)
+        if rc != 0:
             tool("discard-changes.sh", r.impl, head)
             r.log("drift check changed the worktree; changes discarded")
+            if result[0] == "ask":
+                result = ("stopped", "drift check changed the worktree before asking", "", result[3])
+        if result[0] == "ask":
+            return self.ask_consult("drift", r.need("FIN_PAIR"), r.need("FIN_SPEC"), result[1], result[2])
         out = Path(r.need("FIN_OUT"))
         ok = result[0] == "done" and result[1] == "succeeded" and out.is_file() and out.read_text().strip()
         if ok:
@@ -267,6 +227,29 @@ class Finish:
             return self.set_phase("drift")
         r.set(DRIFT_DONE="yes", WAITING_ON=None)
         self.job("drift-done", f"failed: {note}")
+
+    def take_answer(self, answer_path):
+        r = self.r
+        if self.phase() != "consult":
+            raise Done(ERROR, f"ERROR NO_CONSULT_OPEN phase={self.phase()}")
+        p = Path(answer_path)
+        if not p.is_file():
+            raise Done(ERROR, f"ERROR MISSING_FILE {p}")
+        kind = r.need("FIN_ASK_KIND")
+        pair = r.need("FIN_ASK_PAIR")
+        spec = r.need("FIN_ASK_SPEC")
+        conv = r.get("FIN_ASK_CONV", "")
+        ans = p.read_text(encoding="utf-8")
+        result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
+        if result is None:
+            spec_text = Path(spec).read_text(encoding="utf-8")
+            result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
+                                     pair=pair, worktree=r.impl)
+        r.set(FIN_ASK_CONV=None, FIN_ASK_KIND=None, FIN_ASK_PAIR=None, FIN_ASK_SPEC=None, FIN_ASK_FILE=None)
+        if kind == "drift":
+            self.settle_drift(result)
+        else:
+            self.settle_review(result)
 
     def verified(self, log):
         self.set_phase("verified", FIN_VERIFY_LOG=log, WAITING_ON=None)
@@ -324,11 +307,9 @@ class Finish:
         r = self.r
         fid = r.need("FIN_FIX")
         try:
-            Prober(r, self.o).advance(review_pairs(r, [fid]))
+            Prober(r, self.runner).advance(review_pairs(r, [fid]))
         except Done as d:
-            if d.code == WAIT:
-                r.set(WAITING_ON=d.line.split()[1])
-            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
+            if d.code == STOP and d.line.startswith("PROBE_FAILED"):
                 out_file = next_free(r.run_dir, "validate-{n}.txt")
                 out_file.write_text(launch_problems(r, [fid], d.line), encoding="utf-8")
                 self.fix_meta(out_file)
@@ -373,24 +354,27 @@ class Finish:
         self.set_phase("review")
 
     # -- driver
-    def advance(self, architect_result=None, reply_word=None, moved=False):
+    def advance(self, architect_result=None, reply_word=None, answer_path=None, moved=False):
         if moved:
             docs_moved(self.r)
         if architect_result:
             self.take_result(architect_result)
         elif reply_word:
             self.reply(reply_word)
+        elif answer_path:
+            self.take_answer(answer_path)
         for _ in range(50):
             phase = self.phase()
             if phase == "verified":
                 raise Done(VERIFIED, f"VERIFIED {self.r.need('FIN_VERIFY_LOG')}")
             if phase == "job":
                 raise Done(ESCALATE, self.r.need("FIN_LINE"))
+            if phase == "consult":
+                raise Done(CONSULT, f"CONSULT {self.r.need('FIN_ASK_FILE')}")
             if phase.startswith("prompt:"):
                 raise Done(PROMPT, f"PROMPT {self.r.need('FIN_PROMPT_FILE')} {self.r.need('FIN_PROMPT_ACCEPT')}")
-            handler = {"start": self.do_start, "review": self.do_review, "wait": self.do_wait,
-                       "verify": self.do_verify, "probe": self.do_probe, "drift": self.do_drift,
-                       "drift-wait": self.do_drift_wait}.get(phase)
+            handler = {"start": self.do_start, "review": self.do_review, "verify": self.do_verify,
+                       "probe": self.do_probe, "drift": self.do_drift}.get(phase)
             if handler is None:
                 raise Done(ERROR, f"ERROR UNKNOWN_PHASE {phase}")
             handler()
@@ -404,6 +388,7 @@ def main():
     adv = sub.add_parser("advance")
     adv.add_argument("--architect-result")
     adv.add_argument("--reply")
+    adv.add_argument("--answer")
     adv.add_argument("--docs-moved", action="store_true")
     try:
         a = p.parse_args()
@@ -411,7 +396,7 @@ def main():
         return 64 if e.code else 0
     try:
         Finish(a.state).advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None,
-                                a.docs_moved)
+                                a.answer, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

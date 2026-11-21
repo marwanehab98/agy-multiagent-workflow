@@ -1,17 +1,17 @@
-"""Setup picks: menus, requirement checks and the saved picks file (design 2.1, 2.6).
+"""Setup picks: menus, requirement checks and the saved picks file.
 
 Usage:
   python3 -I roles.py menu --catalog C [--harness H [--model M]]
-  python3 -I roles.py check --catalog C --jira yes|no --coordinator P --architect P --egm P --base P
+  python3 -I roles.py check --catalog C --jira yes|no --architect P --egm P --base P
   python3 -I roles.py remembered --roles F --catalog C
-  python3 -I roles.py save --roles F --coordinator P --architect P --egm P --base P
+  python3 -I roles.py save --roles F --architect P --egm P --base P
   python3 -I roles.py to-state --roles F --state S --catalog C
 
 `menu` prints `N<TAB>value<TAB>label` lines (harnesses, then that harness's models, then a
 model's efforts); broken harnesses follow as `BROKEN <name>: <reason>`.
-`check` prints one `OK role pair`, `UNKNOWN role pair why` or `MISSING role pair item in harness: where`
-per finding (`where` names the harness's skill folders and plugin command, or its MCP command, from the
-catalog). A base pick equal to the architect pick is UNKNOWN: the architect never implements first.
+`check` verifies the coordinator session's required skills on Antigravity plus each of the 3
+worker roles (`architect`, `egm`, `base`), printing one `OK`, `UNKNOWN`, or `MISSING` line per finding.
+A base pick equal to the architect pick is UNKNOWN: the architect never implements first.
 A NOTE follows when architect and base share harness and model, and another when the architect is then
 a lower effort than the base (the ladder's last rung would be weaker). Exit 1 on UNKNOWN/MISSING.
 `remembered` prints `role=pair` lines then `AVAILABLE yes`, or one `AVAILABLE no <role> <pair>` line per
@@ -30,10 +30,9 @@ from harnesses import top_effort  # noqa: E402
 from pairs import EFFORTS, parse_pair  # noqa: E402
 import state as state_file  # noqa: E402
 
-ROLES = ("coordinator", "architect", "egm", "base")
+ROLES = ("architect", "egm", "base")
+SESSION_REQUIRES = ["agy-multiagent-workflow", "verification-before-completion", "finishing-a-development-branch"]
 REQUIRES = {
-    "coordinator": ["orca-multiagent-workflow", "orchestration", "orca-cli",
-                    "verification-before-completion", "finishing-a-development-branch"],
     "architect": ["brainstorming", "writing-plans"],
     "egm": ["egm-brainstorm", "egm-review", "egm-review-loop"],
     "base": ["test-driven-development", "verification-before-completion"],
@@ -73,8 +72,33 @@ def where(h, item):
     return f": put it in {' or '.join(h['skill_dirs'])}{plugin}"
 
 
+def session_harness_name(catalog):
+    harnesses = catalog.get("harnesses", {})
+    if "antigravity" in harnesses:
+        return "antigravity"
+    if len(harnesses) == 1:
+        return next(iter(harnesses))
+    return "antigravity"
+
+
 def check(catalog, jira, picks):
     lines, bad = [], False
+    sess_name = session_harness_name(catalog)
+    sess_h = catalog["harnesses"].get(sess_name)
+    if sess_h is None:
+        lines.append(f"UNKNOWN session {sess_name} harness {sess_name} not detected")
+        bad = True
+    elif sess_h.get("broken"):
+        lines.append(f"UNKNOWN session {sess_name} harness {sess_name} is broken: {sess_h['broken']}")
+        bad = True
+    else:
+        missing_sess = [s for s in SESSION_REQUIRES if s not in sess_h["skills"]]
+        for item in missing_sess:
+            lines.append(f"MISSING session {sess_name} {item} in {sess_name}{where(sess_h, item)}")
+        bad = bad or bool(missing_sess)
+        if not missing_sess:
+            lines.append(f"OK session {sess_name}")
+
     a, b = parse_pair_or_none(picks["architect"]), parse_pair_or_none(picks["base"])
     for role in ROLES:
         text = picks[role]
@@ -194,6 +218,10 @@ def main(argv=None):
                 print("NONE")
                 return 1
             picks, catalog = read_roles(a.roles), load_catalog(a.catalog)
+            for role in ROLES:
+                if role not in picks:
+                    print("NONE")
+                    return 1
             for role in ROLES:
                 print(f"{role}={picks[role]}")
             gone = [(role, picks[role]) for role in ROLES

@@ -1,15 +1,15 @@
-"""Run the coordinator's Step 2 read-only design workers as a resumable state machine.
+"""Run the coordinator's Step 2 read-only design workers synchronously via headless `agy -p`.
 
 The architect asks for a worker with a NEED result: a builder check, an EGM design review, an EGM
-lens pass or an EGM plan review. Each call does every deterministic action it can (check the docs
-worktree, test-launch the builder pair, start the worker, save its settle, release it, restore the
-docs worktree, retry once, count runs) and exits at the first point that needs a wait or the architect.
+lens pass or an EGM plan review. Each call runs every deterministic action it can (check the docs
+worktree, test-launch the builder pair, run the worker via `agy -p`, save its response, restore the
+docs worktree, retry once, count runs) and exits at the first point that needs the architect.
 
 Usage:
   python3 -I run_design.py --state <RUN_DIR>/state.json advance --result <file whose first line is RESULT: ...>
-  python3 -I run_design.py --state <file> advance            # continue (re-prints a pending job)
-  python3 -I run_design.py --state <file> advance --docs-moved   # continue, after an architect job
-                                                   # (consult, user-message) committed in DOCS_WORKTREE
+  python3 -I run_design.py --state <file> advance --answer <architect answer file after CONSULT>
+  python3 -I run_design.py --state <file> advance            # continue (re-prints a pending job or consult)
+  python3 -I run_design.py --state <file> advance --docs-moved
 
 Results it accepts (the first non-empty line of the file):
   RESULT: NEED builder-check <design rel> <pair>
@@ -20,28 +20,21 @@ Results it accepts (the first non-empty line of the file):
 Anything else is ERROR UNEXPECTED_RESULT.
 
 The last line of stdout is the status.
-Exit 10  WAIT <dispatch> <kind>            end your turn; call advance again when woken. kind is
-                                           builder-check, egm, lens, plan-review, or probe (a test launch)
 Exit 20  ARCHITECT_JOB <job> <input>       send that architect job with INPUT=<everything after the job name>.
                                            Jobs: commit-docs, builder-check-done, lens-done, egm-done,
                                            egm-limit, plan-review-done. Save its RESULT line to a file and
                                            call advance --result <file>
+Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run architect job `consult` with
+                                           INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
 The builder check runs on the pair in its NEED line (checked with validate_meta.py harness-pair and
-test-launched first); lens, EGM and plan review run on ROLE_EGM. A worker fails when it settles failed,
-is stopped or lost, hits a usage limit, or leaves its output file missing or empty; one that ends its
-turn unsettled is nudged once, and a second time counts as failed. A failure is retried once (RETRY_<kind>),
-then the done job gets "failed: <settle file>". Run limits: EGM_RUNS 3, LENS_RUNS 2, PLAN_REVIEW_RUNS 3.
-After each worker the docs worktree is put back to DOCS_HEAD, its HEAD when the worker started.
---docs-moved (ruling R13) first moves DOCS_HEAD and PROBE_HEAD to the docs worktree's current HEAD, so
-that reset never undoes an architect's commits; uncommitted worker changes are still discarded. The
-coordinator passes it on the first call after it handles the RESULT of an architect job that ran while
-this script waited, and never calls this script while such a job is in flight.
-A NEED egm also sets EGM_REQUESTED=yes, so the state shows the user chose EGM in a relay.
-State keys: DESIGN_PHASE, DESIGN_NEED, DESIGN_LINE, DESIGN_DISPATCH, DESIGN_OUT, DOCS_HEAD, EGM_SKILLS,
-LENS_FIRST, PLAN_REVIEW_LAST. Needs TOPIC, DOCS_WORKTREE, ROLE_EGM and CATALOG.
+test-launched first); lens, EGM and plan review run on ROLE_EGM. A worker fails when it exits failed,
+is stopped, hits a usage limit, or leaves its output file missing or empty. A failure is retried once
+(RETRY_<kind>), then the done job gets "failed: <saved file>". Run limits: EGM_RUNS 3, LENS_RUNS 2,
+PLAN_REVIEW_RUNS 3. After each worker the docs worktree is put back to DOCS_HEAD, its HEAD when the
+worker started.
 """
 import argparse
 import shutil
@@ -49,25 +42,21 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import WAIT, ESCALATE, STOP, ERROR, Done, Orca, Run, build, first_words, git, next_free, poll, save_body, tool  # noqa: E402
+from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build, first_words, git, next_free,  # noqa: E402
+                    save_body, tool)
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
 
-TITLES = {"builder-check": "Builder check", "egm": "EGM review", "lens": "EGM lens pass",
-          "plan-review": "EGM plan review"}
 NEED_ARGS = {"builder-check": 2, "egm": 2, "lens": 1, "plan-review": 2}
 DONE_JOB = {"builder-check": "builder-check-done", "egm": "egm-done", "lens": "lens-done",
             "plan-review": "plan-review-done"}
-NUDGE = ("You ended your turn without settling this task. If a command you started is still running, "
-         "wait for it in the foreground until it finishes. Then finish the task and settle worker_done, "
-         "with outcome succeeded or failed.")
 
 
 class Design:
     def __init__(self, state_path):
         self.r = Run(state_path)
         self.r.require_new_format()
-        self.o = Orca(self.r)
+        self.runner = AgyRunner(self.r)
 
     # -- state helpers
     def phase(self):
@@ -78,7 +67,7 @@ class Design:
 
     def job(self, name, text, phase="job"):
         line = f"ARCHITECT_JOB {name} {text}"
-        self.set_phase(phase, DESIGN_LINE=line, WAITING_ON=None)
+        self.set_phase(phase, DESIGN_LINE=line, WAITING_ON="architect")
         raise Done(ESCALATE, line)
 
     def need(self):
@@ -143,11 +132,9 @@ class Design:
     def do_probe(self):
         pair = self.need()[1][1]
         try:
-            Prober(self.r, self.o).advance([pair])
+            Prober(self.r, self.runner).advance([pair])
         except Done as d:
-            if d.code == WAIT:
-                self.r.set(WAITING_ON=d.line.split()[1])
-            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
+            if d.code == STOP and d.line.startswith("PROBE_FAILED"):
                 self.job(DONE_JOB["builder-check"], f"failed: {d.line.split()[-1]}")
             raise
         self.set_phase("dispatch")
@@ -183,31 +170,50 @@ class Design:
             else:
                 build("plan-review.txt", spec, {"EGM_SKILLS": skills, "PLAN_FILE": args[0], "OUTPUT_FILE": out},
                       {"CONTEXT": args[1]})
-        dispatch, _ = self.o.start(spec, f"{TITLES[kind]}: {r.need('TOPIC')}", pair, self.docs_wt)
-        r.log(f"design {kind} dispatched {dispatch} {pair}")
-        self.set_phase("wait", DESIGN_DISPATCH=dispatch, DESIGN_OUT=out, WAITING_ON=dispatch)
-        raise Done(WAIT, f"WAIT {dispatch} {kind}")
+        r.set(DESIGN_SPEC=spec, DESIGN_OUT=out, DESIGN_PAIR=pair)
+        result = self.runner.run(spec, pair=pair, worktree=self.docs_wt)
+        r.log(f"design {kind} dispatched {pair}")
+        self.handle_result(kind, result)
 
-    # -- waiting for it
-    def do_wait(self):
+    def _restore_tree(self, kind):
+        _, args = self.need()
+        allow = ["--allow", args[1]] if kind == "egm" else []
+        rc, why = tool("check-tree.sh", self.docs_wt, self.r.need("DOCS_HEAD"), *allow)
+        if rc != 0:
+            rc2, out2 = tool("discard-changes.sh", self.docs_wt, self.r.need("DOCS_HEAD"))
+            self.r.log(f"design {kind} worker changed the docs worktree ({why}); discarded: {out2} (exit {rc2})")
+        return rc == 0
+
+    def handle_result(self, kind, result):
         r = self.r
-        kind, _ = self.need()
-        dispatch = r.need("DESIGN_DISPATCH")
-        result = poll(self.o, r, dispatch)
-        if result is None:
-            raise Done(WAIT, f"WAIT {dispatch} {kind}")
-        if result[0] == "idle":
-            r.set(**{f"HANDLED_SEQ_{dispatch}": result[1]})
-            if r.incr(f"NUDGES_{dispatch}") == 1:
-                res = self.o.send(dispatch, "Finish and settle this task", NUDGE)
-                new = res.get("dispatchId") if isinstance(res, dict) else None
-                if new and new != dispatch:
-                    r.set(DESIGN_DISPATCH=new, WAITING_ON=new)
-                    dispatch = new
-                r.log(f"design {kind} worker {dispatch} idle without settling; nudged")
-                raise Done(WAIT, f"WAIT {dispatch} {kind}")
-            result = ("stopped", f"worker {dispatch} ended its turn twice without settling")
+        if result[0] == "ask":
+            if self._restore_tree(kind):
+                ask = next_free(r.run_dir / "asks", "design-{n}.md")
+                save_body(result[2], ask, header=f"design phase ({kind})")
+                self.set_phase("consult", DESIGN_ASK_CONV=result[1], DESIGN_ASK_FILE=ask, WAITING_ON="architect")
+                raise Done(CONSULT, f"CONSULT {ask}")
+            # Read-only worker changed the docs worktree before asking; treat as failed attempt
+            result = ("stopped", "worker changed the docs worktree before asking", "", result[3])
         self.settle(kind, result)
+
+    def take_answer(self, answer_path):
+        r = self.r
+        if self.phase() != "consult":
+            raise Done(ERROR, f"ERROR NO_CONSULT_OPEN phase={self.phase()}")
+        p = Path(answer_path)
+        if not p.is_file():
+            raise Done(ERROR, f"ERROR MISSING_FILE {p}")
+        kind, _ = self.need()
+        pair = r.need("DESIGN_PAIR")
+        conv = r.get("DESIGN_ASK_CONV", "")
+        ans = p.read_text(encoding="utf-8")
+        result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, self.docs_wt, conv)
+        if result is None:
+            spec_text = Path(r.need("DESIGN_SPEC")).read_text(encoding="utf-8")
+            result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
+                                     pair=pair, worktree=self.docs_wt)
+        r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None)
+        self.handle_result(kind, result)
 
     def settle(self, kind, result):
         r = self.r
@@ -219,17 +225,11 @@ class Design:
             save_body(result[2], saved)
         else:
             saved.write_text(f"{result[0]}: {result[1]}\n", encoding="utf-8")
-        self.o.release(r.need("DESIGN_DISPATCH"))
-        allow = []
         if kind == "egm":
-            allow = ["--allow", args[1]]
             src = Path(self.docs_wt) / args[1]
             if src.is_file():
                 shutil.copyfile(src, out)
-        rc, why = tool("check-tree.sh", self.docs_wt, r.need("DOCS_HEAD"), *allow)
-        if rc != 0:
-            rc2, out2 = tool("discard-changes.sh", self.docs_wt, r.need("DOCS_HEAD"))
-            r.log(f"design {kind} worker changed the docs worktree ({why}); discarded: {out2} (exit {rc2})")
+        self._restore_tree(kind)
         if not failed and not (out.is_file() and out.read_text(encoding="utf-8").strip()):
             failed = True
         if failed:
@@ -247,19 +247,22 @@ class Design:
         self.job(DONE_JOB[kind], str(out))
 
     # -- the loop
-    def advance(self, result_path=None, moved=False):
+    def advance(self, result_path=None, answer_path=None, moved=False):
         if moved:
             docs_moved(self.r)
         if result_path:
             self.take_result(result_path)
+        elif answer_path:
+            self.take_answer(answer_path)
         for _ in range(50):
             phase = self.phase()
             if phase == "idle":
                 raise Done(ERROR, "ERROR NO_PENDING_NEED")
             if phase in ("job", "commit-docs"):
                 raise Done(ESCALATE, self.r.need("DESIGN_LINE"))
-            {"start": self.do_start, "probe": self.do_probe, "dispatch": self.dispatch,
-             "wait": self.do_wait}[phase]()
+            if phase == "consult":
+                raise Done(CONSULT, f"CONSULT {self.r.need('DESIGN_ASK_FILE')}")
+            {"start": self.do_start, "probe": self.do_probe, "dispatch": self.dispatch}[phase]()
         raise Done(ERROR, "ERROR LOOP_LIMIT")
 
 
@@ -269,13 +272,14 @@ def main():
     sub = p.add_subparsers(dest="op", required=True)
     adv = sub.add_parser("advance")
     adv.add_argument("--result")
+    adv.add_argument("--answer")
     adv.add_argument("--docs-moved", action="store_true")
     try:
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
     try:
-        Design(a.state).advance(a.result, a.docs_moved)
+        Design(a.state).advance(a.result, a.answer, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

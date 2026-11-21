@@ -1,51 +1,40 @@
-"""Run the per-task loop (coordinator Steps 4-7) as a resumable state machine.
+"""Run the per-task loop (coordinator Steps 4-7) synchronously via headless `agy -p`.
 
-Each call does every deterministic action it can (start workers, save their results,
-check the tree, run the gate, branch on verdicts, count rounds, merge) and exits at the
-first point that needs a wait, the architect, or the user. All its state lives in the
-coordinator's state.json, so a call after a crash or a context compaction carries on.
-It never polls: it reads Orca's inbox without consuming mail, and exits when it must wait.
+Each call runs every deterministic action it can (start workers via `agy -p`, save their results,
+check the tree, run the gate, run both reviews, count rounds, merge) and exits at the first point
+that needs the architect or the user. All its state lives in the coordinator's state.json, so a
+call after a crash or a context compaction carries on.
 
 Usage:
   python3 -I run_task.py --state <RUN_DIR>/state.json advance
   python3 -I run_task.py --state <file> advance --architect-result <file with the RESULT line>
   python3 -I run_task.py --state <file> advance --reply <the user's one-word reply>
-  python3 -I run_task.py --state <file> advance --docs-moved   # continue, after an architect job
-                                                   # (consult, user-message) committed in DOCS_WORKTREE
+  python3 -I run_task.py --state <file> advance --answer <architect answer file after CONSULT>
+  python3 -I run_task.py --state <file> advance --docs-moved
 
 The last line of stdout is the status; earlier lines are events (MERGED ...).
 Exit 0   QUEUE_EMPTY                       every queued task is merged
-Exit 10  WAIT <dispatch> <kind>            end your turn; call advance again when woken
-Exit 20  ESCALATE <input>                  send architect job escalate with INPUT=<input>, which reads
-                                           task <id>, tier <tier>, attempt <a>, next rung <pair>|ladder used up,
-                                           replan allowed|not allowed, history <file>
+Exit 20  ESCALATE <input>                  send architect job escalate with INPUT=<input>
 Exit 21  FIX_META <validate output file>   send architect job fix-meta with INPUT=<file>
+Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run architect job `consult` with
+                                           INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
 Exit 40  STOP <reason>                     dispatch nothing more; coordinator Step 8 item 7
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
-An escalation answer past the ladder (ESCALATE said "ladder used up") is test-launched first
-(phase probe:<attempt>, via probe.Prober); a failed test counts as a rejected answer.
-A REPLAN's new tasks have their REVIEW_1/REVIEW_2 pairs test-launched after validation and before the
-queue changes (phase replan-probe); a failed test goes to the architect as FIX_META, with PROBLEM lines
-naming the pair, and counts toward META_FAILS like a failed validation.
-These probes run in DOCS_WORKTREE and reset it to PROBE_HEAD after each one. --docs-moved (ruling R13)
-first moves PROBE_HEAD to the docs worktree's current HEAD, so an architect's commits made meanwhile
-survive; the coordinator passes it after handling the RESULT of an architect job that ran during a wait.
-
-Rules the loop enforces (moved here from coordinator Step 4):
+Rules the loop enforces:
 - Uncommitted files after an implementer settles get one commit worker per implement or fix round
   (COMMIT_ROUNDS_<id>); whatever it leaves uncommitted is removed with discard-changes.sh and logged.
-- One task at a time. A fresh implementer per task, kept open and reused for that task's fix rounds,
-  released at merge or escalation.
+- One task at a time. A fresh implementer per task, kept across fix/commit rounds via `--conversation`
+  (falling back to a fresh `agy -p` run if resume fails).
 - The gate (gate.py) runs before every review; a failing gate goes straight to a fix round with the log.
 - Stage 1 review, then Stage 2. After a gate fix passes, the review resumes at REVIEW_STAGE_<id>.
 - Escalate after two fix rounds for one stage (STAGE_FIX_ROUNDS_<id>_S<n>, reset when that stage passes),
   two gate fix rounds in a row (GATE_FIX_ROUNDS_<id>), or four fix rounds of any kind (TOTAL_FIX_ROUNDS_<id>).
   An escalation attempt resets all three.
-- A reviewer that changes the worktree, or stops without settling, is void and replaced; the third void
-  in a row prompts retry or stop. A missing VERDICT line gets one new reviewer; a second counts as FIX.
+- A reviewer that changes the worktree, or stops/fails without settling, is void and replaced; the third
+  void in a row prompts retry or stop. A missing VERDICT line gets one new reviewer; a second counts as FIX.
 - A usage limit pauses the task with a retry/stop prompt instead of counting as a failure.
 - The escalation pair must be the ladder's next rung (validate_meta.py pair) and its reset sha must lie
   between the task's base and the worktree's HEAD; two rejected answers prompt the user.
@@ -57,9 +46,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR, Done, Orca, Run,  # noqa: E402
-                    build, first_words, git, next_free, pick_verdict, poll, run, save_body, tool, verdict_line)
-from pairs import ladder, pair_key, parse_pair  # noqa: E402
+from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR, AgyRunner, Done, Run,  # noqa: E402
+                    build, first_words, git, next_free, pick_verdict, run, save_body, tool, verdict_line)
+from pairs import ladder, parse_pair  # noqa: E402
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 
 
@@ -78,7 +67,7 @@ class Loop:
     def __init__(self, state_path):
         self.r = Run(state_path)
         self.r.require_new_format()
-        self.o = Orca(self.r)
+        self.runner = AgyRunner(self.r)
         self.events = []
 
     # -- queue
@@ -101,48 +90,24 @@ class Loop:
     def meta(self, t):
         return read_meta(self.r.task_file(t, ".meta"))
 
-    # -- waiting
-    def wait(self, t, kind, dispatch):
-        self.set_phase(t, f"wait:{kind}", LOOP_WAIT=dispatch, WAITING_ON=dispatch)
-        raise Done(WAIT, f"WAIT {dispatch} {kind}")
-
-    NUDGE = ("You ended your turn without settling this task. If a command you started is still running, "
-             "wait for it in the foreground until it finishes. Then finish the task and settle worker_done, "
-             "with outcome succeeded or failed.")
-
-    def nudge(self, t, kind, dispatch, seq):
-        """A worker ended its turn without worker_done. Nudge it twice, then treat it as stopped."""
-        self.r.set(**{f"HANDLED_SEQ_{dispatch}": seq})
-        n = self.r.incr(f"NUDGES_{dispatch}")
-        if n > 2:
-            return ("stopped", f"worker {dispatch} ended its turn {n} times without settling")
-        res = self.o.send(dispatch, "Finish and settle this task", self.NUDGE)
-        new = res.get("dispatchId") if isinstance(res, dict) else None
-        if new and new != dispatch:
-            self.r.set(**{f"IMPL_DISPATCH_{t}": new} if not kind.startswith("review") else {})
-            dispatch = new
-        self.r.log(f"{t} {kind} worker {dispatch} idle without settling; nudge {n}")
-        self.wait(t, kind, dispatch)
-
     # -- implementers
     def start_impl(self, t, spec, kind, title, reuse):
-        if reuse:
-            d = self.r.get(f"IMPL_DISPATCH_{t}")
-            term = self.r.get(f"IMPL_TERMINAL_{t}")
-            show = self.o.show(d) if d else None
-            if show and term and show.get("terminalState") not in (None, "released"):
-                got = self.o.try_reuse(spec, title, term, self.r.impl)
-                if got:
-                    self.r.set(**{f"IMPL_DISPATCH_{t}": got[0], f"IMPL_TERMINAL_{t}": got[1],
-                                  f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
-                    self.r.log(f"{t} {kind} reused {got[0]}")
-                    self.wait(t, kind, got[0])
         pair = self.r.need(f"PAIR_{t}")
-        d, term = self.o.start(spec, title, pair, self.r.impl, keep_open=True)
-        self.r.set(**{f"IMPL_DISPATCH_{t}": d, f"IMPL_TERMINAL_{t}": term,
-                      f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
-        self.r.log(f"{t} {kind} dispatched {d} {pair}")
-        self.wait(t, kind, d)
+        result = None
+        reused = False
+        if reuse:
+            conv = self.r.get(f"IMPL_CONVERSATION_ID_{t}")
+            if conv:
+                result = self.runner.try_resume(spec, pair, self.r.impl, conv)
+                if result is not None:
+                    reused = True
+        if result is None:
+            result = self.runner.run(spec, pair=pair, worktree=self.r.impl)
+        if result[3]:
+            self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": result[3]})
+        self.r.set(**{f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
+        self.r.log(f"{t} {kind} {'reused' if reused else 'dispatched'} {pair}")
+        self.after_impl(t, kind, result)
 
     def do_start(self, t):
         r = self.r
@@ -157,29 +122,42 @@ class Loop:
             raise Done(ERROR, f"ERROR IMPL_WORKTREE_NOT_READY head={head} last_merged={r.need('LAST_MERGED')} {out}")
         meta = self.meta(t)
         spec = build("implement.txt", r.run_dir / "specs" / f"{t}-implement.txt",
-                          {"TASK_TITLE": meta["TITLE"]},
-                          {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
+                     {"TASK_TITLE": meta["TITLE"]},
+                     {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         r.set(CURRENT_TASK=t, **{f"BASE_SHA_{t}": head, f"IMPLEMENT_SPEC_{t}": spec,
                                  f"PAIR_{t}": meta["IMPLEMENTER"], f"ATTEMPT_{t}": 0,
                                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
                                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
-                                 f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0,
+                                 f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None,
+                                 f"REJECTS_{t}": 0, f"IMPL_CONVERSATION_ID_{t}": None,
                                  f"NO_VERDICT_{t}_S1": 0, f"NO_VERDICT_{t}_S2": 0,
                                  f"VOIDS_{t}_S1": 0, f"VOIDS_{t}_S2": 0})
         self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
+
+    def ask_consult(self, t, kind, pair, spec, conv_id, body, stage=None):
+        r = self.r
+        ask = next_free(r.run_dir / "asks", f"{t}-{kind}-{{n}}.md")
+        save_body(body, ask, header=f"task={t} {self.meta(t)['TITLE']}")
+        r.set(**{f"TASK_ASK_CONV_{t}": conv_id, f"TASK_ASK_KIND_{t}": kind,
+                 f"TASK_ASK_PAIR_{t}": pair, f"TASK_ASK_SPEC_{t}": spec,
+                 f"TASK_ASK_FILE_{t}": ask, f"TASK_ASK_STAGE_{t}": stage})
+        self.set_phase(t, "consult", WAITING_ON="architect")
+        raise Done(CONSULT, f"CONSULT {ask}")
 
     def after_impl(self, t, kind, result):
         r = self.r
         if result[0] == "usage":
             self.prompt_usage(t, kind, result[1])
+        if result[0] == "ask":
+            self.ask_consult(t, kind, r.need(f"PAIR_{t}"), r.need(f"LAST_IMPL_SPEC_{t}"), result[1], result[2])
         if result[0] == "stopped":
             note = next_free(r.run_dir / "results", f"{t}-stopped-{{n}}.md")
             note.write_text(result[1] + "\n", encoding="utf-8")
             r.set(**{f"FAIL_MSG_{t}": note})
             return self.escalate(t)
-        _, outcome, msg = result
+        _, outcome, body, _ = result
         if outcome != "succeeded":
-            r.set(**{f"FAIL_MSG_{t}": save_body(msg, next_free(r.run_dir / "results", f"{t}-failed-{{n}}.md"))})
+            r.set(**{f"FAIL_MSG_{t}": save_body(body, next_free(r.run_dir / "results", f"{t}-failed-{{n}}.md"))})
             r.log(f"{t} {kind} settled failed")
             return self.escalate(t)
         r.log(f"{t} {kind} settled succeeded")
@@ -193,8 +171,6 @@ class Loop:
         r.set(**{f"WORKER_HEAD_{t}": head})
         rc, out = tool("check-tree.sh", r.impl, head)
         if rc == 2 and int(r.get(f"COMMIT_ROUNDS_{t}", "0")) >= 1:
-            # The commit worker left these on purpose: build output or caches (live test 2026-11-15: an
-            # untracked __pycache__ started commit workers forever). Remove them, as gate.py would.
             rc, out = tool("discard-changes.sh", r.impl, head)
             r.log(f"{t} removed what the commit worker left uncommitted: {' '.join(out.split())}")
             if rc != 0:
@@ -204,8 +180,8 @@ class Loop:
             r.incr(f"COMMIT_ROUNDS_{t}")
             meta = self.meta(t)
             spec = build("commit-uncommitted.txt", next_free(r.run_dir / "specs", f"{t}-commit-{{n}}.txt"),
-                              {"TASK_TITLE": meta["TITLE"]}, {"TASK": r.task_file(t, ".md")})
-            self.start_impl(t, spec, "commit", f"Commit: {meta['TITLE']}", reuse=True)
+                         {"TASK_TITLE": meta["TITLE"]}, {"TASK": r.task_file(t, ".md")})
+            return self.start_impl(t, spec, "commit", f"Commit: {meta['TITLE']}", reuse=True)
         if rc != 0:
             raise Done(ERROR, f"ERROR CHECK_TREE {out}")
         if head == r.need(f"BASE_SHA_{t}"):
@@ -235,10 +211,10 @@ class Loop:
         r.incr(f"TOTAL_FIX_ROUNDS_{t}")
         meta = self.meta(t)
         spec = build("fix.txt", next_free(r.run_dir / "specs", f"{t}-fix-{{n}}.txt"),
-                          {"TASK_TITLE": meta["TITLE"], "BASE_SHA": r.need(f"BASE_SHA_{t}"),
-                           "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}")},
-                          {"FINDINGS": findings, "DECISIONS": r.task_file(t, "-decisions.md"),
-                           "IMPLEMENT_SPEC": r.need(f"IMPLEMENT_SPEC_{t}")})
+                     {"TASK_TITLE": meta["TITLE"], "BASE_SHA": r.need(f"BASE_SHA_{t}"),
+                      "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}")},
+                     {"FINDINGS": findings, "DECISIONS": r.task_file(t, "-decisions.md"),
+                      "IMPLEMENT_SPEC": r.need(f"IMPLEMENT_SPEC_{t}")})
         self.start_impl(t, spec, "fix", f"Fix: {meta['TITLE']}", reuse=True)
 
     # -- reviewers
@@ -252,28 +228,36 @@ class Loop:
         out = next_free(r.run_dir / "specs", f"{t}-s{stage}-{{n}}.txt")
         if stage == 1:
             spec = build("spec-review.txt", out, common,
-                              {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
+                         {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         else:
             spec = build("quality-review.txt", out, {**common, "CONVENTION_PATHS": r.need("CONVENTION_PATHS")},
-                              {"SUMMARY": r.task_file(t, "-summary.md"), "DECISIONS": r.task_file(t, "-decisions.md")})
+                         {"SUMMARY": r.task_file(t, "-summary.md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         pair = meta[f"REVIEW_{stage}"]
-        d, _ = self.o.start(spec, f"Stage {stage} review: {meta['TITLE']}", pair, r.impl)
-        r.log(f"{t} stage{stage} reviewer dispatched {d} {pair}")
-        self.wait(t, f"review{stage}", d)
+        r.set(**{f"REVIEW_SPEC_{t}": spec, f"REVIEW_PAIR_{t}": pair})
+        result = self.runner.run(spec, pair=pair, worktree=r.impl)
+        r.log(f"{t} stage{stage} reviewer dispatched {pair}")
+        self.after_review(t, stage, result)
 
     def after_review(self, t, stage, result):
         r = self.r
-        d = r.need("LOOP_WAIT")
+        head = r.need(f"WORKER_HEAD_{t}")
         if result[0] == "usage":
-            self.o.release(d)
             self.prompt_usage(t, f"review{stage}", result[1])
         if result[0] == "stopped":
-            self.o.release(d)
+            tool("discard-changes.sh", r.impl, head)
             return self.void_review(t, stage, "stopped without a verdict")
+        if result[0] == "ask":
+            rc, _ = tool("check-tree.sh", r.impl, head)
+            if rc != 0:
+                tool("discard-changes.sh", r.impl, head)
+                return self.void_review(t, stage, "changed the worktree")
+            self.ask_consult(t, f"review{stage}", r.need(f"REVIEW_PAIR_{t}"),
+                             r.need(f"REVIEW_SPEC_{t}"), result[1], result[2], stage=str(stage))
+        if result[1] != "succeeded":
+            tool("discard-changes.sh", r.impl, head)
+            return self.void_review(t, stage, "failed without a verdict")
         settle = save_body(result[2], next_free(r.run_dir / "results", f"{t}-s{stage}-settle-{{n}}.md"))
         verdict = pick_verdict(Path(r.need(f"REVIEW_OUT_{t}")), settle)
-        self.o.release(d)
-        head = r.need(f"WORKER_HEAD_{t}")
         rc, _ = tool("check-tree.sh", r.impl, head)
         if rc != 0:
             tool("discard-changes.sh", r.impl, head)
@@ -304,6 +288,35 @@ class Loop:
                         ["retry", "stop"], back_to=f"review{stage}")
         self.start_review(t, stage)
 
+    # -- consult answer
+    def take_answer(self, t, answer_path):
+        r = self.r
+        if self.phase(t) != "consult":
+            raise Done(ERROR, f"ERROR NO_CONSULT_OPEN phase={self.phase(t)}")
+        p = Path(answer_path)
+        if not p.is_file():
+            raise Done(ERROR, f"ERROR MISSING_FILE {p}")
+        kind = r.need(f"TASK_ASK_KIND_{t}")
+        pair = r.need(f"TASK_ASK_PAIR_{t}")
+        spec = r.need(f"TASK_ASK_SPEC_{t}")
+        conv = r.get(f"TASK_ASK_CONV_{t}", "")
+        stage = r.get(f"TASK_ASK_STAGE_{t}")
+        ans = p.read_text(encoding="utf-8")
+        result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
+        if result is None:
+            spec_text = Path(spec).read_text(encoding="utf-8")
+            result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
+                                     pair=pair, worktree=r.impl)
+        r.set(**{f"TASK_ASK_CONV_{t}": None, f"TASK_ASK_KIND_{t}": None,
+                 f"TASK_ASK_PAIR_{t}": None, f"TASK_ASK_SPEC_{t}": None,
+                 f"TASK_ASK_FILE_{t}": None, f"TASK_ASK_STAGE_{t}": None})
+        if kind.startswith("review"):
+            self.after_review(t, int(stage or kind[-1]), result)
+        else:
+            if result[3]:
+                r.set(**{f"IMPL_CONVERSATION_ID_{t}": result[3]})
+            self.after_impl(t, kind, result)
+
     # -- merge
     def do_merge(self, t):
         r = self.r
@@ -319,8 +332,7 @@ class Loop:
         q = self.queue()
         if q and q[0] == t:
             self.write_queue(q[1:])
-        self.o.release(r.get(f"IMPL_DISPATCH_{t}"))
-        r.set(LAST_MERGED=head, WAITING_ON=None, LOOP_WAIT=None)
+        r.set(LAST_MERGED=head, WAITING_ON=None, **{f"IMPL_CONVERSATION_ID_{t}": None})
         self.set_phase(t, "merged")
         r.log(f"{t} merged {head}")
         self.events.append(f"MERGED {t} {head}")
@@ -328,7 +340,7 @@ class Loop:
     # -- escalation
     def escalate(self, t):
         r = self.r
-        self.o.release(r.get(f"IMPL_DISPATCH_{t}"))
+        r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
         a = r.incr(f"ATTEMPT_{t}")
         meta = self.meta(t)
         rungs = self.rungs(t)
@@ -342,7 +354,7 @@ class Loop:
             parts.append(f"\n=== {f.name}\n" + f.read_text(encoding="utf-8"))
         hist.write_text("".join(parts), encoding="utf-8")
         line = f"task {t}, tier {meta['TIER']}, attempt {a}, {nxt}, replan {replan}, history {hist}"
-        self.set_phase(t, "escalating", **{f"ESC_INPUT_{t}": line, "WAITING_ON": "architect", "LOOP_WAIT": None})
+        self.set_phase(t, "escalating", **{f"ESC_INPUT_{t}": line, "WAITING_ON": "architect"})
         r.log(f"{t} escalation attempt {a}: {nxt}")
         raise Done(ESCALATE, f"ESCALATE {line}")
 
@@ -426,10 +438,11 @@ class Loop:
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
         spec = build("escalate.txt", r.run_dir / "specs" / f"{t}-attempt{a}.txt",
-                          {"TASK_TITLE": meta["TITLE"], "RESET_SHA": sha},
-                          {"NOTE": note, "DECISIONS": r.task_file(t, "-decisions.md"),
-                           "IMPLEMENT_SPEC": r.run_dir / "specs" / f"{t}-implement.txt"})
+                     {"TASK_TITLE": meta["TITLE"], "RESET_SHA": sha},
+                     {"NOTE": note, "DECISIONS": r.task_file(t, "-decisions.md"),
+                      "IMPLEMENT_SPEC": r.run_dir / "specs" / f"{t}-implement.txt"})
         r.set(**{f"IMPLEMENT_SPEC_{t}": spec, f"PAIR_{t}": pair, f"ESC_PENDING_{t}": None,
+                 f"IMPL_CONVERSATION_ID_{t}": None,
                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
                  f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0})
@@ -441,11 +454,9 @@ class Loop:
         r = self.r
         sha, note, pair = r.need(f"ESC_PENDING_{t}").split()
         try:
-            Prober(r, self.o).advance([pair])
+            Prober(r, self.runner).advance([pair])
         except Done as d:
-            if d.code == WAIT:
-                r.set(WAITING_ON=r.get(f"PROBE_DISPATCH_{pair_key(parse_pair(pair))}") or "probe")
-            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
+            if d.code == STOP and d.line.startswith("PROBE_FAILED"):
                 return self.reject(t, f"launch test for {pair} failed; see {d.line.split()[-1]}")
             raise
         self.start_attempt(t, sha, note, pair)
@@ -474,11 +485,9 @@ class Loop:
         r = self.r
         sha, *ids = r.need(f"PENDING_REPLAN_{t}").split()
         try:
-            Prober(r, self.o).advance(review_pairs(r, ids))
+            Prober(r, self.runner).advance(review_pairs(r, ids))
         except Done as d:
-            if d.code == WAIT:
-                r.set(WAITING_ON=d.line.split()[1])
-            elif d.code == STOP and d.line.startswith("PROBE_FAILED"):
+            if d.code == STOP and d.line.startswith("PROBE_FAILED"):
                 out_file = next_free(r.run_dir, "validate-{n}.txt")
                 out_file.write_text(launch_problems(r, ids, d.line), encoding="utf-8")
                 self.fix_meta(t, out_file)
@@ -536,8 +545,7 @@ class Loop:
             rc, out = tool("discard-changes.sh", r.impl, new)
             if rc != 0:
                 raise Done(ERROR, f"ERROR RESET {out}")
-            self.o.release(r.get(f"IMPL_DISPATCH_{t}"))
-            r.set(LAST_MERGED=new)
+            r.set(LAST_MERGED=new, **{f"IMPL_CONVERSATION_ID_{t}": None})
             return self.set_phase(t, "start")
         if name == "rejected":
             r.set(**{f"REJECTS_{t}": 0})
@@ -553,7 +561,7 @@ class Loop:
                 return self.start_review(t, int(kind[-1]))
             run(["git", "-C", r.impl, "reset", "--hard", "HEAD"])
             run(["git", "-C", r.impl, "clean", "-fd"])
-            self.o.release(r.get(f"IMPL_DISPATCH_{t}"))
+            r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
             return self.start_impl(t, r.need(f"LAST_IMPL_SPEC_{t}"), kind, self.meta(t)["TITLE"], reuse=False)
         return self.set_phase(t, back)
 
@@ -570,7 +578,7 @@ class Loop:
             self.r.set(CURRENT_TASK=q[0], **({f"LOOP_{q[0]}": "start"} if fresh else {}))
         return q[0]
 
-    def advance(self, architect_result=None, reply_word=None, moved=False):
+    def advance(self, architect_result=None, reply_word=None, answer_path=None, moved=False):
         if moved:
             docs_moved(self.r)
         t = self.current()
@@ -582,25 +590,18 @@ class Loop:
             if not t:
                 raise Done(ERROR, "ERROR NO_CURRENT_TASK")
             self.reply(t, reply_word)
-        for _ in range(200):
+        elif answer_path:
+            if not t:
+                raise Done(ERROR, "ERROR NO_CURRENT_TASK")
+            self.take_answer(t, answer_path)
+        for _ in range(1000):
             t = self.current()
             if t is None:
-                self.r.set(WAITING_ON=None, LOOP_WAIT=None, STEP="run_task queue empty")
+                self.r.set(WAITING_ON=None, STEP="run_task queue empty")
                 raise Done(QUEUE_EMPTY, "QUEUE_EMPTY")
             phase = self.phase(t)
             if phase == "start":
                 self.do_start(t)
-            elif phase.startswith("wait:"):
-                kind = phase.split(":", 1)[1]
-                result = poll(self.o, self.r, self.r.need("LOOP_WAIT"))
-                if result is None:
-                    raise Done(WAIT, f"WAIT {self.r.need('LOOP_WAIT')} {kind}")
-                if result[0] == "idle":
-                    result = self.nudge(t, kind, self.r.need("LOOP_WAIT"), result[1])
-                if kind.startswith("review"):
-                    self.after_review(t, int(kind[-1]), result)
-                else:
-                    self.after_impl(t, kind, result)
             elif phase == "check":
                 self.do_check(t)
             elif phase == "merge":
@@ -609,6 +610,8 @@ class Loop:
                 self.do_probe(t)
             elif phase == "replan-probe":
                 self.do_replan_probe(t)
+            elif phase == "consult":
+                raise Done(CONSULT, f"CONSULT {self.r.need(f'TASK_ASK_FILE_{t}')}")
             elif phase == "escalating":
                 raise Done(ESCALATE, f"ESCALATE {self.r.need(f'ESC_INPUT_{t}')}")
             elif phase == "fixmeta":
@@ -628,6 +631,7 @@ def main():
     adv = sub.add_parser("advance")
     adv.add_argument("--architect-result")
     adv.add_argument("--reply")
+    adv.add_argument("--answer")
     adv.add_argument("--docs-moved", action="store_true")
     try:
         a = p.parse_args()
@@ -636,7 +640,8 @@ def main():
     loop = None
     try:
         loop = Loop(a.state)
-        loop.advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None, a.docs_moved)
+        loop.advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None,
+                     a.answer, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

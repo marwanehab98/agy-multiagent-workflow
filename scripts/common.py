@@ -1,4 +1,4 @@
-"""Plumbing shared by the run_*.py scripts: status codes, state file, Orca CLI wrapper, helpers."""
+"""Plumbing shared by the run_*.py scripts: status codes, state file, headless `agy -p` runner, helpers."""
 import datetime
 import json
 import os
@@ -13,14 +13,23 @@ sys.path.insert(0, str(HERE))  # -I drops the script dir from sys.path
 from harnesses import launch_args, pick_style  # noqa: E402
 from pairs import parse_pair  # noqa: E402
 
-QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, PROMPT, STOP, ERROR = 0, 10, 20, 21, 30, 40, 2
+QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR = 0, 10, 20, 21, 22, 30, 40, 2
 
 VERDICTS = ("VERDICT: PASS", "VERDICT: FIX")
+
+USAGE_RE = re.compile(r"(?i)(usageLimitReached|usage\s*limit|rate\s*limit|quota|resource_exhausted|\b429\b|5-hour limit)")
+RESUME_ERR_RE = re.compile(
+    r"(?i)(conversation.*(not found|invalid|expired|does not exist|unknown|missing)|cannot resume|unknown conversation)"
+)
 
 
 def last_line(path):
     lines = [l.strip() for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
     return lines[-1] if lines else ""
+
+
+def first_nonempty_line(text):
+    return next((l.strip() for l in text.splitlines() if l.strip()), "")
 
 
 def verdict_line(path):
@@ -32,11 +41,13 @@ def verdict_line(path):
 
 
 def pick_verdict(review, settle):
-    """The reviewer's file when it ends in a VERDICT line; otherwise the settle message, copied there."""
-    review, settle = Path(review), Path(settle)
+    """The reviewer's file when it ends in a VERDICT line; otherwise the settle text/file, copied there."""
+    review = Path(review)
     if review.is_file() and last_line(review) in VERDICTS:
         return review
-    review.write_text(settle.read_text(encoding="utf-8"), encoding="utf-8")
+    text = settle.read_text(encoding="utf-8") if isinstance(settle, Path) else str(settle)
+    review.parent.mkdir(parents=True, exist_ok=True)
+    review.write_text(text.rstrip("\n") + "\n", encoding="utf-8")
     return review
 
 
@@ -151,85 +162,104 @@ def next_free(folder, pattern):
     return folder / pattern.format(n=n)
 
 
-# ---------------------------------------------------------------- orca
+# ---------------------------------------------------------------- headless agy runner
 
-class Orca:
+class AgyRunner:
+    """Run headless `agy -p` workers synchronously with `--output-format json`."""
+
     def __init__(self, r):
         self.r = r
-        self.exe = r.need("ORCA")
-
-    def call(self, *args, ok_required=True):
-        res = run([self.exe, "orchestration", *args, "--json"])
-        try:
-            data = json.loads(res.stdout)
-        except json.JSONDecodeError:
-            data = {"ok": False, "raw": (res.stdout + res.stderr)[:800]}
-        if ok_required and not data.get("ok"):
-            raise Done(ERROR, f"ERROR ORCA_FAILED {' '.join(args[:1])}: {json.dumps(data)[:800]}")
-        return data
-
-    def start(self, spec, title, pair, worktree, keep_open=False, terminal=None):
-        if not terminal:
-            return self.start_args(spec, title, self.launch(pair), worktree, keep_open)
-        task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
-        res = self.call("worker-start", "--task", task, "--worktree", f"path:{worktree}",
-                        "--terminal", terminal)["result"]
-        return res["dispatchId"], res.get("terminal", "")
+        self.exe = r.get("AGY") or "agy"
 
     def launch(self, pair):
-        """Agent arguments for a pair, in the launch style recorded for it (or the fallback style)."""
+        """Model/effort CLI arguments for a pair, in its recorded launch style (or fallback)."""
         catalog = json.loads(Path(self.r.need("CATALOG")).read_text(encoding="utf-8"))
         parsed = parse_pair(pair)
         return launch_args(catalog, parsed, pick_style(catalog, self.r.s, parsed))
 
-    def start_args(self, spec, title, args, worktree, keep_open=False):
-        """Create a task and start a worker with the given agent args (e.g. from launch_args)."""
-        task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
-        cmd = ["worker-start", "--task", task, "--worktree", f"path:{worktree}", *args]
-        if keep_open:
-            cmd.append("--keep-open")
-        res = self.call(*cmd)["result"]
-        return res["dispatchId"], res.get("terminal", "")
+    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None):
+        """Invoke `agy -p` and return (kind, detail_or_outcome, body, conversation_id).
 
-    def try_reuse(self, spec, title, terminal, worktree):
-        task = self.call("task-create", "--spec-file", str(spec), "--task-title", title)["result"]["taskId"]
-        data = self.call("worker-start", "--task", task, "--worktree", f"path:{worktree}",
-                         "--terminal", terminal, ok_required=False)
-        if not data.get("ok"):
+        kind is one of:
+          'done'          -> ('done', 'succeeded'|'failed', body, conv_id)
+          'ask'           -> ('ask', conv_id, body, conv_id)
+          'usage'         -> ('usage', detail, '', conv_id)
+          'resume_failed' -> ('resume_failed', detail, '', '')
+          'stopped'       -> ('stopped', detail, '', conv_id)
+        """
+        cmd = [
+            self.exe,
+            "-p", prompt_text,
+            "--output-format", "json",
+            "--dangerously-skip-permissions",
+            *args,
+        ]
+        if conversation_id:
+            cmd += ["--conversation", conversation_id]
+        try:
+            proc = subprocess.run(cmd, cwd=worktree, capture_output=True, text=True, errors="replace")
+        except OSError as e:
+            return ("stopped", f"failed to launch {self.exe}: {e}", "", "")
+
+        raw_out = (proc.stdout or "").strip()
+        raw_err = (proc.stderr or "").strip()
+        try:
+            data = json.loads(raw_out) if raw_out else None
+        except json.JSONDecodeError:
+            data = None
+
+        if not isinstance(data, dict):
+            combined = "\n".join(x for x in (raw_out, raw_err) if x).strip()
+            if USAGE_RE.search(combined):
+                return ("usage", combined[:800], "", "")
+            if conversation_id and RESUME_ERR_RE.search(combined):
+                return ("resume_failed", combined[:800], "", "")
+            return ("stopped", f"{self.exe} exited {proc.returncode}: {combined[:800]}", "", "")
+
+        conv_id = data.get("conversation_id") or conversation_id or ""
+        status = data.get("status", "")
+        resp = data.get("response") or ""
+        err = data.get("error") or ""
+
+        if status != "SUCCESS" or proc.returncode != 0:
+            detail = (err or resp or raw_err or f"{self.exe} exited {proc.returncode} (status={status})").strip()
+            if USAGE_RE.search(detail):
+                return ("usage", detail, "", conv_id)
+            if conversation_id and RESUME_ERR_RE.search(detail):
+                return ("resume_failed", detail, "", "")
+            return ("stopped", detail, "", conv_id)
+
+        first = first_nonempty_line(resp)
+        if first.startswith("ASK:"):
+            return ("ask", conv_id, resp, conv_id)
+        if first.startswith("FAILED:"):
+            return ("done", "failed", resp, conv_id)
+        return ("done", "succeeded", resp, conv_id)
+
+    def run(self, spec, pair=None, args=None, worktree=None):
+        prompt_text = Path(spec).read_text(encoding="utf-8") if isinstance(spec, (Path, str)) and Path(spec).is_file() else str(spec)
+        launch = list(args) if args is not None else self.launch(pair)
+        return self.exec_prompt(prompt_text, launch, worktree)
+
+    def try_resume(self, spec_or_text, pair, worktree, conversation_id):
+        if not conversation_id:
             return None
-        return data["result"]["dispatchId"], data["result"].get("terminal", terminal)
-
-    def send(self, dispatch, subject, body):
-        return self.call("send", "--to", f"dispatch:{dispatch}", "--subject", subject, "--body", body)["result"]
-
-    def show(self, dispatch):
-        data = self.call("worker-show", "--dispatch", dispatch, ok_required=False)
-        return data.get("result") if data.get("ok") else None
-
-    def release(self, dispatch):
-        if dispatch:
-            self.call("worker-release", "--dispatch", dispatch, ok_required=False)
-
-    def inbox(self):
-        run_id = self.r.need("RUN_ID")
-        return self.call("inbox", "--terminal", f"run:{run_id}", "--limit", "500", "--full")["result"]["messages"]
+        prompt_text = (
+            Path(spec_or_text).read_text(encoding="utf-8")
+            if isinstance(spec_or_text, Path) or (isinstance(spec_or_text, str) and "\n" not in spec_or_text and Path(spec_or_text).is_file())
+            else str(spec_or_text)
+        )
+        res = self.exec_prompt(prompt_text, self.launch(pair), worktree, conversation_id=conversation_id)
+        if res[0] == "resume_failed":
+            return None
+        return res
 
 
-def payload(m):
-    """`inbox --full` gives the payload as a JSON string; the concise view gives an object."""
-    p = m.get("payload") or {}
-    if isinstance(p, dict):
-        return p
-    try:
-        return json.loads(p)
-    except (json.JSONDecodeError, TypeError):
-        return {}
-
-
-def save_body(msg, out, header=None, append=False):
+def save_body(body_or_msg, out, header=None, append=False):
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    text = (header + "\n" if header else "") + msg["body"].rstrip("\n") + "\n"
+    body = body_or_msg["body"] if isinstance(body_or_msg, dict) else str(body_or_msg)
+    text = (header + "\n" if header else "") + body.rstrip("\n") + "\n"
     with out.open("a" if append else "w", encoding="utf-8") as f:
         f.write(text)
     return out
@@ -245,28 +275,3 @@ def build(template, out, sets=None, files=None):
     if rc != 0:
         raise Done(ERROR, f"ERROR BUILD_SPEC {template}: {out_text}")
     return Path(out)
-
-
-def poll(orca, run, dispatch):
-    """('done', outcome, msg) | ('usage', detail) | ('idle', seq) | ('stopped', note) | None while working."""
-    msgs = sorted(orca.inbox(), key=lambda m: m.get("sequence", 0), reverse=True)
-    mine = [m for m in msgs if payload(m).get("dispatchId") == dispatch]
-    for m in mine:
-        if m["type"] == "worker_done":
-            return ("done", payload(m).get("outcome", "failed"), m)
-    handled = int(run.get(f"HANDLED_SEQ_{dispatch}", "0"))
-    for m in mine:
-        if m["type"] != "escalation" or m.get("sequence", 0) <= handled:
-            continue
-        p = payload(m)
-        if p.get("failureKind") == "usageLimitReached":
-            return ("usage", p.get("detail") or p.get("error") or m["subject"])
-        if p.get("stopReason") == "finished":
-            # Ended its turn without worker_done; it may be waiting on a background command.
-            return ("idle", m.get("sequence", 0))
-        if p.get("stopReason") or p.get("turnOutcome") == "failure":
-            return ("stopped", f"{m['subject']}\n{m['body']}")
-    show = orca.show(dispatch)
-    if show and show.get("liveness") in ("exited", "lost") and show.get("stage") != "settled":
-        return ("stopped", f"worker {dispatch} is {show.get('liveness')} without settling")
-    return None

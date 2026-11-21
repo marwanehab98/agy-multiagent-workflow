@@ -1,13 +1,13 @@
-"""probe.py: test launches with launch-style fallback, against the fake Orca."""
+"""probe.py: synchronous test launches with launch-style fallback against fake_agy."""
 import json
 import unittest
 from pathlib import Path
 
 from helpers import Base, SKILL, sh
 
-RULE = lambda agent, model, effort: {"agent": agent, "model": model, "effort": effort}
-CL_OK = RULE("cl-agent", "big", "high")
-AG_FLAG = [RULE("ag-agent", "g", "high"), RULE("ag-agent", "g", "xhigh")]
+RULE = lambda model, effort: {"model": model, "effort": effort}
+BIG_OK = RULE("big", "high")
+G_FLAG = [RULE("g", "high"), RULE("g", "xhigh")]
 
 
 class ProbeTest(Base):
@@ -18,8 +18,9 @@ class ProbeTest(Base):
         self.docswt = self.tmp / "docswt"
         sh("git", "-C", str(self.main), "worktree", "add", "-q", "-b", "docsbr", str(self.docswt), "feature")
         s = self.st()
-        s.update({"ROLE_ARCHITECT": "cl:big@high", "ROLE_EGM": "ag:g@high", "ROLE_BASE": "ag:g@high",
-                  "BASE_TOP": "xhigh", "CATALOG": str(SKILL / "tests" / "fixtures" / "catalog.json"),
+        s.update({"ROLE_ARCHITECT": "antigravity:big@high", "ROLE_EGM": "antigravity:g@high",
+                  "ROLE_BASE": "antigravity:g@high", "BASE_TOP": "xhigh",
+                  "CATALOG": str(SKILL / "tests" / "fixtures" / "catalog.json"),
                   "DOCS_WORKTREE": str(self.docswt)})
         self.state.write_text(json.dumps(s))
 
@@ -33,158 +34,109 @@ class ProbeTest(Base):
 
     def test_all_pass_records_styles(self):
         self.behave("ok", "ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "step1")
-        self.expect_probe(0, "PROBED")
-        self.assertEqual(self.st("LAUNCH_STYLE_ag_g_high"), "slug")
-        self.assertEqual(self.st("LAUNCH_STYLE_cl_big_high"), "flag")
-        self.assertEqual(self.st("LAUNCH_STYLE_ag_g_xhigh"), "slug")
-        self.assertEqual(len(self.calls("worker-start")), 3)
-        spec = next(iter(json.loads(self.world.read_text())["tasks"].values()))
-        self.assertEqual(spec["title"], "Launch test: cl:big@high")
-        self.assertTrue(spec["spec"].startswith("This is a launch test."))
+        self.expect_probe(0, "PROBED", "--set", "step1")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_g_high"), "slug")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_big_high"), "slug")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_g_xhigh"), "slug")
+        calls = self.calls()
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(c["prompt"].startswith("This is a launch test.") for c in calls))
+        self.assertTrue(all("--dangerously-skip-permissions" in c["argv"] for c in calls))
 
     def test_slug_rejected_falls_back_to_flag(self):
-        self.rules([CL_OK] + AG_FLAG)
+        self.rules([RULE("big-high", "default")] + G_FLAG)
         self.behave("ok", "ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "step1")
-        self.until(0, "PROBED")
-        self.assertEqual(self.st("LAUNCH_STYLE_ag_g_high"), "flag")
-        self.assertEqual(self.st("LAUNCH_STYLE_ag_g_xhigh"), "flag")
-        self.assertEqual(self.st("LAUNCH_STYLE_cl_big_high"), "flag")
-        self.assertIn("is not available", (self.run_dir / "results" / "probe-ag_g_high.md").read_text())
+        self.expect_probe(0, "PROBED", "--set", "step1")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_g_high"), "flag")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_g_xhigh"), "flag")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_big_high"), "slug")
+        self.assertIn("is not available", (self.run_dir / "results" / "probe-antigravity_g_high.md").read_text())
 
     def test_every_style_rejected_fails_with_reasons(self):
-        self.rules([CL_OK, RULE("ag-agent", "g", "xhigh")])
+        self.rules([RULE("big-high", "default"), RULE("g", "xhigh")])
         self.behave("ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "step1")
-        last, _ = self.until(40, "PROBE_FAILED")
-        self.assertTrue(last.startswith("PROBE_FAILED ag:g@high "))
+        last = self.expect_probe(40, "PROBE_FAILED", "--set", "step1")
+        self.assertTrue(last.startswith("PROBE_FAILED antigravity:g@high "), last)
         text = Path(last.split()[-1]).read_text()
         self.assertIn("is not available", text)
         self.assertIn("slug", text)
         self.assertIn("flag", text)
 
-    def test_orca_refusing_a_launch_counts_as_that_style_failing(self):
-        # Live test 2026-11-15: worker-start answered invalid_argument; that must name the pair, not ERROR.
+    def test_agy_refusing_a_launch_counts_as_that_style_failing(self):
         w = json.loads(self.world.read_text())
-        w["reject_rules"] = [RULE("cl-agent", "big", "high")]
+        w["reject_rules"] = [RULE("big-high", "default"), RULE("big", "high")]
         self.world.write_text(json.dumps(w))
         self.behave("ok", "ok", "ok")
-        last, _ = self.until(40, "PROBE_FAILED", "--set", "step1")
-        self.assertTrue(last.startswith("PROBE_FAILED cl:big@high "), last)
+        last = self.expect_probe(40, "PROBE_FAILED", "--set", "step1")
+        self.assertTrue(last.startswith("PROBE_FAILED antigravity:big@high "), last)
         self.assertIn("does not support effort high", Path(last.split()[-1]).read_text())
 
     def test_step3_failure_of_an_architect_chosen_pair_goes_to_fix_meta(self):
         w = json.loads(self.world.read_text())
-        w["reject_rules"] = [RULE("cl-agent", "small", "high")]
+        w["reject_rules"] = [RULE("small-high", "default"), RULE("small", "high")]
         self.world.write_text(json.dumps(w))
         s = self.st()
-        s["CLERICAL_PAIR"] = "cl:small@high"
+        s["CLERICAL_PAIR"] = "antigravity:small@high"
         self.state.write_text(json.dumps(s))
-        last, _ = self.until(21, "FIX_META", "--set", "step3")
+        last = self.expect_probe(21, "FIX_META", "--set", "step3")
         text = Path(last.split()[1]).read_text()
-        self.assertIn("PROBLEM 01: REVIEW_1 cl:small@high failed its test launch; see ", text)
-        self.assertIn("PROBLEM pair 'cl:small@high': CLERICAL_PAIR failed its test launch; see ", text)
-        # After fix-meta changes the pairs, the next call probes the new ones.
+        self.assertIn("PROBLEM 01: REVIEW_1 antigravity:small@high failed its test launch; see ", text)
+        self.assertIn("PROBLEM pair 'antigravity:small@high': CLERICAL_PAIR failed its test launch; see ", text)
         for t in ("01", "02"):
             m = self.docs / "tasks" / f"{t}.meta"
-            m.write_text(m.read_text().replace("cl:small@high", "cl:big@high"))
+            m.write_text(m.read_text().replace("antigravity:small@high", "antigravity:big@high"))
         s = self.st()
-        s["CLERICAL_PAIR"] = "cl:big@high"
+        s["CLERICAL_PAIR"] = "antigravity:big@high"
         self.state.write_text(json.dumps(s))
         self.behave("ok")
-        self.until(0, "PROBED", "--set", "step3")
-
-    def test_advance_is_idempotent_while_waiting(self):
-        self.behave("pending", "ok", "ok")
-        first = self.expect_probe(10, "WAIT", "--set", "step1")
-        again = self.expect_probe(10, "WAIT")
-        self.assertEqual(first, again)
-        self.assertEqual(len(self.calls("worker-start")), 3)
+        self.expect_probe(0, "PROBED", "--set", "step3")
 
     def test_probe_that_edits_docs_is_discarded(self):
         self.behave("ok-edit", "ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "step1")
-        self.expect_probe(0, "PROBED")
-        self.assertEqual(self.st("LAUNCH_STYLE_cl_big_high"), "flag")
+        self.expect_probe(0, "PROBED", "--set", "step1")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_big_high"), "slug")
         self.assertEqual(sh("git", "-C", str(self.docswt), "status", "--porcelain"), "")
         self.assertIn("discarded", (self.run_dir / "run-log.md").read_text())
 
-    def test_idle_nudged_once_then_counts_as_failure(self):
-        self.rules([CL_OK] + AG_FLAG)
-        self.behave("ok", "ok", "idle-forever")
-        self.expect_probe(10, "WAIT", "--set", "step1")
-        last, _ = self.until(40, "PROBE_FAILED")
-        self.assertTrue(last.startswith("PROBE_FAILED ag:g@xhigh "))
-        self.assertEqual(len(self.calls("send")), 1)
-        self.assertEqual(self.st("LAUNCH_STYLE_ag_g_high"), "flag")
-
     def test_pair_set_and_skip_known(self):
         self.behave("ok")
-        self.expect_probe(10, "WAIT", "--set", "pair", "--pair", "ag:g@low")
-        self.expect_probe(0, "PROBED")
-        self.expect_probe(0, "PROBED", "--set", "pair", "--pair", "ag:g@low")
-        self.assertEqual(len(self.calls("worker-start")), 1)
+        self.expect_probe(0, "PROBED", "--set", "pair", "--pair", "antigravity:g@low")
+        self.expect_probe(0, "PROBED", "--set", "pair", "--pair", "antigravity:g@low")
+        self.assertEqual(len(self.calls()), 1)
 
     def test_resume_reprobes_step1_and_step3_pairs(self):
         self.behave("ok", "ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "step1")
-        self.expect_probe(0, "PROBED")
+        self.expect_probe(0, "PROBED", "--set", "step1")
         s = self.st()
-        s["CLERICAL_PAIR"] = "cl:big@low"
+        s["CLERICAL_PAIR"] = "antigravity:big@low"
         self.state.write_text(json.dumps(s))
         self.behave("ok", "ok", "ok", "ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "resume")
-        self.until(0, "PROBED")
-        titles = sorted(t["title"] for t in json.loads(self.world.read_text())["tasks"].values())[3:]
-        self.assertEqual(len(self.calls("worker-start")), 8)
-        self.assertIn("Launch test: cl:small@high", titles)
-        self.assertEqual(self.st("LAUNCH_STYLE_cl_big_low"), "flag")
+        self.expect_probe(0, "PROBED", "--set", "resume")
+        self.assertEqual(len(self.calls()), 8)
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_big_low"), "slug")
         self.expect_probe(0, "PROBED")
-        self.assertEqual(len(self.calls("worker-start")), 8)
+        self.assertEqual(len(self.calls()), 8)
 
     def test_resume_overwrites_or_fails_a_recorded_style(self):
         s = self.st()
-        s.update({"LAUNCH_STYLE_ag_g_high": "flag", "LAUNCH_STYLE_ag_g_xhigh": "flag", "LAUNCH_STYLE_cl_big_high": "flag",
-                  "LAUNCH_STYLE_cl_small_high": "flag"})
+        s.update({"LAUNCH_STYLE_antigravity_g_high": "flag", "LAUNCH_STYLE_antigravity_g_xhigh": "flag",
+                  "LAUNCH_STYLE_antigravity_big_high": "flag", "LAUNCH_STYLE_antigravity_small_high": "flag"})
         self.state.write_text(json.dumps(s))
         self.behave("ok", "ok", "ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "resume")
-        self.until(0, "PROBED")
-        self.assertEqual(self.st("LAUNCH_STYLE_ag_g_high"), "slug")
-        self.rules([CL_OK, RULE("cl-agent", "small", "high")])
-        self.behave("ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "resume")
-        last, _ = self.until(40, "PROBE_FAILED")
-        self.assertTrue(last.startswith("PROBE_FAILED ag:g@"))
+        self.expect_probe(0, "PROBED", "--set", "resume")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_g_high"), "slug")
+        self.rules([RULE("big-high", "default"), RULE("small-high", "default")])
+        self.behave("ok")
+        last = self.expect_probe(40, "PROBE_FAILED", "--set", "resume")
+        self.assertTrue(last.startswith("PROBE_FAILED antigravity:g@"))
 
     def test_resume_never_discards_the_architects_work(self):
         (self.docswt / "notes.md").write_text("uncommitted architect notes\n")
         self.behave("ok", "ok", "ok", "ok")
-        self.expect_probe(10, "WAIT", "--set", "resume")
-        g = lambda *a: sh("git", "-C", str(self.docswt), "-c", "user.email=t@t", "-c", "user.name=t", *a)
-        (self.docswt / "design.md").write_text("design\n")
-        g("add", "design.md")
-        g("commit", "-qm", "architect commit after PROBE_HEAD")
-        head = g("rev-parse", "HEAD")
-        self.until(0, "PROBED")
-        self.assertEqual(g("rev-parse", "HEAD"), head)
+        self.expect_probe(0, "PROBED", "--set", "resume")
         self.assertEqual((self.docswt / "notes.md").read_text(), "uncommitted architect notes\n")
         self.assertIn("left as is", (self.run_dir / "run-log.md").read_text())
-        self.assertIn("left as is", (self.run_dir / "results" / "probe-cl_big_high.md").read_text())
-
-    def test_docs_moved_keeps_architect_commit_discards_probe_edit(self):
-        self.behave("ok-edit")
-        self.expect_probe(10, "WAIT", "--set", "pair", "--pair", "ag:g@low")
-        g = lambda *a: sh("git", "-C", str(self.docswt), "-c", "user.email=t@t", "-c", "user.name=t", *a)
-        (self.docswt / "decisions.md").write_text("user-message decision\n")
-        g("add", "decisions.md")
-        g("commit", "-qm", "architect commit while the probe runs")
-        head = g("rev-parse", "HEAD")
-        self.expect_probe(0, "PROBED", "--docs-moved")
-        self.assertEqual(g("rev-parse", "HEAD"), head)
-        self.assertEqual(g("status", "--porcelain", "--untracked-files=all"), "")
-        self.assertEqual(self.st("PROBE_HEAD"), head)
+        self.assertIn("left as is", (self.run_dir / "results" / "probe-antigravity_big_high.md").read_text())
 
     def test_old_format_state_is_refused(self):
         s = self.st()
