@@ -153,4 +153,4 @@ agy plugin validate --strict --json .
 
 ## License & Attributions
 
-Licensed under the [MIT License](LICENSE). Selected bundled skills, agent personas, and document standards are adapted from upstream open-source projects — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for full license texts and attributions.
+Original code in this repository is licensed under the [MIT License](LICENSE). Vendored and adapted skills, agent personas, and document standards retain their respective upstream licenses (MIT and Apache-2.0) — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for full license texts and attributions.
