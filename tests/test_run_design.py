@@ -101,6 +101,19 @@ class Happy(Design):
         self.assertIn("builder-check-done", last)
         self.assertEqual(self.calls()[1]["conversation"], "conv_1")
 
+    def test_consult_expired_conversation_falls_back_cleanly(self):
+        self.behave("ask", "write-output")
+        self.builder(expect=(22, "CONSULT"))
+        w = json.loads(self.world.read_text())
+        w["expired_conversations"] = ["conv_1"]
+        self.world.write_text(json.dumps(w))
+        ans = self.tmp / "ans.md"
+        ans.write_text("Use strict validation.\n" + "x" * 400 + "\n")
+        last, _ = self.expect(20, "ARCHITECT_JOB", "--answer", str(ans))
+        self.assertIn("builder-check-done", last)
+        self.assertEqual(self.calls()[2]["conversation"], "")
+        self.assertIn("Use strict validation.", self.calls()[2]["prompt"])
+
 
 class DocsTree(Design):
     def test_dirty_docs_tree_sends_commit_docs_then_resumes(self):

@@ -59,10 +59,17 @@ def main():
     def save_world():
         world_path.write_text(json.dumps(w), encoding="utf-8")
 
-    def emit(rc, payload):
+    def emit(rc, payload, prefix=""):
         save_world()
+        if prefix:
+            print(prefix)
         print(json.dumps(payload))
         return rc
+
+    effective_prompt = ns.prompt or ""
+    ptr = re.fullmatch(r"Read and follow all instructions in (.+?) exactly\.", effective_prompt)
+    if ptr and Path(ptr.group(1)).is_file():
+        effective_prompt = Path(ptr.group(1)).read_text(encoding="utf-8")
 
     if any(match_rule(r, ns.model, ns.effort) for r in w.get("reject_rules", [])):
         return emit(1, {
@@ -100,21 +107,25 @@ def main():
         Path("probe_edit.txt").write_text("stray edit\n", encoding="utf-8")
         return emit(0, {"conversation_id": conv_id, "status": "SUCCESS", "response": "OK\n"})
 
-    if do == "fail":
+    if do in ("fail", "fail-formatted"):
+        line = "**FAILED:** missing tool xyz" if do == "fail-formatted" else "FAILED: could not make the test pass"
         return emit(0, {"conversation_id": conv_id, "status": "SUCCESS",
-                        "response": "FAILED: could not make the test pass\nAssertionError: 1 != 2\n"})
+                        "response": f"{line}\nAssertionError: 1 != 2\n"})
 
     if do in ("error", "stopped"):
         return emit(1, {"conversation_id": conv_id, "status": "ERROR",
                         "response": "", "error": "worker crashed unexpectedly"})
 
-    if do == "usage":
+    if do in ("usage", "usage-edit"):
+        if do == "usage-edit":
+            Path("stray_usage_edit.txt").write_text("stray edit before quota\n", encoding="utf-8")
         return emit(1, {"conversation_id": conv_id, "status": "ERROR",
                         "response": "", "error": "usageLimitReached: You've hit your 5-hour limit"})
 
-    if do == "ask":
+    if do in ("ask", "ask-formatted"):
         q = beh.get("question", "Which edge case behavior should I use?") if isinstance(beh, dict) else "Which edge case behavior should I use?"
-        return emit(0, {"conversation_id": conv_id, "status": "SUCCESS", "response": f"ASK: {q}\n"})
+        text = f"`ASK: {q}`\n" if do == "ask-formatted" else f"ASK: {q}\n"
+        return emit(0, {"conversation_id": conv_id, "status": "SUCCESS", "response": text})
 
     if do == "response":
         if isinstance(beh, dict) and beh.get("edit"):
@@ -123,12 +134,13 @@ def main():
             p_edit.write_text(beh.get("edit_text", "edited\n"), encoding="utf-8")
         status = beh.get("status", "SUCCESS") if isinstance(beh, dict) else "SUCCESS"
         rc = beh.get("rc", 0 if status == "SUCCESS" else 1) if isinstance(beh, dict) else 0
+        prefix = beh.get("stdout_prefix", "") if isinstance(beh, dict) else ""
         return emit(rc, {
             "conversation_id": conv_id,
             "status": status,
             "response": beh.get("text", "") if isinstance(beh, dict) else "",
             "error": beh.get("error", "") if isinstance(beh, dict) else "",
-        })
+        }, prefix=prefix)
 
     if do == "commit":
         f = Path(f"work_{seq}.txt")
@@ -169,20 +181,24 @@ def main():
     if do == "nocommit":
         return emit(0, {"conversation_id": conv_id, "status": "SUCCESS", "response": "done\n"})
 
-    if do in ("pass", "fix", "noverdict", "edit-and-pass", "pass-body-only"):
-        out = output_file_from_prompt(ns.prompt or "")
+    if do in ("pass", "fix", "noverdict", "edit-and-pass", "pass-body-only", "fix-formatted"):
+        out = output_file_from_prompt(effective_prompt)
         if do == "edit-and-pass":
             Path("stray_review_edit.txt").write_text("oops\n", encoding="utf-8")
         verdict = {"pass": "VERDICT: PASS", "edit-and-pass": "VERDICT: PASS",
-                   "fix": "VERDICT: FIX", "noverdict": "Looks fine.", "pass-body-only": "VERDICT: PASS"}[do]
+                   "fix": "VERDICT: FIX", "fix-formatted": "**VERDICT: FIX**",
+                   "noverdict": "Looks fine.", "pass-body-only": "VERDICT: PASS"}[do]
         if out and do != "pass-body-only":
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(f"Review notes.\n{verdict}\n", encoding="utf-8")
-        resp = f"Review complete.\n{verdict}\n" if do != "noverdict" else "Review complete.\nLooks fine.\n"
+            body = "Critical: bug in foo.py:1.\n" if do == "fix-formatted" else "Review notes.\n"
+            out.write_text(f"{body}{verdict}\n", encoding="utf-8")
+        resp = "Summary only." if do == "fix-formatted" else (
+            f"Review complete.\n{verdict}\n" if do != "noverdict" else "Review complete.\nLooks fine.\n"
+        )
         return emit(0, {"conversation_id": conv_id, "status": "SUCCESS", "response": resp})
 
     if do in ("write-output", "write-empty"):
-        out = output_file_from_prompt(ns.prompt or "")
+        out = output_file_from_prompt(effective_prompt)
         if out:
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text("" if do == "write-empty" else "Important: x.md:1 unclear.\n", encoding="utf-8")

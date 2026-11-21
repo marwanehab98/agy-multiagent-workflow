@@ -94,10 +94,11 @@ class Review(Finish):
         self.expect(0, "VERIFIED", "--reply", "retry")
 
     def test_usage_limit_prompts_retry_stop(self):
-        self.behave("usage", "pass")
+        self.behave("usage-edit", "pass")
         last, _ = self.expect(30, "PROMPT")
         self.assertIn("5-hour limit", self.prompt_text(last))
         self.assertTrue(last.endswith(" retry stop"), last)
+        self.assertFalse((self.impl / "stray_usage_edit.txt").exists())
         self.expect(0, "VERIFIED", "--reply", "retry")
 
     def test_stop_reply_stops(self):
@@ -113,6 +114,18 @@ class Review(Finish):
         ans.write_text("Approved.\n")
         self.expect(0, "VERIFIED", "--answer", str(ans))
         self.assertEqual(self.calls()[1]["conversation"], "conv_1")
+
+    def test_consult_expired_conversation_falls_back_cleanly(self):
+        self.behave("ask", "pass")
+        self.expect(22, "CONSULT")
+        w = json.loads(self.world.read_text())
+        w["expired_conversations"] = ["conv_1"]
+        self.world.write_text(json.dumps(w))
+        ans = self.tmp / "ans.md"
+        ans.write_text("Approved.\n" + "y" * 400 + "\n")
+        self.expect(0, "VERIFIED", "--answer", str(ans))
+        self.assertEqual(self.calls()[2]["conversation"], "")
+        self.assertIn("Approved.", self.calls()[2]["prompt"])
 
     def test_starting_state_clears_impl_conversations_and_checks_tree(self):
         self.state.write_text(json.dumps({**self.st(), "IMPL_CONVERSATION_ID_01": "conv_9"}))
@@ -388,6 +401,13 @@ class Drift(Finish):
         self.state.write_text(json.dumps({**self.st(), "DRIFT_CHECK": "no"}))
         self.behave("pass")
         self.expect(0, "VERIFIED")
+
+    def test_drift_usage_limit_prompts_and_retries(self):
+        self.behave("pass", "usage", "write-output")
+        last, _ = self.expect(30, "PROMPT")
+        self.assertIn("5-hour limit", self.prompt_text(last))
+        last, _ = self.expect(20, "ARCHITECT_JOB", "--reply", "retry")
+        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
 
 
 if __name__ == "__main__":

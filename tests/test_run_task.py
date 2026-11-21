@@ -183,6 +183,47 @@ class TreeAndWorkers(Base):
         self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
         self.assertEqual(self.calls()[2]["conversation"], "conv_2")
 
+    def test_consult_expired_conversation_falls_back_cleanly(self):
+        self.behave("ask", "commit", "pass", "pass")
+        self.expect(22, "CONSULT")
+        w = json.loads(self.world.read_text())
+        w["expired_conversations"] = ["conv_1"]
+        self.world.write_text(json.dumps(w))
+        ans = self.tmp / "ans.md"
+        ans.write_text("Return 42.\n" + "z" * 400 + "\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+        self.assertEqual(self.calls()[2]["conversation"], "")
+        self.assertIn("Return 42.", self.calls()[2]["prompt"])
+
+    def test_large_prompt_spills_to_pointer_file(self):
+        (self.docs / "tasks" / "01.md").write_text("Task 01\n" + ("long detail line\n" * 5000))
+        self.behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        self.assertTrue(self.calls()[0]["prompt"].startswith("Read and follow all instructions in "))
+
+    def test_leading_stdout_prefix_and_formatted_markers(self):
+        self.behave(
+            {"do": "response", "stdout_prefix": "Fetching workspace...\nWarning: cache miss",
+             "text": "`ASK: Formatted question?`", "conv_id": "conv_fmt"},
+            "commit",
+            "fix-formatted",
+            "commit",
+            "pass",
+            "pass",
+        )
+        self.expect(22, "CONSULT")
+        ans = self.tmp / "ans.md"
+        ans.write_text("Proceed.\n")
+        self.expect(0, "QUEUE_EMPTY", "--answer", str(ans))
+        # fix-formatted review file preserved its Critical finding instead of being overwritten by settle summary
+        verdict_file = self.run_dir / "verdicts" / "01-s1-1.md"
+        self.assertIn("Critical: bug in foo.py:1.", verdict_file.read_text())
+
+    def test_formatted_failed_marker_escalates(self):
+        self.behave("fail-formatted")
+        self.expect(20, "ESCALATE")
+        self.assertIn("**FAILED:** missing tool xyz", (self.run_dir / "verdicts" / "01-history.md").read_text())
+
 
 class Prompts(Base):
     def test_usage_limit_prompts_then_retry_restarts(self):
@@ -289,6 +330,70 @@ class Prompts(Base):
         sh("git", "-C", str(self.main), "switch", "-q", "main")
         _, lines = self.expect(0, "QUEUE_EMPTY", "--reply", "continue")
         self.assertTrue(lines[0].startswith("MERGED 01"))
+
+    def test_usage_limit_on_commit_worker_preserves_uncommitted_work(self):
+        self.behave("dirty", "usage", "commit-all", "pass", "pass")
+        last, _ = self.expect(30, "PROMPT")
+        self.assertTrue(last.endswith(" retry stop"), last)
+        dirty_files = list(self.impl.glob("dirty_*.txt"))
+        self.assertEqual(len(dirty_files), 1)
+        self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+        changed = sh("git", "-C", str(self.impl), "show", "--stat", "--format=", self.st("LAST_MERGED"))
+        self.assertIn(dirty_files[0].name, changed)
+
+    def test_usage_limit_on_reviewer_cleans_stray_edits(self):
+        self.behave("commit", "usage-edit", "pass", "pass")
+        self.expect(30, "PROMPT")
+        self.assertFalse((self.impl / "stray_usage_edit.txt").exists())
+        self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+
+    def test_non_consecutive_voids_do_not_trigger_three_in_a_row(self):
+        self.behave(
+            "commit",
+            "stopped", "stopped", "fix",
+            "commit",
+            "stopped", "pass", "pass",
+        )
+        self.expect(0, "QUEUE_EMPTY")
+        self.assertEqual(self.st("VOIDS_01_S1"), "0")
+
+    def test_resume_interrupted_fixing_does_not_double_count_rounds(self):
+        s = self.st()
+        spec = self.run_dir / "specs" / "01-fix-manual.txt"
+        spec.write_text("Fix task 01.\n")
+        s.update({
+            "CURRENT_TASK": "01",
+            "LOOP_01": "fixing",
+            "PAIR_01": "antigravity:g@high",
+            "BASE_SHA_01": self.base,
+            "LAST_IMPL_SPEC_01": str(spec),
+            "IMPLEMENT_SPEC_01": str(self.run_dir / "specs" / "01-implement.txt"),
+            "TOTAL_FIX_ROUNDS_01": "1",
+            "STAGE_FIX_ROUNDS_01_S1": "1",
+        })
+        (self.run_dir / "specs" / "01-implement.txt").write_text("Impl 01.\n")
+        self.state.write_text(json.dumps(s))
+        (self.impl / "half_written.txt").write_text("partial\n")
+        self.behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        self.assertEqual(self.st("TOTAL_FIX_ROUNDS_01"), "1")
+        self.assertFalse((self.impl / "half_written.txt").exists())
+
+    def test_resume_interrupted_reviewing_cleans_and_retries(self):
+        s = self.st()
+        s.update({
+            "CURRENT_TASK": "01",
+            "LOOP_01": "reviewing:1",
+            "PAIR_01": "antigravity:g@high",
+            "BASE_SHA_01": self.base,
+            "WORKER_HEAD_01": self.base,
+        })
+        self.state.write_text(json.dumps(s))
+        (self.impl / "stray_mid_review.txt").write_text("oops\n")
+        self.behave("pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        self.assertFalse((self.impl / "stray_mid_review.txt").exists())
+        self.assertEqual(self.st("VOIDS_01_S1"), "0")
 
 
 class PicksAndLadder(Base):

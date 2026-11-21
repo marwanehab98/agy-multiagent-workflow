@@ -112,6 +112,7 @@ class Finish:
         r = self.r
         head = r.need("FIN_HEAD")
         if result[0] == "usage":
+            tool("discard-changes.sh", r.impl, head)
             self.prompt("usage-limit",
                         f"The final reviewer hit its model's usage limit: {result[1]}\n"
                         "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.", ["retry", "stop"])
@@ -212,6 +213,11 @@ class Finish:
                 result = ("stopped", "drift check changed the worktree before asking", "", result[3])
         if result[0] == "ask":
             return self.ask_consult("drift", r.need("FIN_PAIR"), r.need("FIN_SPEC"), result[1], result[2])
+        if result[0] == "usage":
+            self.prompt("drift-usage-limit",
+                        f"The drift check hit its model's usage limit: {result[1]}\n"
+                        "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.",
+                        ["retry", "stop"])
         out = Path(r.need("FIN_OUT"))
         ok = result[0] == "done" and result[1] == "succeeded" and out.is_file() and out.read_text().strip()
         if ok:
@@ -351,6 +357,8 @@ class Finish:
         if name == "accept-failing":
             r.log("user accepted a failing verification")
             return self.verified(r.need("FIN_VERIFY_LOG"))
+        if name == "drift-usage-limit":
+            return self.set_phase("drift")
         self.set_phase("review")
 
     # -- driver

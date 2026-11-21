@@ -43,17 +43,33 @@ def _handle_response(r, result, keep_open):
         return RC_FAILED, f"FAILED {saved}"
 
     save_body(body, saved)
-    if conv_id:
-        r.set(ARCHITECT_CONVERSATION_ID=conv_id)
     words = first_words(saved)
     if len(words) >= 3 and words[:2] == ["RESULT:", "RELAY"]:
+        if not Path(words[2]).is_file():
+            save_body(f"\nERROR: RELAY target file does not exist: {words[2]}", saved, append=True)
+            if not keep_open:
+                r.set(ARCHITECT_CONVERSATION_ID=None)
+            return RC_FAILED, f"FAILED {saved}"
+        if conv_id:
+            r.set(ARCHITECT_CONVERSATION_ID=conv_id)
         return RC_RELAY, f"RELAY {words[2]} {saved}"
     if len(words) >= 3 and words[:2] == ["RESULT:", "NOTIFY"]:
+        if not Path(words[2]).is_file():
+            save_body(f"\nERROR: NOTIFY target file does not exist: {words[2]}", saved, append=True)
+            if not keep_open:
+                r.set(ARCHITECT_CONVERSATION_ID=None)
+            return RC_FAILED, f"FAILED {saved}"
+        if conv_id:
+            r.set(ARCHITECT_CONVERSATION_ID=conv_id)
         return RC_NOTIFY, f"NOTIFY {words[2]} {saved}"
     if len(words) >= 2 and words[0] == "RESULT:":
-        if not keep_open:
+        if keep_open and conv_id:
+            r.set(ARCHITECT_CONVERSATION_ID=conv_id)
+        elif not keep_open:
             r.set(ARCHITECT_CONVERSATION_ID=None)
         return RC_RESULT, f"RESULT {saved}"
+    if not keep_open:
+        r.set(ARCHITECT_CONVERSATION_ID=None)
     return RC_FAILED, f"FAILED {saved}"
 
 

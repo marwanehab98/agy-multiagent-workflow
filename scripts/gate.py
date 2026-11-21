@@ -18,12 +18,25 @@ Exit 1: a command failed (the log has its output); the worktree is clean at <hea
 Exit 2: the worktree could not be restored to <head> (prints why).  Exit 64: bad usage.
 """
 import argparse
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 LINE = re.compile(r"(GATE|VERIFY)_(\d+)=(.*)")
+DEFAULT_GATE_TIMEOUT = 1800
+
+
+def _timeout():
+    raw = os.environ.get("GATE_TIMEOUT")
+    if raw is None or raw.strip() == "":
+        return DEFAULT_GATE_TIMEOUT
+    try:
+        val = int(raw)
+    except ValueError:
+        return DEFAULT_GATE_TIMEOUT
+    return None if val <= 0 else val
 
 
 def commands(run_values, prefix):
@@ -42,7 +55,7 @@ def commands_all(run_values, prefix):
 
 
 def git(wt, *args):
-    return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True)
+    return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True, errors="replace")
 
 
 def main():
@@ -70,6 +83,10 @@ def main():
     if not want or head != want:
         print(f"HEAD_MOVED expected={a.head} actual={head}")
         return 2
+    pre_dirty = git(a.worktree, "status", "--porcelain", "--untracked-files=all").stdout.strip()
+    if pre_dirty:
+        print(f"TREE_DIRTY\n{pre_dirty}")
+        return 2
 
     log = Path(a.log)
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +95,7 @@ def main():
         while (log.parent / log.name.format(n=n)).exists():
             n += 1
         log = log.parent / log.name.format(n=n)
+    timeout = _timeout()
     failed = []
     with log.open("w", encoding="utf-8") as f:
         f.write(f"worktree={a.worktree} head={want}\n")
@@ -86,10 +104,18 @@ def main():
                 f.write(f"\n=== {name} skipped (BASELINE_SKIP): {cmd}\n")
                 print(f"{name} skipped")
                 continue
-            r = subprocess.run(cmd, shell=True, cwd=a.worktree, capture_output=True, text=True)
-            f.write(f"\n=== {name}: {cmd}\n{r.stdout}{r.stderr}\n=== {name} exit={r.returncode}\n")
-            print(f"{name} exit={r.returncode}")
-            if r.returncode != 0:
+            try:
+                r = subprocess.run(cmd, shell=True, cwd=a.worktree, stdin=subprocess.DEVNULL,
+                                   capture_output=True, text=True, errors="replace", timeout=timeout)
+                f.write(f"\n=== {name}: {cmd}\n{r.stdout}{r.stderr}\n=== {name} exit={r.returncode}\n")
+                print(f"{name} exit={r.returncode}")
+                if r.returncode != 0:
+                    failed.append(name)
+            except subprocess.TimeoutExpired as e:
+                out_s = (e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+                err_s = (e.stderr or b"").decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+                f.write(f"\n=== {name}: {cmd}\n{out_s}{err_s}\n=== {name} timed out after {timeout}s\n")
+                print(f"{name} timed out")
                 failed.append(name)
 
     # Build and test output that is not gitignored would look like a reviewer's edit later.

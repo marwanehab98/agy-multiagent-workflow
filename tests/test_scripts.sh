@@ -62,7 +62,15 @@ echo "--- worktree.sh remove"
 bash "$SK/worktree.sh" remove . "$WT_DOCS" --delete-branch >/dev/null; expect 0 $? "remove merged docs worktree"
 [ ! -d "$WT_DOCS" ] && ok "docs worktree removed" || bad "docs worktree still exists"
 bash "$SK/worktree.sh" remove . "$WT_IMPL" --delete-branch >/dev/null 2>&1; expect 1 $? "refuses deleting unmerged branch"
+[ -d "$WT_IMPL" ] && ok "worktree preserved when branch delete refused" || bad "worktree deleted despite refused branch delete"
+git update-ref refs/heads/feature "$H2"
+bash "$SK/worktree.sh" remove . "$WT_IMPL" --delete-branch --merged-into feature >/dev/null; expect 0 $? "remove impl worktree with --merged-into feature"
+[ ! -d "$WT_IMPL" ] && ok "impl worktree removed" || bad "impl worktree still exists"
+git branch --list T-impl | grep -q T-impl && bad "T-impl branch still exists" || ok "T-impl branch deleted"
 WT_KEEP=$(bash "$SK/worktree.sh" create . T-keep T-keep "$H2")
+mkdir -p "$WT_KEEP/nested" && git -C "$WT_KEEP/nested" init -q
+bash "$SK/discard-changes.sh" "$WT_KEEP" "$H2" >/dev/null; expect 0 $? "discard-changes removes nested git repo"
+[ ! -e "$WT_KEEP/nested" ] && ok "nested git dir removed" || bad "nested git dir remained"
 bash "$SK/worktree.sh" remove . "$WT_KEEP" >/dev/null; expect 0 $? "remove worktree without deleting branch"
 git branch --list T-keep | grep -q T-keep && ok "branch preserved without --delete-branch" || bad "branch deleted unexpectedly"
 

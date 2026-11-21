@@ -41,9 +41,9 @@ def verdict_line(path):
 
 
 def pick_verdict(review, settle):
-    """The reviewer's file when it ends in a VERDICT line; otherwise the settle text/file, copied there."""
+    """The reviewer's file when it gives a VERDICT line; otherwise the settle text/file, copied there."""
     review = Path(review)
-    if review.is_file() and last_line(review) in VERDICTS:
+    if review.is_file() and verdict_line(review) in VERDICTS:
         return review
     text = settle.read_text(encoding="utf-8") if isinstance(settle, Path) else str(settle)
     review.parent.mkdir(parents=True, exist_ok=True)
@@ -138,7 +138,7 @@ class Run:
 
 
 def run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, errors="replace")
 
 
 def git(wt, *args):
@@ -164,6 +164,50 @@ def next_free(folder, pattern):
 
 # ---------------------------------------------------------------- headless agy runner
 
+MAX_INLINE_PROMPT_BYTES = 65536
+DEFAULT_AGY_TIMEOUT = 1800
+
+
+def _read_spec_or_text(spec_or_text):
+    """Return (text, path_or_none) without hitting ENAMETOOLONG on multi-line or long prompt strings."""
+    if isinstance(spec_or_text, Path):
+        return spec_or_text.read_text(encoding="utf-8"), spec_or_text
+    if isinstance(spec_or_text, str) and "\n" not in spec_or_text and len(spec_or_text) < 4096:
+        p = Path(spec_or_text)
+        try:
+            if p.is_file():
+                return p.read_text(encoding="utf-8"), p
+        except OSError:
+            pass
+    return str(spec_or_text), None
+
+
+def _parse_json_envelope(raw_out):
+    """Parse JSON envelope from stdout, tolerating leading status/banner lines."""
+    if not raw_out:
+        return None
+    try:
+        data = json.loads(raw_out)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        pass
+    lines = raw_out.splitlines()
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].lstrip().startswith("{"):
+            candidate = "\n".join(lines[i:])
+            try:
+                data = json.loads(candidate)
+                if isinstance(data, dict):
+                    return data
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
+def _strip_marker_formatting(line):
+    return line.strip().lstrip("`* \t")
+
+
 class AgyRunner:
     """Run headless `agy -p` workers synchronously with `--output-format json`."""
 
@@ -171,13 +215,33 @@ class AgyRunner:
         self.r = r
         self.exe = r.get("AGY") or "agy"
 
+    def _timeout(self):
+        raw = self.r.get("AGY_TIMEOUT") or os.environ.get("AGY_TIMEOUT")
+        if raw is None or str(raw).strip() == "":
+            return DEFAULT_AGY_TIMEOUT
+        try:
+            val = int(raw)
+        except ValueError:
+            return DEFAULT_AGY_TIMEOUT
+        return None if val <= 0 else val
+
+    def _prepare_prompt(self, prompt_text, spec_path=None):
+        if len(prompt_text.encode("utf-8")) <= MAX_INLINE_PROMPT_BYTES:
+            return prompt_text
+        if spec_path is not None and spec_path.is_file():
+            target = spec_path
+        else:
+            target = next_free(self.r.run_dir / "specs", "large-prompt-{n}.txt")
+            target.write_text(prompt_text, encoding="utf-8")
+        return f"Read and follow all instructions in {target} exactly."
+
     def launch(self, pair):
         """Model/effort CLI arguments for a pair, in its recorded launch style (or fallback)."""
         catalog = json.loads(Path(self.r.need("CATALOG")).read_text(encoding="utf-8"))
         parsed = parse_pair(pair)
         return launch_args(catalog, parsed, pick_style(catalog, self.r.s, parsed))
 
-    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None):
+    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None, spec_path=None):
         """Invoke `agy -p` and return (kind, detail_or_outcome, body, conversation_id).
 
         kind is one of:
@@ -187,26 +251,35 @@ class AgyRunner:
           'resume_failed' -> ('resume_failed', detail, '', '')
           'stopped'       -> ('stopped', detail, '', conv_id)
         """
+        cli_prompt = self._prepare_prompt(prompt_text, spec_path=spec_path)
         cmd = [
             self.exe,
-            "-p", prompt_text,
+            "-p", cli_prompt,
             "--output-format", "json",
             "--dangerously-skip-permissions",
             *args,
         ]
         if conversation_id:
             cmd += ["--conversation", conversation_id]
+        timeout = self._timeout()
         try:
-            proc = subprocess.run(cmd, cwd=worktree, capture_output=True, text=True, errors="replace")
+            proc = subprocess.run(
+                cmd,
+                cwd=worktree,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return ("stopped", f"{self.exe} timed out after {timeout}s", "", conversation_id or "")
         except OSError as e:
             return ("stopped", f"failed to launch {self.exe}: {e}", "", "")
 
         raw_out = (proc.stdout or "").strip()
         raw_err = (proc.stderr or "").strip()
-        try:
-            data = json.loads(raw_out) if raw_out else None
-        except json.JSONDecodeError:
-            data = None
+        data = _parse_json_envelope(raw_out)
 
         if not isinstance(data, dict):
             combined = "\n".join(x for x in (raw_out, raw_err) if x).strip()
@@ -229,7 +302,7 @@ class AgyRunner:
                 return ("resume_failed", detail, "", "")
             return ("stopped", detail, "", conv_id)
 
-        first = first_nonempty_line(resp)
+        first = _strip_marker_formatting(first_nonempty_line(resp))
         if first.startswith("ASK:"):
             return ("ask", conv_id, resp, conv_id)
         if first.startswith("FAILED:"):
@@ -237,19 +310,16 @@ class AgyRunner:
         return ("done", "succeeded", resp, conv_id)
 
     def run(self, spec, pair=None, args=None, worktree=None):
-        prompt_text = Path(spec).read_text(encoding="utf-8") if isinstance(spec, (Path, str)) and Path(spec).is_file() else str(spec)
+        prompt_text, spec_path = _read_spec_or_text(spec)
         launch = list(args) if args is not None else self.launch(pair)
-        return self.exec_prompt(prompt_text, launch, worktree)
+        return self.exec_prompt(prompt_text, launch, worktree, spec_path=spec_path)
 
     def try_resume(self, spec_or_text, pair, worktree, conversation_id):
         if not conversation_id:
             return None
-        prompt_text = (
-            Path(spec_or_text).read_text(encoding="utf-8")
-            if isinstance(spec_or_text, Path) or (isinstance(spec_or_text, str) and "\n" not in spec_or_text and Path(spec_or_text).is_file())
-            else str(spec_or_text)
-        )
-        res = self.exec_prompt(prompt_text, self.launch(pair), worktree, conversation_id=conversation_id)
+        prompt_text, spec_path = _read_spec_or_text(spec_or_text)
+        res = self.exec_prompt(prompt_text, self.launch(pair), worktree, conversation_id=conversation_id,
+                               spec_path=spec_path)
         if res[0] == "resume_failed":
             return None
         return res

@@ -11,5 +11,5 @@ git -C "$wt" rev-parse "$sha^{commit}" >/dev/null || exit 64
 echo "DISCARDING:"
 git -C "$wt" status --porcelain --untracked-files=all | sed 's/^/  /'
 git -C "$wt" reset --hard "$sha" >/dev/null || exit 1
-git -C "$wt" clean -fd >/dev/null || exit 1
-bash "$(dirname "$0")/check-tree.sh" "$wt" "$sha"
+git -C "$wt" clean -ffd >/dev/null || exit 1
+bash "$(dirname "$0")/check-tree.sh" "$wt" "$sha" || exit 1

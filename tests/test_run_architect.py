@@ -102,6 +102,17 @@ class RunArchitectTests(Base):
                              "--pair", "antigravity:big@high")
         self.assertEqual(rc, 1)
         self.assertTrue(last.startswith("FAILED "), last)
+        self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
+
+    def test_missing_relay_target_file_returns_failed_1(self):
+        missing = self.run_dir / "does-not-exist.md"
+        self.behave({"do": "response", "text": f"RESULT: RELAY {missing}\n", "conv_id": "arch_missing"})
+        rc, last = self.arch("start", "--state", str(self.state), "--spec", str(self.spec),
+                             "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 1)
+        self.assertTrue(last.startswith("FAILED "), last)
+        self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
+        self.assertIn("does not exist", Path(last.split()[1]).read_text())
 
 
 if __name__ == "__main__":

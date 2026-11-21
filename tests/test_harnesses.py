@@ -70,6 +70,17 @@ class DetectTests(unittest.TestCase):
         self.assertIn("Fetching available models", h["broken"])
         self.assertEqual(h["models"], [])
 
+    def test_nonzero_models_exit_is_broken(self):
+        base = fixture_runner()
+        def runner(cmd):
+            if tuple(cmd) == ("agy", "models"):
+                return 1, "Unauthorized\n"
+            return base(cmd)
+        runner.fixtures = True
+        h = detect(runner, FAKE_HOME, env={})["harnesses"]["antigravity"]
+        self.assertEqual(h["models"], [])
+        self.assertIn("Unauthorized", h["broken"])
+
     def test_missing_binary_is_left_out(self):
         cat = detect_fixture(agy_version="no_such_file.txt")
         self.assertNotIn("antigravity", cat["harnesses"])

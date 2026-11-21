@@ -68,6 +68,20 @@ class GateTests(unittest.TestCase):
     def test_empty_skip_skips_nothing(self):
         self.assertEqual(self.gate("--skip", "")[0], 1)
 
+    def test_dirty_worktree_refused_without_discarding(self):
+        (self.wt / "uncommitted.txt").write_text("keep me\n")
+        rc, out = self.gate()
+        self.assertEqual(rc, 2)
+        self.assertIn("TREE_DIRTY", out)
+        self.assertEqual((self.wt / "uncommitted.txt").read_text(), "keep me\n")
+
+    def test_non_utf8_command_output_is_replaced(self):
+        self.rv.write_text(f"VERIFY_1={sys.executable} -c \"import sys; sys.stdout.buffer.write(b'hi \\\\xff\\\\xfe ok')\"\n")
+        rc, out = self.gate()
+        self.assertEqual(rc, 0, out)
+        log = (self.d / "gates" / "baseline-1.log").read_text()
+        self.assertIn("\ufffd", log)
+
 
 class MergeLocalTests(unittest.TestCase):
     """The user's "merge locally" choice at the end of a run: fast-forward only, never losing their work."""

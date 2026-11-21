@@ -119,8 +119,11 @@ class AntigravityAdapter(Adapter):
     models_cmd = ("models",)
 
     def models(self):
+        rc, raw = self.run(*self.models_cmd)
+        if rc != 0:
+            return []
         by_model = {}
-        for line in self.raw_models().splitlines():
+        for line in raw.splitlines():
             slug, _, label = line.partition("\t")
             slug = slug.strip()
             if not re.fullmatch(r"[A-Za-z0-9][\w.\-]*", slug):

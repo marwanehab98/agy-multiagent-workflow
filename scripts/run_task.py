@@ -93,6 +93,9 @@ class Loop:
     # -- implementers
     def start_impl(self, t, spec, kind, title, reuse):
         pair = self.r.need(f"PAIR_{t}")
+        self.r.set(**{f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
+        in_flight = "committing" if kind == "commit" else ("fixing" if kind == "fix" else "impl")
+        self.set_phase(t, in_flight)
         result = None
         reused = False
         if reuse:
@@ -105,7 +108,6 @@ class Loop:
             result = self.runner.run(spec, pair=pair, worktree=self.r.impl)
         if result[3]:
             self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": result[3]})
-        self.r.set(**{f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
         self.r.log(f"{t} {kind} {'reused' if reused else 'dispatched'} {pair}")
         self.after_impl(t, kind, result)
 
@@ -234,6 +236,7 @@ class Loop:
                          {"SUMMARY": r.task_file(t, "-summary.md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         pair = meta[f"REVIEW_{stage}"]
         r.set(**{f"REVIEW_SPEC_{t}": spec, f"REVIEW_PAIR_{t}": pair})
+        self.set_phase(t, f"reviewing:{stage}")
         result = self.runner.run(spec, pair=pair, worktree=r.impl)
         r.log(f"{t} stage{stage} reviewer dispatched {pair}")
         self.after_review(t, stage, result)
@@ -242,6 +245,7 @@ class Loop:
         r = self.r
         head = r.need(f"WORKER_HEAD_{t}")
         if result[0] == "usage":
+            tool("discard-changes.sh", r.impl, head)
             self.prompt_usage(t, f"review{stage}", result[1])
         if result[0] == "stopped":
             tool("discard-changes.sh", r.impl, head)
@@ -265,6 +269,7 @@ class Loop:
             return self.void_review(t, stage, "changed the worktree")
         last = verdict_line(verdict)
         r.log(f"{t} stage{stage} {last or 'no verdict'} {verdict}")
+        r.set(**{f"VOIDS_{t}_S{stage}": 0})
         if last:
             r.set(**{f"NO_VERDICT_{t}_S{stage}": 0})
         if last == "VERDICT: PASS":
@@ -559,9 +564,12 @@ class Loop:
             kind = r.need(f"PROMPT_KIND_{t}")
             if kind.startswith("review"):
                 return self.start_review(t, int(kind[-1]))
-            run(["git", "-C", r.impl, "reset", "--hard", "HEAD"])
-            run(["git", "-C", r.impl, "clean", "-fd"])
-            r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
+            if kind != "commit":
+                cur_head = git(r.impl, "rev-parse", "HEAD")
+                rc, out = tool("discard-changes.sh", r.impl, cur_head)
+                if rc != 0:
+                    raise Done(ERROR, f"ERROR RESET {out}")
+                r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
             return self.start_impl(t, r.need(f"LAST_IMPL_SPEC_{t}"), kind, self.meta(t)["TITLE"], reuse=False)
         return self.set_phase(t, back)
 
@@ -602,6 +610,23 @@ class Loop:
             phase = self.phase(t)
             if phase == "start":
                 self.do_start(t)
+            elif phase in ("impl", "fixing"):
+                cur_head = git(self.r.impl, "rev-parse", "HEAD")
+                rc, out = tool("discard-changes.sh", self.r.impl, cur_head)
+                if rc != 0:
+                    raise Done(ERROR, f"ERROR RESET {out}")
+                self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
+                kind = "fix" if phase == "fixing" else "impl"
+                self.start_impl(t, self.r.need(f"LAST_IMPL_SPEC_{t}"), kind, self.meta(t)["TITLE"], reuse=False)
+            elif phase == "committing":
+                self.start_impl(t, self.r.need(f"LAST_IMPL_SPEC_{t}"), "commit", f"Commit: {self.meta(t)['TITLE']}",
+                                reuse=True)
+            elif phase.startswith("reviewing:"):
+                stage = int(phase.split(":", 1)[1])
+                rc, out = tool("discard-changes.sh", self.r.impl, self.r.need(f"WORKER_HEAD_{t}"))
+                if rc != 0:
+                    raise Done(ERROR, f"ERROR RESET {out}")
+                self.start_review(t, stage)
             elif phase == "check":
                 self.do_check(t)
             elif phase == "merge":
