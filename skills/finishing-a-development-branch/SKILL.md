@@ -39,8 +39,8 @@ This determines which menu to show and how cleanup works:
 
 | State | Menu | Cleanup |
 |-------|------|---------|
-| `GIT_DIR == GIT_COMMON` (normal repo) | Standard 3 options | No worktree to clean up |
-| `GIT_DIR != GIT_COMMON`, named branch | Standard 3 options | Provenance-based (see Step 6) |
+| `GIT_DIR == GIT_COMMON` (normal repo) | Standard 3 options (2 if no remote) | No worktree to clean up |
+| `GIT_DIR != GIT_COMMON`, named branch | Standard 3 options (2 if no remote) | Provenance-based (see Step 6) |
 | `GIT_DIR != GIT_COMMON`, detached HEAD | Reduced 2 options (no merge) | Externally managed — leave in place |
 
 ## Step 3: Determine Base Branch
@@ -52,7 +52,7 @@ Confirm before merging: merging into the wrong base is expensive to undo.
 
 ## Step 4: Present Options
 
-**Normal repo and named-branch worktree — present exactly these 3 options:**
+**Normal repo and named-branch worktree (with a git remote) — present exactly these 3 options:**
 
 ```
 Implementation complete. What would you like to do?
@@ -60,6 +60,17 @@ Implementation complete. What would you like to do?
 1. Merge back to <base-branch> locally
 2. Push and create a Pull Request
 3. Keep the branch as-is (I'll handle it later)
+
+Which option?
+```
+
+**Normal repo and named-branch worktree with no git remote (`git remote` is empty or `START_HOW=no-remote`) — omit the PR option and present these 2 options:**
+
+```
+Implementation complete. What would you like to do?
+
+1. Merge back to <base-branch> locally
+2. Keep the branch as-is (I'll handle it later)
 
 Which option?
 ```

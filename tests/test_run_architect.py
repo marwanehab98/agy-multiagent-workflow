@@ -162,6 +162,33 @@ class RunArchitectTests(Base):
         self.assertEqual(rc, 13)
         self.assertTrue(last.startswith("LOST "), last)
         self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
+        self.assertIsNone(self.st("LAST_ARCH_RESULT"))
+
+    def test_records_last_arch_result_and_open_relay_and_clears_on_failure(self):
+        relay = self.run_dir / "relay-state.md"
+        relay.write_text("Confirm plan?\n")
+        self.behave(
+            {"do": "response", "text": f"RESULT: RELAY {relay}\n", "conv_id": "arch_r1"},
+            {"do": "response", "text": "RESULT: COMMITTED\n", "conv_id": "arch_r1"},
+            {"do": "response", "text": "No result header here.\n", "conv_id": "arch_r1"},
+        )
+        rc, last = self.arch("start", "--state", str(self.state), "--spec", str(self.spec),
+                             "--pair", "antigravity:big@high", "--keep-open")
+        self.assertEqual(rc, 11)
+        self.assertEqual(self.st("OPEN_RELAY"), str(relay))
+        self.assertEqual(self.st("LAST_ARCH_RESULT"), last)
+
+        reply = self.tmp / "reply-state.md"
+        reply.write_text("Yes\n")
+        rc, last = self.arch("reply", "--state", str(self.state), "--file", str(reply),
+                             "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.st("LAST_ARCH_RESULT"), last)
+
+        rc, _ = self.arch("send", "--state", str(self.state), "--spec", str(self.spec),
+                          "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 1)
+        self.assertIsNone(self.st("LAST_ARCH_RESULT"))
 
 
 if __name__ == "__main__":

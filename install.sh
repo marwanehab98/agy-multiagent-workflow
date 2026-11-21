@@ -85,10 +85,50 @@ if [ $run_tests -eq 1 ]; then
   fi
 fi
 
+# Copy a file or directory to an exact destination path.
+# Falls back from `cp -a` to `cp -R` on mounts (e.g. virtiofs/FUSE) that reject chmod/utimensat.
+copy_item() {
+  local src=$1 dst=$2
+  if ! cp -a "$src" "$dst" 2>/dev/null; then
+    [ -d "$src" ] && rm -rf "$dst"
+    cp -R "$src" "$dst"
+  fi
+}
+
+# Copy contents of a directory into an existing destination directory.
+copy_into() {
+  local src=$1 dst=$2
+  if ! cp -a "$src/." "$dst/" 2>/dev/null; then
+    cp -R "$src/." "$dst/"
+  fi
+}
+
+# Move a file or directory into a backup path, falling back to `cp -R` or Python
+# `shutil.copyfile` + `rm -rf` on cross-filesystem moves (e.g. virtiofs -> local disk)
+# where GNU `mv`/`cp` fail on metadata or unstable inode numbers.
+move_backup() {
+  local src=$1 dst=$2
+  if ! mv "$src" "$dst" 2>/dev/null; then
+    [ -d "$src" ] && rm -rf "$dst"
+    if ! cp -R "$src" "$dst" 2>/dev/null; then
+      [ -d "$src" ] && rm -rf "$dst"
+      python3 -I -c '
+import os, shutil, sys
+src, dst = sys.argv[1], sys.argv[2]
+if os.path.isdir(src) and not os.path.islink(src):
+    shutil.copytree(src, dst, symlinks=True, copy_function=shutil.copyfile)
+else:
+    shutil.copyfile(src, dst)
+' "$src" "$dst"
+    fi
+    rm -rf "$src"
+  fi
+}
+
 release="$work/release"
 mkdir -p "$release"
 for part in SKILL.md plugin.json THIRD_PARTY_NOTICES.md assets skills references scripts agents resources docs; do
-  [ -e "$work/$part" ] && cp -a "$work/$part" "$release/"
+  [ -e "$work/$part" ] && copy_item "$work/$part" "$release/$part"
 done
 find "$release" -name __pycache__ -prune -exec rm -rf {} +
 {
@@ -112,9 +152,9 @@ for i in "${!targets[@]}"; do
     if [ -e "$dest" ]; then
       mkdir -p "$keep"
       backup="$keep/$(date +%Y%m%d-%H%M%S)-$$"
-      mv "$dest" "$backup"
+      move_backup "$dest" "$backup"
     fi
-    cp -a "$release" "$dest"
+    copy_item "$release" "$dest"
     prune_backups "$keep"
     echo "INSTALLED ${sha:0:12} to $dest ($label)${backup:+, previous kept at $backup}"
   else
@@ -135,7 +175,7 @@ for i in "${!targets[@]}"; do
       count=$((count + 1))
       if [ -e "$dest/$sname" ]; then
         mkdir -p "$snap"
-        mv "$dest/$sname" "$snap/$sname"
+        move_backup "$dest/$sname" "$snap/$sname"
         backup="$snap"
       fi
     done
@@ -144,26 +184,26 @@ for i in "${!targets[@]}"; do
         [ "$sname" = "$name" ] && continue
         if [ -e "$dest/$sname" ]; then
           mkdir -p "$snap"
-          mv "$dest/$sname" "$snap/$sname"
+          move_backup "$dest/$sname" "$snap/$sname"
           backup="$snap"
         fi
       done
     fi
     if [ "$has_bundled_skills" -eq 0 ] && [ -e "$dest/$name" ]; then
       mkdir -p "$snap"
-      mv "$dest/$name" "$snap/$name"
+      move_backup "$dest/$name" "$snap/$name"
       backup="$snap"
     fi
     # Install main orchestrator + shared runtime into $dest/$name
     mkdir -p "$dest/$name"
     if [ -d "$release/skills/$name" ]; then
-      cp -a "$release/skills/$name/." "$dest/$name/"
+      copy_into "$release/skills/$name" "$dest/$name"
     elif [ -f "$release/SKILL.md" ]; then
-      cp -a "$release/SKILL.md" "$dest/$name/"
+      copy_item "$release/SKILL.md" "$dest/$name/SKILL.md"
       count=1
     fi
     for part in plugin.json THIRD_PARTY_NOTICES.md assets references scripts agents resources docs VERSION; do
-      [ -e "$release/$part" ] && cp -a "$release/$part" "$dest/$name/"
+      [ -e "$release/$part" ] && copy_item "$release/$part" "$dest/$name/$part"
     done
     # Install each standalone skill directly into $dest/<skill_name>
     managed=()
@@ -171,7 +211,7 @@ for i in "${!targets[@]}"; do
       [ -d "$sdir" ] || continue
       sname=$(basename "$sdir")
       [ "$sname" = "$name" ] && continue
-      cp -a "$sdir" "$dest/$sname"
+      copy_item "$sdir" "$dest/$sname"
       managed+=("$sname")
     done
     if [ ${#managed[@]} -gt 0 ]; then

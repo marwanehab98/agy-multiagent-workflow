@@ -57,12 +57,14 @@ class Prober:
         pending = [p for p in pairs if not self.r.get(f"LAUNCH_STYLE_{pair_key(p)}")
                    or self.r.get(f"PROBE_RECHECK_{pair_key(p)}")]
         if not pending:
+            self.r.set(PROBE_HARNESS_VERSIONS=harness_versions(self.catalog))
             return
         self.r.set(PROBE_HEAD=git(self.wt, "rev-parse", "HEAD"))
         for p in pending:
             key = pair_key(p)
             if not self.probe_one(p, key):
                 raise Done(STOP, f"PROBE_FAILED {p} {self.results_file(key)}")
+        self.r.set(PROBE_HARNESS_VERSIONS=harness_versions(self.catalog))
 
     def probe_one(self, pair, key):
         styles = self.styles(pair)
@@ -99,6 +101,13 @@ class Prober:
         elif rc != 0:
             rc2, out2 = tool("discard-changes.sh", self.wt, head)
             self.r.log(f"probe {pair}: docs worktree changed ({out}); discarded: {out2} (exit {rc2})")
+
+
+def harness_versions(catalog):
+    """Stable fingerprint of detected harness versions in catalog.json."""
+    harnesses = catalog.get("harnesses", {})
+    parts = [f"{name}:{harnesses[name].get('version', '')}" for name in sorted(harnesses)]
+    return ",".join(parts)
 
 
 def read_meta(path):
@@ -157,7 +166,7 @@ def set_pairs(r, name, one=None):
     raise Done(ERROR, f"ERROR UNKNOWN_SET {name}")
 
 
-def run_advance(r, set_name, one, moved=False):
+def run_advance(r, set_name, one, moved=False, if_changed=False):
     r.require_new_format()
     runner = AgyRunner(r)
     if moved:
@@ -165,7 +174,15 @@ def run_advance(r, set_name, one, moved=False):
     if set_name and (set_name != r.get("PROBE_SET") or (set_name == "pair" and one != r.get("PROBE_PAIR"))):
         r.set(PROBE_SET=set_name, PROBE_PAIR=one)
     if set_name == "resume" and not any(k.startswith("PROBE_RECHECK_") for k in r.s):
-        r.set(**{f"PROBE_RECHECK_{pair_key(p)}": "yes" for p in set_pairs(r, "resume")})
+        catalog = json.loads(Path(r.need("CATALOG")).read_text(encoding="utf-8"))
+        cur_versions = harness_versions(catalog)
+        if if_changed and r.get("PROBE_HARNESS_VERSIONS") == cur_versions:
+            resume_pairs = set_pairs(r, "resume")
+            if all(r.get(f"LAUNCH_STYLE_{pair_key(p)}") for p in resume_pairs):
+                r.log("probe resume: harness versions unchanged; reusing recorded launch styles")
+                raise Done(PROBED, "PROBED")
+        else:
+            r.set(**{f"PROBE_RECHECK_{pair_key(p)}": "yes" for p in set_pairs(r, "resume")})
     set_name, one = r.get("PROBE_SET"), r.get("PROBE_PAIR")
     if not set_name:
         raise Done(ERROR, "ERROR NO_PROBE_SET pass --set step1|step3|resume|pair")
@@ -201,12 +218,13 @@ def main():
     adv.add_argument("--set", choices=["step1", "step3", "resume", "pair"])
     adv.add_argument("--pair")
     adv.add_argument("--docs-moved", action="store_true")
+    adv.add_argument("--if-changed", action="store_true")
     try:
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
     try:
-        run_advance(Run(a.state), a.set, a.pair, a.docs_moved)
+        run_advance(Run(a.state), a.set, a.pair, a.docs_moved, a.if_changed)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:
         code, line = d.code, d.line

@@ -13,7 +13,7 @@ Part of agy-multiagent-workflow. The Rules in `<SKILL_DIR>/skills/agy-multiagent
 - **You never retype a worker's message.** `run_architect.py` saves every architect response verbatim to `<RUN_DIR>/results/architect-{n}.md`. The loop scripts save their own workers' outputs and asks. Only the user's own replies are written by hand.
 - **File numbers:** `{n}` in a path you pass to `gate.py` is filled in by the script with the next free number; use the path its output names (`log=<path>`). Elsewhere, `<n>` or `<NNN>` in a file name is the next free number in that folder. The exception is `<NNN>-from-user.md`, which takes the number of the `<NNN>-to-user.md` it answers. All paths you pass to scripts are absolute.
 - **Fixed prompts:** some steps stop with a fixed prompt and list the replies they accept. While one is open, a user message that isn't one of those replies and doesn't start with `coordinator:` gets the same prompt again, followed by "Reply with exactly one of: <the accepted replies>." Don't send it to the architect.
-- **What you print.** Run your commands without commentary. Your text in a turn is a relay (Rule 5; one ending in a choice block is a dialog, never printed text), the output or fixed line a step tells you to show, or any `Merged task <id> at <head>.` lines (one per `MERGED <id> <head>` the script printed).
+- **What you print.** Keep output concise: emit brief one-line status updates when starting or finishing long script calls (e.g. `Running plan review...`, `Merged task <id> at <head>.`, `Running final verification...`), and otherwise print only relays (Rule 5; one ending in a choice block is a dialog, never printed text) and the exact output or fixed lines a step specifies. Never summarize, reword, or comment on a relay.
 - **Keep a run log:** append one line per event to `<RUN_DIR>/run-log.md`, `<time> <event>` for what you do yourself: the architects you start, merges you see, the PR URL. The scripts log their own workers.
 - **Running the architect** (`run_architect.py`, Rule 15). `ARCH` below means `python3 -I <SKILL_DIR>/scripts/run_architect.py`. Set `LAST_JOB=<JOB>` and `LAST_JOB_INPUT=<input>` before running it, and record the event in `run-log.md`.
   - **Design phase** (`PHASE=design`): build `architect-job.txt` and run `ARCH send --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_ARCHITECT>`. (The first job uses `ARCH start --keep-open`.)
@@ -22,9 +22,9 @@ Part of agy-multiagent-workflow. The Rules in `<SKILL_DIR>/skills/agy-multiagent
 
     | Exit (last line) | Do |
     | --- | --- |
-    | `0` (`RESULT <saved>`) | `STATE set JOB_RETRIES=0`, `STATE unset OPEN_RELAY OPEN_USAGE_PROMPT LAST_ARCH_OP LAST_ARCH_ARG`, and branch on `<saved>`'s first line as the calling step specifies. |
-    | `11` (`RELAY <relay_path> <saved>`) | `STATE set OPEN_RELAY=<relay_path> WAITING_ON=user`, `STATE unset OPEN_USAGE_PROMPT LAST_ARCH_OP LAST_ARCH_ARG`, relay `<relay_path>` verbatim (Rule 5), and end your turn. When the user replies, write their answer verbatim to `<RELAY_DIR>/<NNN>-from-user.md`, `STATE unset OPEN_RELAY`, `STATE set WAITING_ON=architect`, and run `ARCH reply --state <RUN_DIR>/state.json --file <from-user> --pair <the job's pair>`, then handle its exit code using this table. |
-    | `12` (`NOTIFY <notify_path> <saved>`) | Show `<notify_path>` to the user verbatim (Rule 5), then immediately run `ARCH notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` and handle its exit code using this table. |
+    | `0` (`RESULT <saved>`) | `STATE set JOB_RETRIES=0`, `STATE unset OPEN_RELAY OPEN_USAGE_PROMPT LAST_ARCH_OP LAST_ARCH_ARG LAST_ARCH_RESULT`, and branch on `<saved>`'s first line as the calling step specifies. |
+    | `11` (`RELAY <relay_path> <saved>`) | `STATE set OPEN_RELAY=<relay_path> WAITING_ON=user`, `STATE unset OPEN_USAGE_PROMPT LAST_ARCH_OP LAST_ARCH_ARG`, relay `<relay_path>` verbatim (Rule 5), and end your turn. When the user replies, write their answer verbatim to `<RELAY_DIR>/<NNN>-from-user.md`, `STATE unset OPEN_RELAY LAST_ARCH_RESULT`, `STATE set WAITING_ON=architect`, and run `ARCH reply --state <RUN_DIR>/state.json --file <from-user> --pair <the job's pair>`, then handle its exit code using this table. |
+    | `12` (`NOTIFY <notify_path> <saved>`) | `STATE unset LAST_ARCH_RESULT`, show `<notify_path>` to the user verbatim (Rule 5), then immediately run `ARCH notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` and handle its exit code using this table. |
     | `13` (`LOST <detail>`) | In `PHASE=design`, follow "Architect lost". After plan approval, follow "A fresh architect fails". |
     | `31` (`USAGE_LIMIT <detail>`) | `STATE set OPEN_USAGE_PROMPT=yes WAITING_ON=user LAST_ARCH_OP=<start|send|reply|notify-ack> LAST_ARCH_ARG=<spec, file, or empty>`, then say exactly "The architect hit its model's usage limit: <detail>\nReply \"retry\" once the limit has reset, or \"stop\" to stop the run." This is a fixed prompt. "retry" unsets `OPEN_USAGE_PROMPT` and retries the same `ARCH` command; "stop" goes to Step 8 item 7. |
     | `1` (`FAILED <saved>`) | Follow "Architect lost" (design phase) or "A fresh architect fails" (after plan approval). |
@@ -145,9 +145,10 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 | `PROMPT <file> <reply>...` (30) | A fixed prompt, handled as in Step 4, with `FINISH --reply <word>`. |
 | `STOP <reason>` (40) | Dispatch nothing more and go to item 7. |
 
-4. **Open the PR:**
-   1. Send job `pr` with `INPUT=<the passing verify log>`. On `RESULT: PR_READY <title> <body>`, invoke `finishing-a-development-branch` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, title `$(cat <title>)`, and body file `<body>`. Tell it the branch is not checked out anywhere (it pushes with `git -C <MAIN_CHECKOUT> push -u origin <FEATURE_BRANCH>`), that it has already been verified (the log above), and to skip its own worktree cleanup. For `jira`, tell it to push and create the PR immediately, without presenting options; for `written`, let it offer its usual options and carry out the user's choice, with one change: a local merge never goes through that skill or a hand-typed git command. Run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` and show its output exactly. On exit 2 or 3 nothing changed: show its output, then offer the options again.
-   2. Log the PR URL.
+4. **Open the PR (or finish locally):**
+   1. **When `START_HOW` is `no-remote` and `REQUIREMENTS_SOURCE` is `written`:** skip `job=pr` (there is no remote to push to). Invoke `finishing-a-development-branch` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, telling it `START_HOW=no-remote` (omit the Push/PR option and offer only local merge or keep as-is), that the branch is not checked out anywhere, that it has already been verified (`<the passing verify log>`), and to skip its own worktree cleanup. Carry out the user's choice, using `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a local merge (never through that skill or a hand-typed git command; on exit 2 or 3 show its output and offer the options again).
+   2. **Otherwise:** send job `pr` with `INPUT=<the passing verify log>`. On `RESULT: PR_READY <title> <body>`, invoke `finishing-a-development-branch` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, title `$(cat <title>)`, and body file `<body>`. Tell it the branch is not checked out anywhere (it pushes with `git -C <MAIN_CHECKOUT> push -u origin <FEATURE_BRANCH>`), that it has already been verified (the log above), and to skip its own worktree cleanup. For `jira`, tell it to push and create the PR immediately, without presenting options; for `written`, let it offer its usual options and carry out the user's choice, with one change: a local merge never goes through that skill or a hand-typed git command. Run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` and show its output exactly. On exit 2 or 3 nothing changed: show its output, then offer the options again.
+   3. Log the PR URL (if a PR was created).
 5. **Update JIRA** (`jira` with a PR only): send job `jira-close` with `INPUT=<PR URL>`, and log the `RESULT: JIRA_DONE` line.
 6. **Clean up:** once a PR is open or the branch is merged, run `bash <SKILL_DIR>/scripts/worktree.sh remove <MAIN_CHECKOUT> <IMPL_WORKTREE> --delete-branch --merged-into <FEATURE_BRANCH>`, never with `--force`. If it fails, show the user the output. If the user chose keep or discard, leave the worktree in place.
 7. **Report:** send job `report` with `INPUT=<RUN_DIR>/run-log.md`. On `RESULT: REPORT <path>`, relay `<path>` to the user as in Rule 5, then add exactly: "Run documents: `<DOCS_DIR>`. Remove the docs worktree with `bash <SKILL_DIR>/scripts/worktree.sh remove <MAIN_CHECKOUT> <DOCS_WORKTREE>` when you're done with them." Then `STATE set PHASE=done WAITING_ON=`.
@@ -156,7 +157,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 
 - **A user message:**
   - **Starting with `coordinator:`:** it is for you. "status" means show the last 10 run-log lines. "use the fallback" means "Architect lost" below. "stop" goes to Step 8 item 7. Anything else, including a request to change a pick, a model or a `.meta`: say exactly "I only understand: status, use the fallback, stop." and change nothing.
-  - **Otherwise, with a relay open (`OPEN_RELAY` is set):** it is the answer. Write it, exactly as typed, to `<RELAY_DIR>/<NNN>-from-user.md`, `STATE unset OPEN_RELAY`, `STATE set WAITING_ON=architect`, and run `ARCH reply --state <RUN_DIR>/state.json --file <from-user> --pair <the job's pair>` (using `LAST_JOB` and "Architect job models" for `<the job's pair>`).
+  - **Otherwise, with a relay open (`OPEN_RELAY` is set):** it is the answer. Write it, exactly as typed, to `<RELAY_DIR>/<NNN>-from-user.md`, `STATE unset OPEN_RELAY LAST_ARCH_RESULT`, `STATE set WAITING_ON=architect`, and run `ARCH reply --state <RUN_DIR>/state.json --file <from-user> --pair <the job's pair>` (using `LAST_JOB` and "Architect job models" for `<the job's pair>`).
   - **Otherwise, with `OPEN_USAGE_PROMPT` set to `yes`:** it answers the architect usage-limit prompt ("retry" unsets `OPEN_USAGE_PROMPT` and retries `ARCH <LAST_ARCH_OP>` with `LAST_ARCH_ARG`; "stop" goes to Step 8 item 7).
   - **Otherwise, with a fixed prompt open:** follow "Fixed prompts" in "How you work".
   - **Otherwise:** write it to `<RELAY_DIR>/<NNN>-from-user.md` and send job `user-message` with `INPUT=<that path>`. When it finishes with `RESULT: NOTED`, pass `--docs-moved` on the next call to `DESIGN`, `TASKLOOP`, `FINISH`, or `PROBE`.
@@ -173,10 +174,10 @@ Use this when the user asks to continue a run or after a context compaction in t
    - **No `RUN_NOTES` in it:** `STATE set RUN_NOTES=none`.
 2. **Check and re-probe the picks.** The run keeps its `ROLE_*` picks; never change one.
    1. Run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`, then `roles.py check` as in Step 1 item 7, with `--catalog <CATALOG>`, `--mode <RUN_MODE>` (default `full` when `RUN_MODE` is unset), and the three `ROLE_*` values. Stop on exit 1.
-   2. Run `PROBE --set resume`. On `PROBE_FAILED`, do as in Step 1 item 8.
+   2. Run `PROBE --set resume --if-changed`. (Skips re-probing when harness versions in `<CATALOG>` are unchanged and every pair in the resume set already has a recorded `LAUNCH_STYLE_*`; re-probes automatically if harness versions changed or any pair is new.) On `PROBE_FAILED`, do as in Step 1 item 8.
 3. Pick up at the first of these that holds:
    - **`OPEN_USAGE_PROMPT` is `yes`:** re-show the architect usage-limit prompt ("Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.") and wait. On "retry", unset `OPEN_USAGE_PROMPT` and re-run `ARCH <LAST_ARCH_OP>` with `LAST_ARCH_ARG` (using `LAST_JOB` and "Architect job models" for `<the job's pair>`, and adding `--keep-open` if `PHASE=design` and `LAST_ARCH_OP=start`), then handle its exit code and route any returned `RESULT <saved>` via the `LAST_JOB` / `STEP` routing rules below.
-   - **`OPEN_RELAY` is set:** show `<OPEN_RELAY>` to the user again as in Rule 5, and wait. When the user replies, write their answer to `<RELAY_DIR>/<NNN>-from-user.md`, unset `OPEN_RELAY`, and run `ARCH reply` using `LAST_JOB` and "Architect job models" for `<the job's pair>`; once `ARCH reply` returns `0` (`RESULT <saved>`), route it by `LAST_JOB` and `STEP`:
+   - **`OPEN_RELAY` is set:** show `<OPEN_RELAY>` to the user again as in Rule 5, and wait. When the user replies, write their answer to `<RELAY_DIR>/<NNN>-from-user.md`, unset `OPEN_RELAY LAST_ARCH_RESULT`, and run `ARCH reply` using `LAST_JOB` and "Architect job models" for `<the job's pair>`; once `ARCH reply` returns `0` (`RESULT <saved>`), route it by `LAST_JOB` and `STEP`:
      - `LAST_JOB=user-message` (expecting `RESULT: NOTED`): continue at `STEP` passing `--docs-moved` on the next `DESIGN`, `TASKLOOP`, `FINISH`, or `PROBE` call;
      - `2 design`: branch per Step 2;
      - `3 setup`: continue Step 3 from the failing item (`baseline-failed` -> item 5; `fix-meta` -> item 7);
@@ -184,6 +185,9 @@ Use this when the user asks to continue a run or after a context compaction in t
      - `run_task ...`: pass `--architect-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `TASKLOOP` and branch per Step 4;
      - `run_finish ...`: pass `--architect-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `FINISH` and branch per Step 8;
      - `8 <n>`: continue Step 8 at item `<n>` with `<saved>`.
+   - **`LAST_ARCH_RESULT` is set** (an interrupted `run_architect.py` call already finished and saved its response):
+     - **`RESULT <saved>`** (and `<saved>` exists): `STATE set JOB_RETRIES=0`, `STATE unset LAST_ARCH_RESULT`, and route `<saved>` directly via the `LAST_JOB` / `STEP` rules above without spawning a fallback architect.
+     - **`NOTIFY <notify_path> <saved>`** (and `<notify_path>` exists): `STATE unset LAST_ARCH_RESULT`, show `<notify_path>` verbatim, and run `ARCH notify-ack` using `LAST_JOB` and "Architect job models" for `<the job's pair>`.
    - **`STEP` is `2 design`:** run "Architect lost" to start a fallback design architect (`FIRST_JOB=resume`) and resend `LAST_JOB` with `LAST_JOB_INPUT`.
    - **`STEP` is `3 setup`:** redo Step 3 from item 2, skipping item 3 if `INITIAL_BASE_SHA` is set, item 4 if `IMPL_WORKTREE` is set, and item 5 if `BASELINE_OK` is `yes`.
    - **`STEP` is `8 <n>`:** continue Step 8 at item `<n>`.
@@ -198,11 +202,39 @@ Use this when the user asks to continue a run or after a context compaction in t
 | `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, `START_SHA`, `START_HOW` | Repo | 1 |
 | `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR` | The docs worktree | 1 |
 | `ROLE_ARCHITECT`, `ROLE_EGM`, `ROLE_BASE`, `BASE_TOP`, `CATALOG` | The picks, the base model's highest effort, and the catalog; fixed for the run | 1 (`roles.py to-state`) |
-| `LAUNCH_STYLE_<pair key>` | The launch style a test launch proved for a pair. Never set them | `probe.py` |
+| `LAUNCH_STYLE_<pair key>`, `PROBE_HARNESS_VERSIONS` | The launch style a test launch proved for a pair and the harness versions probed. Never set them | `probe.py` |
 | `PHASE` | `design`, `execution`, `finish`, or `done` | 1, 3, 8 |
 | `STEP`, `WAITING_ON`, `OPEN_RELAY`, `OPEN_USAGE_PROMPT`, `LAST_ARCH_OP`, `LAST_ARCH_ARG` | Where to pick up after a compaction or restart | every wait |
-| `ARCHITECT_CONVERSATION_ID`, `ARCHITECT_KEEP_OPEN`, `LAST_JOB`, `LAST_JOB_INPUT`, `JOB_RETRIES` | The current architect conversation and its job | `run_architect.py` |
+| `ARCHITECT_CONVERSATION_ID`, `ARCHITECT_KEEP_OPEN`, `LAST_JOB`, `LAST_JOB_INPUT`, `LAST_ARCH_RESULT`, `JOB_RETRIES` | The current architect conversation, its job, and its settled result | `run_architect.py` |
 | `RUN_VALUES`, `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS`, `CLERICAL_PAIR`, `BASELINE_SKIP`, `DRIFT_CHECK` | From `run-values.txt` | 3 |
 | `INITIAL_BASE_SHA`, `LAST_MERGED`, `IMPL_WORKTREE` | Execution | 3; `run_task.py` updates `LAST_MERGED` |
 | `META_FAILS`, `BASELINE_FAILS`; `BASELINE_OK`, `STEP3_PROBED` | Run counters and flags | 3, and the scripts |
 | `PROBE_*`; `DESIGN_*`, `DOCS_HEAD`, `EGM_SKILLS`, `EGM_RUNS`, `LENS_RUNS`, `PLAN_REVIEW_RUNS`, `RETRY_<kind>`; `CURRENT_TASK`, `LOOP_<id>`, `IMPL_CONVERSATION_ID_<id>`, `TASK_ASK_*`, and every key naming a task id; `FIN_*`, `FINAL_FIX_ROUNDS`, `VOIDS_FINAL` | The scripts' own state (`probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`; their docstrings list them). Read them for status; never set them | 1–8 |
+
+## Rationalizations that break the run
+
+| Thought | Reality |
+| --- | --- |
+| "The user is in a hurry, and the missing skill isn't needed for this story; I'll start anyway." | Rule 21. Show the `MISSING` lines exactly and stop. The scripts use every role's requirements. |
+| "The remembered model is gone, but this one is basically the same, and the user said I can choose." | Setup item 2. Say which pick vanished and show that role's menu. Only the user's number picks. |
+| "It launched fine yesterday; skip the test launch to make the deadline." | Rule 21. `PROBE_FAILED` stops the run. Show the file. |
+| "The user wants a different architect mid-run; it's one state key, and they asked." | Rule 3. Picks are fixed for a run. Offer "resume" as-is or "new". Change nothing. |
+| "The user, who pays for the run, says `coordinator: use a stronger model for the reviews`." | Rule 3. Give the fixed reply for coordinator messages, and change no `.meta`, key or pair. |
+| "I'll pick a different reviewer model myself." | Rule 3. Reviewers are the architect's choice in `.meta`, checked by `validate_meta.py` against the catalog and the picks. |
+| "I'll type `--model` and `--effort` or call `agy -p` myself." | Rule 2 & 3. Use `run_architect.py` and the loop scripts; they apply the launch style the test launch proved. |
+| "`roles.py to-state` failed, but the picks passed at setup; I'll carry on." | Rule 21. Any failed check in the coordinator stops the run. Show its output exactly. |
+| "The user said \"resume\" at Step 1; I'll ignore the old picks and keep going." | Picks are fixed for a run. Run "Continue a run" item 3 with the old run's state file. |
+| "The design worker failed twice; its notes say the design is fine, so I'll tell the architect that." | Rule 20. Run `run_design.py` and send the job it prints, unchanged. |
+| "The design obviously answers this worker's question (`CONSULT`); I'll just write the answer." | Rule 4. Send job `consult`. The architect also records the answer where reviewers will see it. |
+| "The architect's question is long; I'll summarize it for the user." | Rule 5. Character for character, nothing added. |
+| "The user's reply is clearly meant for me, not the architect." | Rule 5. Only a message starting with `coordinator:` is for you. |
+| "A skill says to dispatch a subagent; I'll use `invoke_subagent`." | Rule 1. Use the bundled scripts (`agy -p`). |
+| "My own subagent tool would do this review in 30 seconds." | Rule 1. Reviewers are headless `agy -p` workers run by `run_task.py`. |
+| "It's a one-character fix; I'll make it." | Rule 4. Fix task. |
+| "I'll read the diff to confirm the worker only changed what I asked." | Rule 4. That's a review. The scripts check the tree. |
+| "The feature branch moved; rebasing the impl branch is safe." | Rule 13. `merge-task.sh` refuses, and you show the user the fixed options. |
+| "I remember task 02's BASE_SHA and fix count; the summary says round 1." | Rule 18. `STATE get` them. Memory and summaries are not sources. |
+| "The docs worktree has a stray file; discard-changes will tidy it." | Rule 12. `run_design.py` sends `commit-docs`. Never discard the architect's files. |
+| "To merge, I'll check out the feature branch in the main checkout." | Rule 13. `merge-task.sh` moves it with `update-ref`. |
+| "The user's deadline justifies skipping a gate." | Never. Keep the gates. The user can ask `coordinator: status`; anything more they need to hear comes from the architect. |
+| "The user said 'just rebase it'; that's authorization." | Rule 13. At a fixed prompt, only its listed replies count. Show the prompt again. |

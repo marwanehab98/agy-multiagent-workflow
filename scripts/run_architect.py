@@ -29,19 +29,22 @@ RC_RESULT, RC_FAILED, RC_ERROR, RC_RELAY, RC_NOTIFY, RC_LOST, RC_USAGE = 0, 1, 2
 
 def _handle_response(r, result, keep_open):
     if result is None:
-        r.set(ARCHITECT_CONVERSATION_ID=None)
+        r.set(ARCHITECT_CONVERSATION_ID=None, LAST_ARCH_RESULT=None)
         return RC_LOST, "LOST architect conversation could not be resumed"
     kind, detail, body, conv_id = result
     if kind == "usage":
+        r.set(LAST_ARCH_RESULT=None)
         return RC_USAGE, f"USAGE_LIMIT {detail}"
     saved = next_free(r.run_dir / "results", "architect-{n}.md")
     if kind == "stopped":
         save_body(detail, saved)
+        r.set(LAST_ARCH_RESULT=None)
         if not keep_open:
             r.set(ARCHITECT_CONVERSATION_ID=None)
         return RC_FAILED, f"FAILED {saved}"
     if kind == "done" and detail == "failed":
         save_body(body, saved)
+        r.set(LAST_ARCH_RESULT=None)
         if not keep_open:
             r.set(ARCHITECT_CONVERSATION_ID=None)
         return RC_FAILED, f"FAILED {saved}"
@@ -51,35 +54,45 @@ def _handle_response(r, result, keep_open):
     if len(words) >= 3 and words[:2] == ["RESULT:", "RELAY"]:
         if not Path(words[2]).is_file():
             save_body(f"\nERROR: RELAY target file does not exist: {words[2]}", saved, append=True)
+            r.set(LAST_ARCH_RESULT=None)
             if not keep_open:
                 r.set(ARCHITECT_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
         if not conv_id:
             save_body("\nERROR: RELAY requires a conversation_id to receive the user's reply", saved, append=True)
+            r.set(LAST_ARCH_RESULT=None)
             if not keep_open:
                 r.set(ARCHITECT_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
-        r.set(ARCHITECT_CONVERSATION_ID=conv_id)
-        return RC_RELAY, f"RELAY {words[2]} {saved}"
+        line = f"RELAY {words[2]} {saved}"
+        r.set(ARCHITECT_CONVERSATION_ID=conv_id, OPEN_RELAY=words[2], LAST_ARCH_RESULT=line)
+        return RC_RELAY, line
     if len(words) >= 3 and words[:2] == ["RESULT:", "NOTIFY"]:
         if not Path(words[2]).is_file():
             save_body(f"\nERROR: NOTIFY target file does not exist: {words[2]}", saved, append=True)
+            r.set(LAST_ARCH_RESULT=None)
             if not keep_open:
                 r.set(ARCHITECT_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
         if not conv_id:
             save_body("\nERROR: NOTIFY requires a conversation_id to continue after SHOWN.", saved, append=True)
+            r.set(LAST_ARCH_RESULT=None)
             if not keep_open:
                 r.set(ARCHITECT_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
-        r.set(ARCHITECT_CONVERSATION_ID=conv_id)
-        return RC_NOTIFY, f"NOTIFY {words[2]} {saved}"
+        line = f"NOTIFY {words[2]} {saved}"
+        r.set(ARCHITECT_CONVERSATION_ID=conv_id, LAST_ARCH_RESULT=line)
+        return RC_NOTIFY, line
     if len(words) >= 2 and words[0] == "RESULT:":
+        line = f"RESULT {saved}"
+        updates = {"LAST_ARCH_RESULT": line}
         if keep_open and conv_id:
-            r.set(ARCHITECT_CONVERSATION_ID=conv_id)
+            updates["ARCHITECT_CONVERSATION_ID"] = conv_id
         elif not keep_open:
-            r.set(ARCHITECT_CONVERSATION_ID=None)
-        return RC_RESULT, f"RESULT {saved}"
+            updates["ARCHITECT_CONVERSATION_ID"] = None
+        r.set(**updates)
+        return RC_RESULT, line
+    r.set(LAST_ARCH_RESULT=None)
     if not keep_open:
         r.set(ARCHITECT_CONVERSATION_ID=None)
     return RC_FAILED, f"FAILED {saved}"
@@ -92,26 +105,30 @@ def run_cmd(ns):
     wt = r.need("DOCS_WORKTREE")
     if ns.op == "start":
         keep = bool(ns.keep_open)
-        r.set(ARCHITECT_KEEP_OPEN="yes" if keep else "no")
+        r.set(ARCHITECT_KEEP_OPEN="yes" if keep else "no", LAST_ARCH_RESULT=None)
         res = runner.run(ns.spec, pair=ns.pair, worktree=wt)
         return _handle_response(r, res, keep)
 
     conv_id = r.get("ARCHITECT_CONVERSATION_ID")
     keep = r.get("ARCHITECT_KEEP_OPEN") == "yes"
     if not conv_id:
+        r.set(LAST_ARCH_RESULT=None)
         return RC_LOST, "LOST no ARCHITECT_CONVERSATION_ID in state"
 
     if ns.op == "send":
+        r.set(LAST_ARCH_RESULT=None)
         res = runner.try_resume(ns.spec, ns.pair, wt, conv_id)
         return _handle_response(r, res, keep)
     if ns.op == "reply":
         p = Path(ns.file)
         if not p.is_file():
             return RC_ERROR, f"ERROR MISSING_FILE {p}"
+        r.set(LAST_ARCH_RESULT=None)
         prompt = "User reply (verbatim):\n\n" + p.read_text(encoding="utf-8")
         res = runner.try_resume(prompt, ns.pair, wt, conv_id)
         return _handle_response(r, res, keep)
     if ns.op == "notify-ack":
+        r.set(LAST_ARCH_RESULT=None)
         prompt = "SHOWN. Continue your current job and end with a RESULT: line."
         res = runner.try_resume(prompt, ns.pair, wt, conv_id)
         return _handle_response(r, res, keep)

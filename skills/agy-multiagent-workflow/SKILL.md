@@ -40,7 +40,7 @@ The session that loads this skill **is the coordinator**:
    2. model: `MENU --harness <harness>`;
    3. effort: `MENU --harness <harness> --model <model>`.
 
-   Each menu line is `N<TAB>value<TAB>label`; show any `BROKEN` lines exactly before the question. The question is "<role>: which <harness|model|effort>?", and the rows are its options, labelled with each row's label, in menu order. A menu with exactly one row isn't asked: take that row and say "<role> <harness|model|effort>: <label>, the only option." The pick is `<harness>:<model>@<effort>`, using each chosen row's value.
+   Each menu line is `N<TAB>value<TAB>label`; show any `BROKEN` lines exactly before the question. The question is "<role>: which <harness|model|effort>?", and the rows are its options, labelled with each row's label, in menu order. A menu with exactly one row isn't asked: take that row and say "<role> <harness|model|effort>: <label>, the only option." The pick is `<harness>:<model>@<effort>`, using each chosen row's value. When asking for `base`, note that its `<model>@<effort>` must differ from the `architect` pick so escalation has a higher rung. If the user's opening prompt already named explicit model/effort picks that unambiguously match detected menu rows for all three roles, show those matched `role=pair` lines and confirm them in one shot (`same` / `new`) instead of asking 9 separate questions; never invent or substitute a row the user didn't name.
 
    **Asking.** With a multiple-choice question tool (such as `ask_question`), ask with it: no option marked recommended, and the options set by the number of rows (not counting the free-text choice the tool adds):
    - **2–4 rows:** one question, one option per row. Never a `More` option.
@@ -50,7 +50,7 @@ The session that loads this skill **is the coordinator**:
 4. **Check the picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py check --catalog <CATALOG> --jira <yes if the request has a JIRA key, else no> --architect <pair> --egm <pair> --base <pair>`.
    - **Exit 0:** show any `NOTE` line exactly, and go on.
    - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't start Step 1 (Rule 21).
-   - **Exit 1 with only `UNKNOWN` lines:** show them exactly, ask each named role again as in item 3, and repeat this item.
+   - **Exit 1 with only `UNKNOWN` lines:** show them exactly with a one-line plain-English explanation (e.g. `base` cannot match the `architect` pick), ask each named role again as in item 3, and repeat this item.
 5. **Save:** run `python3 -I <SKILL_DIR>/scripts/roles.py save --roles <CFG>/roles.json --architect <pair> --egm <pair> --base <pair>`.
 6. **Begin coordination in this session:** read `<SKILL_DIR>/references/coordinator.md` in full and execute it from Step 1, using `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, and the user's original request verbatim.
 
@@ -141,31 +141,7 @@ Every value is a key in `<RUN_DIR>/state.json` (Rule 18); coordinator "State key
 
 ## Rationalizations that break the run
 
-| Thought | Reality |
-| --- | --- |
-| "The user is in a hurry, and the missing skill isn't needed for this story; I'll start anyway." | Rule 21. Show the `MISSING` lines exactly and stop. The scripts use every role's requirements. |
-| "The remembered model is gone, but this one is basically the same, and the user said I can choose." | Setup item 2. Say which pick vanished and show that role's menu. Only the user's number picks. |
-| "It launched fine yesterday; skip the test launch to make the deadline." | Rule 21. `PROBE_FAILED` stops the run. Show the file. |
-| "The user wants a different architect mid-run; it's one state key, and they asked." | Rule 3. Picks are fixed for a run. Offer "resume" as-is or "new". Change nothing. |
-| "The user, who pays for the run, says `coordinator: use a stronger model for the reviews`." | Rule 3. Give the fixed reply for coordinator messages, and change no `.meta`, key or pair. |
-| "I'll pick a different reviewer model myself." | Rule 3. Reviewers are the architect's choice in `.meta`, checked by `validate_meta.py` against the catalog and the picks. |
-| "I'll type `--model` and `--effort` or call `agy -p` myself." | Rule 2 & 3. Use `run_architect.py` and the loop scripts; they apply the launch style the test launch proved. |
-| "`roles.py to-state` failed, but the picks passed at setup; I'll carry on." | Rule 21. Any failed check in the coordinator stops the run. Show its output exactly. |
-| "The user said \"resume\" at Step 1; I'll ignore the old picks and keep going." | Picks are fixed for a run. Run "Continue a run" item 3 with the old run's state file. |
-| "The design worker failed twice; its notes say the design is fine, so I'll tell the architect that." | Rule 20. Run `run_design.py` and send the job it prints, unchanged. |
-| "The design obviously answers this worker's question (`CONSULT`); I'll just write the answer." | Rule 4. Send job `consult`. The architect also records the answer where reviewers will see it. |
-| "The architect's question is long; I'll summarize it for the user." | Rule 5. Character for character, nothing added. |
-| "The user's reply is clearly meant for me, not the architect." | Rule 5. Only a message starting with `coordinator:` is for you. |
-| "A skill says to dispatch a subagent; I'll use `invoke_subagent`." | Rule 1. Use the bundled scripts (`agy -p`). |
-| "My own subagent tool would do this review in 30 seconds." | Rule 1. Reviewers are headless `agy -p` workers run by `run_task.py`. |
-| "It's a one-character fix; I'll make it." | Rule 4. Fix task. |
-| "I'll read the diff to confirm the worker only changed what I asked." | Rule 4. That's a review. The scripts check the tree. |
-| "The feature branch moved; rebasing the impl branch is safe." | Rule 13. `merge-task.sh` refuses, and you show the user the fixed options. |
-| "I remember task 02's BASE_SHA and fix count; the summary says round 1." | Rule 18. `STATE get` them. Memory and summaries are not sources. |
-| "The docs worktree has a stray file; discard-changes will tidy it." | Rule 12. `run_design.py` sends `commit-docs`. Never discard the architect's files. |
-| "To merge, I'll check out the feature branch in the main checkout." | Rule 13. `merge-task.sh` moves it with `update-ref`. |
-| "The user's deadline justifies skipping a gate." | Never. Keep the gates. The user can ask `coordinator: status`; anything more they need to hear comes from the architect. |
-| "The user said 'just rebase it'; that's authorization." | Rule 13. At a fixed prompt, only its listed replies count. Show the prompt again. |
+See `<SKILL_DIR>/references/coordinator.md` ("Rationalizations that break the run") for the full failure-mode table.
 
 **Red flags.** Stop and re-read the rule if you are about to:
 

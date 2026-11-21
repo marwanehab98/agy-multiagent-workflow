@@ -144,6 +144,45 @@ class ProbeTest(Base):
         self.state.write_text(json.dumps(s))
         self.expect_probe(2, "ERROR", "--set", "step1")
 
+    def test_resume_if_changed_skips_when_versions_and_pairs_unchanged(self):
+        self.behave("ok", "ok", "ok", "ok")
+        self.expect_probe(0, "PROBED", "--set", "step1")
+        self.expect_probe(0, "PROBED", "--set", "step3")
+        before = len(self.calls())
+        self.expect_probe(0, "PROBED", "--set", "resume", "--if-changed")
+        self.assertEqual(len(self.calls()), before)
+        self.assertIn("reusing recorded launch styles", (self.run_dir / "run-log.md").read_text())
+
+    def test_resume_if_changed_probes_only_new_pair_when_version_unchanged(self):
+        self.behave("ok", "ok", "ok", "ok")
+        self.expect_probe(0, "PROBED", "--set", "step1")
+        self.expect_probe(0, "PROBED", "--set", "step3")
+        before = len(self.calls())
+        s = self.st()
+        s["CLERICAL_PAIR"] = "antigravity:big@low"
+        self.state.write_text(json.dumps(s))
+        self.behave("ok")
+        self.expect_probe(0, "PROBED", "--set", "resume", "--if-changed")
+        self.assertEqual(len(self.calls()), before + 1)
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_big_low"), "slug")
+
+    def test_resume_if_changed_reprobes_when_harness_version_changes(self):
+        self.behave("ok", "ok", "ok", "ok")
+        self.expect_probe(0, "PROBED", "--set", "step1")
+        self.expect_probe(0, "PROBED", "--set", "step3")
+        before = len(self.calls())
+        cat_path = self.run_dir / "catalog-bumped.json"
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["antigravity"]["version"] = "9.9.9"
+        cat_path.write_text(json.dumps(cat))
+        s = self.st()
+        s["CATALOG"] = str(cat_path)
+        self.state.write_text(json.dumps(s))
+        self.behave("ok", "ok", "ok", "ok")
+        self.expect_probe(0, "PROBED", "--set", "resume", "--if-changed")
+        self.assertEqual(len(self.calls()), before + 4)
+        self.assertEqual(self.st("PROBE_HARNESS_VERSIONS"), "antigravity:9.9.9")
+
 
 if __name__ == "__main__":
     unittest.main()

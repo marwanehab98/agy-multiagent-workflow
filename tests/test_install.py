@@ -1,5 +1,6 @@
 """install.sh: releases a committed version into a skills folder, with tests, backups and rollback."""
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -123,6 +124,46 @@ class InstallTests(unittest.TestCase):
         rc, out = self.harness_install("--harness", "antigravity")
         self.assertEqual(rc, 0, out)
         self.assertIn("INSTALLED", out)
+
+    def test_cp_a_failure_falls_back_to_cp_r(self):
+        real_cp = shutil.which("cp")
+        fake_bin = self.d / "fake-bin"
+        fake_bin.mkdir()
+        cp_shim = fake_bin / "cp"
+        # Simulate virtiofs/FUSE: `cp -a` copies partially then fails on chmod/utimensat
+        cp_shim.write_text(
+            "#!/usr/bin/env bash\n"
+            f'if [ "${{1:-}}" = "-a" ]; then\n'
+            f'  "{real_cp}" -R "${{@:2}}" 2>/dev/null || true\n'
+            '  echo "cp: preserving times: Operation not permitted" >&2\n'
+            '  exit 1\n'
+            'fi\n'
+            f'exec "{real_cp}" "$@"\n',
+            encoding="utf-8",
+        )
+        cp_shim.chmod(0o755)
+        env = {**os.environ, "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
+
+        r1 = subprocess.run(
+            ["bash", str(INSTALL), "--target", str(self.target), "--backups", str(self.backups), "--skip-tests"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        self.assertIn("INSTALLED", r1.stdout)
+        self.assertTrue((self.target / "skills" / "agy-multiagent-workflow" / "SKILL.md").is_file())
+        self.assertFalse((self.target / "release").exists(), "fallback must not nest release/ inside target")
+
+        r2 = subprocess.run(
+            ["bash", str(INSTALL), "--home", str(self.d / "home"), "--harness-fixtures", str(FIXTURES),
+             "--backups", str(self.backups), "--skip-tests", "--harness", "antigravity"],
+            capture_output=True, text=True, env=env,
+        )
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertIn("INSTALLED", r2.stdout)
+        skills_root = self.d / "home" / ".gemini" / "config" / "skills"
+        self.assertTrue((skills_root / "agy-multiagent-workflow" / "SKILL.md").is_file())
+        self.assertTrue((skills_root / "egm-review" / "SKILL.md").is_file())
+        self.assertFalse((skills_root / "egm-review" / "egm-review").exists(), "fallback must not nest skill dir")
 
     def harness_install(self, *extra):
         r = sh("bash", str(INSTALL), "--home", str(self.d / "home"), "--harness-fixtures", str(FIXTURES),
