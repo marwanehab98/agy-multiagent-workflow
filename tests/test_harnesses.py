@@ -200,8 +200,8 @@ class ClaudeAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
             user_dir = home / ".claude" / "skills" / "brainstorming"
-            old_cache = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.1" / "skills"
-            new_cache = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.2" / "skills"
+            old_cache = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.2" / "skills"
+            new_cache = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.10" / "skills"
             for d in (
                 user_dir,
                 old_cache / "brainstorming",
@@ -283,19 +283,6 @@ class ClaudeAdapterTests(unittest.TestCase):
             harnesses.ClaudeAdapter(runner, FAKE_HOME, env={}).plugins(),
             ["active-one@official", "active-two@synced"],
         )
-
-    def test_claude_skill_roots_prefers_numeric_version_sort(self):
-        with tempfile.TemporaryDirectory() as td:
-            home = Path(td)
-            v_old = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.2" / "skills"
-            v_new = home / ".claude" / "plugins" / "cache" / "claude-plugins-official" / "superpowers" / "7.0.10" / "skills"
-            for d in (v_old / "tdd", v_new / "tdd"):
-                d.mkdir(parents=True)
-                (d / "SKILL.md").write_text("---\nname: tdd\n---\n")
-            adapter = harnesses.ClaudeAdapter(fixture_runner(), home, env={})
-            roots = adapter.skill_roots()
-            self.assertLess(roots.index(v_new), roots.index(v_old))
-            self.assertEqual(adapter.skills()["tdd"], str(v_new / "tdd"))
 
 
 class RealRunnerTests(unittest.TestCase):
