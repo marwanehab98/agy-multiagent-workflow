@@ -37,6 +37,10 @@ Requirements / JIRA Key
   - **Base Implementer** — writes code and tests for each task, with automatic escalation to stronger picks if a task gets stuck.
   
   Roles can all run on Antigravity, all on Claude Code, or be **mixed in the same run** (for example, an architect on `claude:opus@high` with implementers on `antigravity:<model>@high`). Only [`scripts/harnesses.py`](scripts/harnesses.py) knows harness-specific CLI flags, JSON envelopes, and model catalogs.
+
+  > [!NOTE]
+  > **Consumer subscription Terms of Service:** Having one vendor's CLI programmatically orchestrate another vendor's CLI may violate consumer subscription Terms of Service (e.g., Google AI Pro or Claude Pro/Max). If you are on consumer subscriptions rather than API-key / commercial billing, keep all roles on the same harness as your active session (`antigravity` in `agy`, or `claude` in `claude`).
+
 - **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live on a dedicated `<topic>-docs` worktree (`.run/state.json`), while each implementation task executes in its own task worktree and only fast-forwards into the feature branch after passing verification gates and reviews.
 - **Session resumption with safe fallback:** Multi-turn workers resume their CLI session (`--conversation` on `agy`, `--resume` on `claude`) across fix rounds, automatically detecting expired or silently restarted sessions and falling back to a clean retry.
 - **Compaction-safe & resumable:** Because all progress is persisted in `.run/state.json`, you can stop at any point and resume later from the exact step where you left off.
