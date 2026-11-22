@@ -64,6 +64,21 @@ class PluginBundleTests(unittest.TestCase):
         for key in ("version", "license", "repository", "author"):
             self.assertEqual(claude_manifest[key], root_manifest[key], key)
 
+    def test_claude_marketplace_manifest_matches_plugin_manifest(self):
+        claude_manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        mp_path = ROOT / ".claude-plugin" / "marketplace.json"
+        self.assertTrue(mp_path.is_file(), ".claude-plugin/marketplace.json missing")
+        mp = json.loads(mp_path.read_text(encoding="utf-8"))
+        self.assertEqual(mp["name"], "mission-control")
+        self.assertTrue(mp.get("description"))
+        self.assertEqual(mp["owner"]["name"], claude_manifest["author"]["name"])
+        self.assertEqual(len(mp["plugins"]), 1)
+        entry = mp["plugins"][0]
+        self.assertEqual(entry["name"], claude_manifest["name"])
+        self.assertEqual(entry["source"], "./")
+        self.assertTrue(entry.get("description"))
+        self.assertNotIn("version", entry, "omit version on entry so plugin.json stays the single source of truth")
+
     def test_all_expected_skills_and_frontmatter(self):
         skills_dir = ROOT / "skills"
         found = {p.name for p in skills_dir.iterdir() if p.is_dir()}
@@ -105,6 +120,12 @@ class PluginBundleTests(unittest.TestCase):
         self.assertEqual(data["components"]["skills"], len(EXPECTED_SKILLS))
         self.assertEqual(data["components"]["agents"], len(EXPECTED_AGENTS))
         self.assertEqual(data["findings"], [])
+
+    @unittest.skipUnless(shutil.which("claude"), "claude CLI not installed")
+    def test_claude_plugin_validate(self):
+        r = subprocess.run(["claude", "plugin", "validate", str(ROOT)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":

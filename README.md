@@ -146,10 +146,11 @@ agy plugin validate --strict .
 
 ### Option 2: Claude Code Plugin (recommended for `claude`)
 
-`mission-control` includes `.claude-plugin/plugin.json` for Claude Code plugin discovery:
+`mission-control` includes `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` for Claude Code plugin discovery:
 
 ```sh
-claude plugin install https://github.com/marwanehab98/mission-control
+claude plugin marketplace add marwanehab98/mission-control
+claude plugin install mission-control@mission-control
 ```
 
 Or load directly from a local checkout:
@@ -180,6 +181,7 @@ Each install records a `VERSION` file naming its commit. Replaced versions are k
 ```sh
 bash tests/run_all.sh
 agy plugin validate --strict --json .
+claude plugin validate .
 ```
 
 ---

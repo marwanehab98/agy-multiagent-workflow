@@ -1,0 +1,14 @@
+{
+  "name": "mission-control",
+  "description": "Self-contained multi-agent workflow suite for Antigravity and Claude Code: standalone spec drafting, planning, TDD, adversarial reviews, verification, branch landing, plan execution, and full end-to-end orchestration via headless workers.",
+  "owner": {
+    "name": "Marwan Ehab"
+  },
+  "plugins": [
+    {
+      "name": "mission-control",
+      "source": "./",
+      "description": "Self-contained multi-agent workflow suite for Antigravity and Claude Code: standalone spec drafting, planning, TDD, adversarial reviews, verification, branch landing, plan execution, and full end-to-end orchestration via headless workers."
+    }
+  ]
+}
