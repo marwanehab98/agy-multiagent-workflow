@@ -1,7 +1,69 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="14" fill="#0F172A"/>
-  <circle cx="32" cy="18" r="7" fill="#38BDF8"/>
-  <circle cx="17" cy="44" r="6" fill="#34D399"/>
-  <circle cx="47" cy="44" r="6" fill="#A78BFA"/>
-  <path d="M27.5 23.5L20 38.5M36.5 23.5L44 38.5M23 44H41" stroke="#E2E8F0" stroke-width="2.5" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f1b33"/>
+      <stop offset="100%" stop-color="#050912"/>
+    </linearGradient>
+
+    <radialGradient id="scopeBg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0b243f"/>
+      <stop offset="100%" stop-color="#040c17"/>
+    </radialGradient>
+
+    <linearGradient id="radarSweep" x1="0.9" y1="0.6" x2="0" y2="0">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </linearGradient>
+
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+
+    <clipPath id="scopeClip">
+      <circle cx="32" cy="32" r="20"/>
+    </clipPath>
+  </defs>
+
+  <!-- App Icon Container -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)" stroke="#1e3a5f" stroke-width="1.5"/>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#glow)"/>
+
+  <!-- Outer Scope Housing & Cardinal Ticks -->
+  <circle cx="32" cy="32" r="22.5" fill="#131e32" stroke="#334155" stroke-width="1.5"/>
+  <g stroke="#475569" stroke-width="1.5" stroke-linecap="round">
+    <line x1="32" y1="7.5" x2="32" y2="9.5"/>
+    <line x1="32" y1="54.5" x2="32" y2="56.5"/>
+    <line x1="7.5" y1="32" x2="9.5" y2="32"/>
+    <line x1="54.5" y1="32" x2="56.5" y2="32"/>
+  </g>
+
+  <!-- Radar Screen -->
+  <circle cx="32" cy="32" r="20" fill="url(#scopeBg)"/>
+
+  <g clip-path="url(#scopeClip)">
+    <!-- Concentric Range Rings -->
+    <circle cx="32" cy="32" r="19.5" fill="none" stroke="#1e3a5f" stroke-width="1"/>
+    <circle cx="32" cy="32" r="13.5" fill="none" stroke="#1e3a5f" stroke-width="1"/>
+    <circle cx="32" cy="32" r="7" fill="none" stroke="#1e3a5f" stroke-width="1"/>
+
+    <!-- Crosshairs -->
+    <line x1="12" y1="32" x2="52" y2="32" stroke="#1e3a5f" stroke-width="1"/>
+    <line x1="32" y1="12" x2="32" y2="52" stroke="#1e3a5f" stroke-width="1"/>
+
+    <!-- Radar Sweep Wedge & Leading Beam -->
+    <path d="M 32 32 L 32 12 A 20 20 0 0 1 49.32 22 Z" fill="url(#radarSweep)"/>
+    <line x1="32" y1="32" x2="49.32" y2="22" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round"/>
+
+    <!-- Tracked Blips -->
+    <circle cx="41.5" cy="24.5" r="4.2" fill="#10b981" opacity="0.24"/>
+    <circle cx="41.5" cy="24.5" r="2.1" fill="#10b981"/>
+    <circle cx="41.5" cy="24.5" r="0.8" fill="#e2e8f0"/>
+
+    <circle cx="24" cy="38.5" r="3.4" fill="#f59e0b" opacity="0.22"/>
+    <circle cx="24" cy="38.5" r="1.7" fill="#f59e0b"/>
+
+    <!-- Center Pivot -->
+    <circle cx="32" cy="32" r="1.8" fill="#38bdf8"/>
+  </g>
 </svg>
