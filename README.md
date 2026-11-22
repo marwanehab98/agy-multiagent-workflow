@@ -2,52 +2,75 @@
 
 A self-contained, multi-skill plugin for **Antigravity** (`agy`) and **Claude Code** (`claude`) for spec-driven development and multi-agent execution via headless CLI workers (`agy -p` / `claude -p`), including mixed cross-harness runs.
 
-Every stage of the workflow is available both as an **independently invocable skill** (for brainstorming, planning, adversarial design review, TDD, drift checking, verification, or branch landing) and as a **full end-to-end pipeline** (`mission` and `launch-plan`).
+Every stage of the workflow is available both as an **independently invocable skill** (for ideation, spec drafting, planning, adversarial review, TDD, drift checking, verification, or branch landing) and as a **full end-to-end pipeline** (`mission` and `launch-plan`).
+
+---
+
+## Which Skill Should I Start With?
+
+| Starting point | Use | What it does |
+| --- | --- | --- |
+| **Fuzzy / half-baked idea** ("should we even build this?") | `crucible` (standalone) | Runs all 4 steps: deep open-ended questioning, 7-lens stress testing, iterative refinement, and an RFC brief (`concepts_brief.md`) you can feed into `mission` or `draft-spec`. |
+| **Concrete feature or JIRA story** | `mission` | Full end-to-end pipeline from requirements to a reviewed PR: spec drafting, automated stress-test & design review, task planning, per-task TDD + code review, drift check, and branch landing. |
+| **Existing markdown plan** (or `tasks/` + `run-values.txt`) | `launch-plan` | Skips design/planning and jumps straight into the per-task TDD execution, gate, review, and landing loop. |
+| **Single focused task** (review a doc, fix a bug with TDD, land a branch) | Standalone skill | Call `draft-spec`, `flight-plan`, `gauntlet`, `crossfire`, `red-green`, `gatecheck`, `spec-drift`, or `touchdown` directly in your session. |
 
 ---
 
 ## How It Works
 
-When you run the full pipeline (`mission` or `launch-plan`), your active chat session acts purely as the **coordinator**—it runs deterministic state-machine scripts, dispatches headless worker sessions, relays outputs verbatim, and merges verified work atomically. It does no design, coding, or judgment work itself.
+When you run `mission` or `launch-plan`, your active chat session acts purely as the **coordinator**—it runs deterministic state-machine scripts, dispatches headless CLI workers, relays questions and approvals verbatim, and merges verified work atomically. It does no design, coding, or judgment work itself.
 
 ```
 Requirements / JIRA Key
         │
         ▼
-  1. Setup & Probe        Detect installed harnesses/models, confirm role picks, probe CLI flags
+  1. Setup & Probe        Detect installed CLIs/models, confirm 3 role picks, probe CLI flags
         │
         ▼
-  2. Design & Review      Architect drafts spec ──► Independent reviewers stress-test & audit
-        │
+  2. Design & Review      Architect clarifies & drafts spec (draft-spec)
+        │                 ──► 7-lens stress test (crucible Step 2) + 5-stage audit (gauntlet)
+        │                 ──► You approve the spec
         ▼
-  3. Task Plan            Architect breaks spec into ordered TDD tasks + verification commands
-        │
+  3. Task Plan            Architect breaks spec into ordered TDD tasks (flight-plan)
+        │                 ──► Adversarial plan audit (crossfire) ──► You approve the plan
         ▼
-  4. Per-Task Loop        Isolated git worktree ──► Implement (TDD) ──► Gate (tests/lint)
-        │                 ──► Spec & quality review ──► Atomic fast-forward merge
+  4. Per-Task Loop        Isolated git worktree ──► Implement (red-green TDD)
+        │                 ──► Automated gate (tests/lint) ──► Spec & quality review
+        │                 ──► Atomic fast-forward merge into feature branch
         ▼
   5. Finalize & Land      Full-branch verification + spec-drift check ──► PR, local merge, or keep
 ```
 
 ### Key Mechanics
 
+- **Two-phase Architect lifecycle (context vs. freshness):**
+  - During **design and planning**, one Architect session stays open across turns via CLI session resumption (`--conversation` on `agy`, `--resume` on `claude`), so it remembers your Q&A and design rationale.
+  - After **plan approval**, every Architect job (answering an implementer's question, replanning, handling metadata fixes) starts a **fresh** headless session with no prior chat history—forcing it to answer strictly from the committed spec, plan, and files on disk.
+- **Right-sized design review:** `mission` uses `draft-spec` to inspect your codebase first and draft the spec, then automatically runs `crucible` Step 2 (7-lens stress test) and `gauntlet` (5-stage review) on non-trivial designs while skipping heavy passes on small changes.
 - **Multi-harness & cross-harness role routing:** You assign a `<harness>:<model>@<effort>` pair to three roles during setup:
-  - **Architect** — designs the spec, writes the task plan, answers questions raised mid-run, and chooses per-task reviewers.
-  - **Design / Plan Reviewer** — runs structured, fresh-context design and plan reviews before any code is written.
-  - **Base Implementer** — writes code and tests for each task, with automatic escalation to stronger picks if a task gets stuck.
-  
-  Roles can all run on Antigravity, all on Claude Code, or be **mixed in the same run** (for example, an architect on `claude:opus@high` with implementers on `antigravity:<model>@high`). Only [`scripts/harnesses.py`](scripts/harnesses.py) knows harness-specific CLI flags, JSON envelopes, and model catalogs.
+  - **Architect** — designs the spec, writes the task plan, answers questions raised mid-run, and picks per-task reviewers.
+  - **Design / Plan Reviewer** — runs fresh-context `crucible` Step 2, `gauntlet`, and `crossfire` reviews before any code is written.
+  - **Base Implementer** — writes code and tests for each task (must differ from the Architect pick so stuck tasks can escalate up the effort/model ladder).
+
+  Roles can all run on Antigravity, all on Claude Code, or be **mixed in the same run** (for example, `claude:opus@high` for the Architect and `antigravity:<model>@high` for implementers). Only [`scripts/harnesses.py`](scripts/harnesses.py) knows harness-specific CLI flags, JSON envelopes, and model catalogs.
 
   > [!NOTE]
   > **Consumer subscription Terms of Service:** Having one vendor's CLI programmatically orchestrate another vendor's CLI may violate consumer subscription Terms of Service (e.g., Google AI Pro or Claude Pro/Max). If you are on consumer subscriptions rather than API-key / commercial billing, keep all roles on the same harness as your active session (`antigravity` in `agy`, or `claude` in `claude`).
 
-- **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live on a dedicated `<topic>-docs` worktree (`.run/state.json`), while each implementation task executes in its own task worktree and only fast-forwards into the feature branch after passing verification gates and reviews.
-- **Session resumption with safe fallback:** Multi-turn workers resume their CLI session (`--conversation` on `agy`, `--resume` on `claude`) across fix rounds, automatically detecting expired or silently restarted sessions and falling back to a clean retry.
-- **Compaction-safe & resumable:** Because all progress is persisted in `.run/state.json`, you can stop at any point and resume later from the exact step where you left off.
+- **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live in a dedicated `<topic>-docs` worktree (`.run/state.json`), while each task runs in its own isolated implementation worktree and only fast-forwards into the feature branch after passing automated gates and both spec and code-quality reviews.
+- **Lean, behavior-focused TDD:** `red-green` enforces strict RED-GREEN-REFACTOR on public behaviors and realistic failure modes (preferring table-driven tests over per-helper boilerplate), and `quality-review` checks correctness and edge cases without demanding redundant tests.
+- **Rate-limit & compaction safe:** Workers never silently downgrade models on quota/rate limits—instead, the run pauses cleanly with all state saved in `.run/state.json`, ready to resume in a new session.
 
 ---
 
 ## How to Use It
+
+### Prerequisites
+
+- `git` and `python3`
+- At least one supported CLI installed and signed in: **Antigravity** (`agy`) and/or **Claude Code** (`claude`)
+- *(Optional, for JIRA keys)* An Atlassian MCP server connected on your active harness—setup checks this automatically when your prompt includes a JIRA key.
 
 ### 1. Run a full end-to-end feature (`mission`)
 
@@ -57,29 +80,35 @@ Invoke `mission` with either a JIRA key or written requirements:
 >
 > "Use `mission` to add OAuth2 PKCE login with refresh token rotation and integration tests."
 
-On first run, the coordinator detects your installed harnesses (`agy`, `claude`), walks you through selecting `<harness>:<model>@<effort>` for each role, checks required skills/MCP integrations, and saves your picks to `~/.config/mission-control/roles.json` for reuse on future runs.
+**What to expect:**
+1. **Role setup:** On first run, the coordinator detects installed CLIs/models and asks you to pick `<harness>:<model>@<effort>` for Architect, Design/Plan Reviewer, and Base Implementer, then saves your choices to `~/.config/mission-control/roles.json` (on later runs it asks `same` / `new`). You can also name explicit model/effort picks in your opening prompt to confirm all three in one shot.
+2. **Design & plan sign-off:** The Architect asks clarifying questions one at a time, runs automated design reviews, and presents the spec and task plan for your approval before any production code is written.
+3. **Hands-off execution:** Each task is implemented, tested, reviewed, and merged automatically. You are only interrupted if a genuine product decision is needed or a quota limit is hit.
+4. **Landing:** Once all tasks pass final verification and `spec-drift`, `touchdown` asks whether to open a PR, fast-forward merge locally, keep the branch, or discard.
 
 ### 2. Execute an existing plan (`launch-plan`)
 
-Already have a markdown plan (or a `tasks/` directory with `run-values.txt`)? Skip design and jump straight into the task execution, review, and landing loop:
+Already have a markdown plan (or a `tasks/` directory with `run-values.txt`)? Skip design and jump straight into execution, review, and landing:
 
 > "Use `launch-plan` on `docs/my-feature-plan.md`."
 
 ### 3. Resume an interrupted run
 
-If a session ends or hits a quota/rate limit, simply ask in a new session:
+If your chat session compacts, disconnects, or pauses on a quota/rate limit, start a new session and say:
 
 > "Continue my `mission` run for `<topic>`."
 
-The coordinator locates `.run/state.json` in the `<topic>-docs` worktree and picks up cleanly without losing completed tasks.
+The coordinator locates `.run/state.json` in the `<topic>-docs` worktree and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
 
 ### 4. Use individual skills standalone
 
-You don't need the full orchestrator to use any stage—invoke any bundled skill directly in your session:
+Every stage works on its own in your current chat session without starting the full `mission` orchestrator:
 
-- **Drafting & planning:** `draft-spec` to refine requirements into a design doc; `flight-plan` to turn a spec into ordered TDD tasks.
-- **Stress-testing & review:** `crucible` for 7-lens ideation stress-testing; `gauntlet` for 5-stage design doc review; `crossfire` for adversarial multi-reviewer audits.
-- **Implementation & shipping:** `red-green` for strict TDD; `gatecheck` for evidence-based verification; `spec-drift` to audit finished code against the spec; `touchdown` to verify tests and land a branch via PR or fast-forward merge.
+- **Early ideation (`crucible`):** *"Use `crucible` to stress-test my idea for multi-tenant rate limiting."* Runs all 4 steps (deep questioning, 7-lens parallel critique, refinement, `concepts_brief.md`).
+- **Spec & planning (`draft-spec`, `flight-plan`):** *"Use `draft-spec` to design webhook retries"* or *"Use `flight-plan` to break `docs/plans/webhooks.md` into TDD tasks."*
+- **Document review (`gauntlet`, `crossfire`):** *"Run `gauntlet` on `docs/design.md`"* for a 5-stage design review, or *"Run `crossfire` on `docs/plan.md`"* for an adversarial multi-reviewer audit loop.
+- **Coding & verification (`red-green`, `gatecheck`, `spec-drift`):** *"Use `red-green` to fix the token expiry bug"*, *"Use `gatecheck` before claiming tests pass"*, or *"Run `spec-drift` against `docs/design.md`."*
+- **Landing (`touchdown`):** *"Use `touchdown` to verify and open a PR for this branch."*
 
 ---
 
@@ -91,11 +120,11 @@ You don't need the full orchestrator to use any stage—invoke any bundled skill
 | `launch-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through execution, verification, and landing | Coordinator + headless `agy -p` / `claude -p` workers |
 | `draft-spec` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
 | `flight-plan` | Break a spec or design doc into TDD tasks and verification steps | Interactive in-session |
-| `crucible` | Ideation + 7-lens stress-testing (`concepts_brief.md`) | Fresh-context subagent lenses |
+| `crucible` | Full 4-step ideation + 7-lens stress-testing (`concepts_brief.md`); Step 2 is also used automatically inside `mission` | Fresh-context subagent lenses |
 | `gauntlet` | 5-stage design document review (zoom-out, comprehension, critique, readiness) | Fresh-context subagent reviewers |
 | `crossfire` | Adversarial multi-reviewer audit loop on specs, plans, or docs | Fresh-context subagent reviewers |
 | `spec-drift` | Compare finished source code against design docs | In-session / drift check |
-| `red-green` | Strict RED-GREEN-REFACTOR test-first workflow | In-session or worker |
+| `red-green` | Strict RED-GREEN-REFACTOR test-first workflow (lean, behavior-focused tests) | In-session or worker |
 | `gatecheck` | Require fresh command output before claiming success | In-session or worker |
 | `touchdown` | Verify tests and complete via PR, fast-forward local merge, keep, or discard | In-session or coordinator final step |
 
@@ -138,7 +167,7 @@ bash install.sh --harness antigravity    # install all 11 skills into ~/.gemini/
 bash install.sh --harness claude         # install all 11 skills into ~/.claude/skills
 bash install.sh                          # update every harness that already has mission-control
 bash install.sh --target <dir>           # install the full plugin bundle into a custom directory
-bash install.sh --ref <commit>           # install an older version (rollback)
+bash install.sh --ref <commit-or-tag>    # install an older version (rollback)
 python3 scripts/harnesses.py install-dirs  # detected harnesses and their skills folders
 ```
 
