@@ -280,115 +280,35 @@ plain chat):
 
 ### Subflow: Zoom Out Review
 
-1. **Delegate to Synthesizer Subagent**: Spawn `rso-synthesizer` (or the
-  specialized `rso-zoom-out` subagent at `agents/zoom_out.md`) on `full file`
-  applying `resources/document_standards/zoom-out-standard.md`. When running
-  as Step 8 (Intermediate Zoom Out), include `zoom_out_report.md` path in
-  context and focus on additions/mitigations from Comprehension and Critic
-  stages. When running as Step 5, also
-  spawn `rso-inventive-catalyst` in parallel and write both into
-  `zoom_out_report.md`.
-  In both Stage 5 and Stage 8, pass `ReviewContext`.
-2. **Delivery**: Write findings to `zoom_out_report.md` (Stage 5) or
-  `intermediate_zoom_out_report.md` (Stage 8) using your file-writing tool.
-3. **Notify User (No Chat Dumps)**: Notify user that findings are written to
-  the report file (give its path).
-4. **Checkpoint Gate**: Present the tri-state gate following the Checkpoint
-  Gate Protocol:
-  - **Stage 5**: Question: `"Stage 5 (Initial Zoom Out Review) completed.
-    Findings written to zoom_out_report.md. How would you like to
-    proceed?"`, Option 0: `"Proceed to next stage: Stage 6 (Comprehension
-    Test)"`.
-  - **Stage 8 (Feature Spec Gates Only)**: Question: `"Stage 8 (Intermediate
-    Zoom Out) completed. High-level architecture verified. How would you
-    like to proceed?"`, Option 0: `"Conclude review and begin detailed
-    implementation planning"`.
-  - **Stage 8 (Interactive Full Flow)**: Question: `"Stage 8 (Intermediate
-    Zoom Out) completed. Findings written to
-    intermediate_zoom_out_report.md. How would you like to proceed?"`,
-    Option 0: `"Proceed to next stage: Stage 9 (Implementation Readiness
-    Test)"`.
-  - All cases provide Option 1: `"I will update doc first (pause session;
-    notify me in chat when edits are complete to re-run)"` and Option 2:
-    `"Pause Review (save progress and exit)"`.
+1. **Delegate to Synthesizer Subagent**: Spawn `rso-synthesizer` (or `rso-zoom-out` at `agents/zoom_out.md`) on `full file` applying `resources/document_standards/zoom-out-standard.md`, passing `ReviewContext`. For Stage 5, also spawn `rso-inventive-catalyst` in parallel and write both into `zoom_out_report.md`. For Stage 8 (Intermediate Zoom Out), include `zoom_out_report.md` in context and focus on additions/mitigations from Stages 6–7.
+2. **Delivery & Notify**: Write findings to `zoom_out_report.md` (Stage 5) or `intermediate_zoom_out_report.md` (Stage 8) and notify the user with the path (no chat dumps).
+3. **Checkpoint Gate** (tri-state gate per Checkpoint Gate Protocol — Options 1 & 2 standard):
+  - **Stage 5**: Question: `"Stage 5 (Initial Zoom Out Review) completed. Findings written to zoom_out_report.md. How would you like to proceed?"`, Option 0: `"Proceed to next stage: Stage 6 (Comprehension Test)"`.
+  - **Stage 8 (Feature Spec Only)**: Question: `"Stage 8 (Intermediate Zoom Out) completed. High-level architecture verified. How would you like to proceed?"`, Option 0: `"Conclude review and begin detailed implementation planning"`.
+  - **Stage 8 (Interactive Full Flow)**: Question: `"Stage 8 (Intermediate Zoom Out) completed. Findings written to intermediate_zoom_out_report.md. How would you like to proceed?"`, Option 0: `"Proceed to next stage: Stage 9 (Implementation Readiness Test)"`.
 
 ### Subflow: Comprehension Test
 
-1. **Spawn the Reviewer Directly**: Spawn the `rso-comprehension` subagent
-  at `agents/comprehension.md` on `FeatureRange` & `DetailedRange` with no
-  document standard. Do not use the synthesizer: its report keeps only
-  findings, and the author must see the paraphrase. The test is self-containment,
-  not detail. Do not apply `re-implementation-standard.md`: it asks for
-  code-level detail, which the Zoom Out standard forbids in `FeatureRange`.
-2. **Delivery**: Write the complete reviewer result to
-  `comprehension_report.md` using your file-writing tool. Start with the two
-  paraphrase headings verbatim, then the findings. Keep the paraphrase when
-  there are no findings.
-3. **Notify User (No Chat Dumps)**: Notify user that findings are written to
-  `comprehension_report.md` (give its path).
-4. **Checkpoint Gate**: Present the Stage 6 tri-state gate:
-  - Question: `"Stage 6 (Comprehension Test) completed. Findings written to
-    comprehension_report.md. How would you like to proceed?"`
+1. **Spawn Reviewer Directly**: Spawn `rso-comprehension` (`agents/comprehension.md`) directly on `FeatureRange` & `DetailedRange` with no document standard (do not use the synthesizer, which drops the paraphrase; do not apply `re-implementation-standard.md`, which asks for code-level detail forbidden in `FeatureRange`).
+2. **Delivery & Notify**: Write the complete reviewer result to `comprehension_report.md` (starting with the two paraphrase headings verbatim, then findings; keep the paraphrase even with zero findings) and notify the user with the path.
+3. **Checkpoint Gate** (tri-state gate per Checkpoint Gate Protocol — Options 1 & 2 standard):
+  - Question: `"Stage 6 (Comprehension Test) completed. Findings written to comprehension_report.md. How would you like to proceed?"`
   - Option 0: `"Proceed to next stage: Stage 7 (Critic Review)"`
-  - Option 1: `"I will update doc first (pause session; notify me in chat
-    when edits are complete to re-run)"`
-  - Option 2: `"Pause Review (save progress and exit)"`
 
 ### Subflow: Critic Review
 
-1. **Invoke Antagonistic Review Loop**: Invoke `cross-check` in-thread on
-  `FeatureRange` with reviewers `[rso-design, rso-structural, rso-style]`,
-  standards `{"rso-design": "feature-spec-standard", "rso-structural":
-  "feature-spec-standard"}`, and `ReviewContext`.
-2. **Notify User (No Chat Dumps)**: Notify user that findings are written to
-  `critic_report.md` (give its path).
-3. **Checkpoint Gate**: Present the Stage 7 gate:
-  - Question: `"Stage 7 (Critic Review) completed. Findings written to
-    critic_report.md. How would you like to proceed?"`
-  - Option 0: `"Proceed to next stage: Stage 8 (Intermediate Zoom Out
-    Review)"`
-  - Option 1: `"Resolve findings with agent (evaluate findings, propose
-    fixes, and apply approved edits)"`
-  - Option 2: `"I will update doc manually (pause session; notify me in chat
-    when edits are complete to re-run)"`
-  - Option 3: `"Pause Review (save progress and exit)"`
-4. **Remediation & Resolution (Option 1)**:
-  - In the primary session context on `FeatureRange`, classify findings from
-    `critic_report.md` as `PROPOSE FIX` or `CONTEST` and save the triage to
-    `rso_review_report.md`.
-  - Present proposed fixes to the user and execute approved edits directly
-    on `TargetFile` using file editing tools.
-  - After fixes are applied, re-read `TargetFile` to recalculate line
-    bounds, and advance to Stage 8 (or re-run Stage 7, max 1 re-audit).
+1. **Invoke Adversarial Review Loop**: Invoke `cross-check` in-thread on `FeatureRange` with reviewers `[rso-design, rso-structural, rso-style]`, standards `{"rso-design": "feature-spec-standard", "rso-structural": "feature-spec-standard"}`, and `ReviewContext`. Write findings to `critic_report.md` and notify the user with the path.
+2. **Checkpoint Gate** (4-option remediation gate per Checkpoint Gate Protocol — Options 1, 2 & 3 standard):
+  - Question: `"Stage 7 (Critic Review) completed. Findings written to critic_report.md. How would you like to proceed?"`
+  - Option 0: `"Proceed to next stage: Stage 8 (Intermediate Zoom Out Review)"`
+3. **Option 1 Remediation**: Execute Resolution Semantics above on `FeatureRange` from `critic_report.md` (writing triage to `rso_review_report.md`), then advance to Stage 8 or re-run Stage 7 (max 1 re-audit).
 
 ### Subflow: Implementation Readiness Test
 
-1. **Invoke Antagonistic Review Loop**: Invoke `cross-check` in-thread on
-  `DetailedRange` with reviewers `[rso-implementation-readiness,
-  rso-codebase-details, rso-style]` and standards
-  `{"rso-implementation-readiness": "implementation-readiness-standard",
-  "rso-codebase-details": "implementation-readiness-standard"}`, and
-  `ReviewContext`.
-2. **Notify User (No Chat Dumps)**: Notify user that findings are written to
-  `implementation_readiness_report.md` (give its path).
-3. **Terminal Checkpoint Gate**: Present the Stage 9 terminal gate:
-  - Question: `"Stage 9 (Implementation Readiness Test) completed. Report
-    written to implementation_readiness_report.md. How would you like to
-    proceed?"`
+1. **Invoke Adversarial Review Loop**: Invoke `cross-check` in-thread on `DetailedRange` with reviewers `[rso-implementation-readiness, rso-codebase-details, rso-style]`, standards `{"rso-implementation-readiness": "implementation-readiness-standard", "rso-codebase-details": "implementation-readiness-standard"}`, and `ReviewContext`. Write findings to `implementation_readiness_report.md` and notify the user with the path.
+2. **Terminal Checkpoint Gate** (4-option remediation gate per Checkpoint Gate Protocol — Options 1, 2 & 3 standard):
+  - Question: `"Stage 9 (Implementation Readiness Test) completed. Report written to implementation_readiness_report.md. How would you like to proceed?"`
   - Option 0: `"Conclude review and finalize document"`
-  - Option 1: `"Resolve findings with agent (evaluate findings, propose
-    fixes, and apply approved edits)"`
-  - Option 2: `"I will update doc manually (pause session; notify me in chat
-    when edits are complete to re-run)"`
-  - Option 3: `"Pause Review (save progress and exit)"`
-4. **Remediation & Resolution (Option 1)**:
-  - In the primary session context on `DetailedRange`, classify findings
-    from `implementation_readiness_report.md` as `PROPOSE FIX` or
-    `CONTEST` and save the triage to `rso_review_report.md`.
-  - Present proposed fixes to the user and execute approved edits directly
-    on `TargetFile` using file editing tools.
-  - After fixes are applied, re-read `TargetFile` to recalculate line
-    bounds, and conclude the review session (or re-run Stage 9, max 1
-    re-audit).
+3. **Option 1 Remediation**: Execute Resolution Semantics above on `DetailedRange` from `implementation_readiness_report.md` (writing triage to `rso_review_report.md`), then conclude or re-run Stage 9 (max 1 re-audit).
 
 <!-- Adapted from google/elephant-goldfish-model (Apache-2.0); modified for mission-control. See THIRD_PARTY_NOTICES.md. -->
