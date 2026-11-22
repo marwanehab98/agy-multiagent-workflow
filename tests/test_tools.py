@@ -115,23 +115,6 @@ class GateTests(unittest.TestCase):
         self.assertLess(elapsed, 4.0)
         self.assertIn("VERIFY_1 timed out", out)
 
-    def test_legacy_run_values_flag_and_state_aliases(self):
-        self.rv.write_text("VERIFY_1=true\n")
-        r = subprocess.run([sys.executable, "-I", str(GATE), "--run-values", str(self.rv),
-                            "--worktree", str(self.wt), "--head", self.head,
-                            "--log", str(self.d / "legacy-{n}.log")], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-
-        sys.path.insert(0, str(SKILL / "scripts"))
-        import common  # noqa: E402
-        st = self.d / "legacy-state.json"
-        st.write_text('{"RUN_VALUES": "/old/rv.txt", "CLERICAL_PAIR": "claude:sonnet@low"}\n')
-        run = common.Run(st)
-        self.assertEqual(run.need("FLIGHT_MANIFEST"), "/old/rv.txt")
-        self.assertEqual(run.get("GROUND_CREW_PAIR"), "claude:sonnet@low")
-        run.set(FLIGHT_MANIFEST="/new/fm.txt")
-        self.assertEqual(run.need("FLIGHT_MANIFEST"), "/new/fm.txt")
-
 
 class MergeLocalTests(unittest.TestCase):
     """The user's "merge locally" choice at the end of a run: fast-forward only, never losing their work."""

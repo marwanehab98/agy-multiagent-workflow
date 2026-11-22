@@ -94,32 +94,18 @@ def repo_key(name):
 
 # ---------------------------------------------------------------- state and helpers
 
-_STATE_ALIASES = {
-    "FLIGHT_MANIFEST": "RUN_VALUES",
-    "GROUND_CREW_PAIR": "CLERICAL_PAIR",
-}
-
-
 class Run:
     def __init__(self, path):
         self.path = Path(path)
         self.s = json.loads(self.path.read_text(encoding="utf-8"))
 
     def get(self, key, default=None):
-        if key in self.s:
-            return self.s[key]
-        legacy = _STATE_ALIASES.get(key)
-        if legacy and legacy in self.s:
-            return self.s[legacy]
-        return default
+        return self.s.get(key, default)
 
     def need(self, key):
-        if key in self.s:
-            return self.s[key]
-        legacy = _STATE_ALIASES.get(key)
-        if legacy and legacy in self.s:
-            return self.s[legacy]
-        raise Done(ERROR, f"ERROR MISSING_STATE {key}")
+        if key not in self.s:
+            raise Done(ERROR, f"ERROR MISSING_STATE {key}")
+        return self.s[key]
 
     def set(self, **kv):
         for k, v in kv.items():

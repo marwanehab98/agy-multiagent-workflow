@@ -98,7 +98,7 @@ def _run_cmd(cmd, cwd, timeout):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--flight-manifest", "--run-values", dest="flight_manifest", required=True)
+    p.add_argument("--flight-manifest", required=True)
     p.add_argument("--worktree", required=True)
     p.add_argument("--head", required=True)
     p.add_argument("--log", required=True)
