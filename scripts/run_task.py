@@ -213,7 +213,7 @@ class Loop:
             r.set(**{f"FAIL_MSG_{t}": note})
             return self.escalate(t)
         log = next_free(r.run_dir / "gates", f"{t}-{{n}}.log")
-        gate_args = ["--run-values", r.need("RUN_VALUES"), "--worktree", wt, "--head", head, "--log", str(log)]
+        gate_args = ["--flight-manifest", r.need("FLIGHT_MANIFEST"), "--worktree", wt, "--head", head, "--log", str(log)]
         if repo:
             gate_args += ["--repo", repo_key(repo)]
         rc, out = tool("gate.py", *gate_args)

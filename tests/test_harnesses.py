@@ -130,12 +130,12 @@ class DetectTests(unittest.TestCase):
             harnesses.shutil, "which", return_value="/usr/bin/agy"
         ):
             home = Path(td)
-            override = home / ".gemini" / "config" / "skills" / "gauntlet"
+            override = home / ".gemini" / "config" / "skills" / "flight-readiness"
             override.mkdir(parents=True)
-            (override / "SKILL.md").write_text("---\nname: gauntlet\n---\n")
+            (override / "SKILL.md").write_text("---\nname: flight-readiness\n---\n")
             h = detect(live_like_runner, home, env={})["harnesses"]["antigravity"]
-            self.assertEqual(h["skills"]["gauntlet"], str(override))
-            self.assertEqual(h["skills"]["draft-spec"], str(SKILL / "skills" / "draft-spec"))
+            self.assertEqual(h["skills"]["flight-readiness"], str(override))
+            self.assertEqual(h["skills"]["mission-brief"], str(SKILL / "skills" / "mission-brief"))
             self.assertEqual(h["skills"]["launch-plan"], str(SKILL / "skills" / "launch-plan"))
             self.assertEqual(h["skills"]["spec-drift"], str(SKILL / "skills" / "spec-drift"))
 

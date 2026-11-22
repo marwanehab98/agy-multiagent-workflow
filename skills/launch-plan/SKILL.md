@@ -1,15 +1,15 @@
 ---
 name: launch-plan
-description: Use when you already have an implementation plan (a markdown plan file, or tasks/*.meta and run-values.txt) and want to execute it via Antigravity / Gemini headless agy -p or Claude Code (claude -p) workers, gates, two-stage reviews, final verification, and PR or local merge without running draft-spec or design steps.
+description: Use when you already have an implementation plan (a markdown plan file, or tasks/*.meta and flight-manifest.txt) and want to execute it via Antigravity / Gemini headless agy -p or Claude Code (claude -p) workers, gates, two-stage reviews, final verification, and PR or local merge without running mission-brief or design steps.
 ---
 
-# Execute Plan (Multi-Agent Execution Pipeline)
+# Launch Plan
 
 **After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full, `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install, for all Capsule Communicator Rules 1–21), and `<SKILL_DIR>/references/capsule-communicator.md`, then pick up from `<RUN_DIR>/state.json`. A summary of the rules is not the rules.
 
 ## Overview
 
-This skill runs the **execution, review, verification, and finishing stages** (Capsule Communicator Steps 3–8) starting from an existing plan, without running draft-spec or design reviews.
+This skill runs the **execution, review, verification, and finishing stages** (Capsule Communicator Steps 3–8) starting from an existing plan, without running mission-brief or design reviews.
 
 The invoking session acts as the **Capsule Communicator** and delegates every step to the bundled deterministic scripts (`run_director.py`, `probe.py`, `run_task.py`, `run_finish.py`), which run synchronous headless CLI workers. All Capsule Communicator Rules (Rules 1–21 in `<SKILL_DIR>/skills/mission/SKILL.md`, or `<SKILL_DIR>/SKILL.md` in a flat install) apply throughout.
 
@@ -27,7 +27,7 @@ The invoking session acts as the **Capsule Communicator** and delegates every st
 ### Step 1: Identify the Plan
 
 1. **Locate the plan input** from the user's message:
-   - Either a ready task bundle containing `run-values.txt` and `tasks/<id>.{md,meta,-summary.md,-decisions.md}`, OR
+   - Either a ready task bundle containing `flight-manifest.txt` and `tasks/<id>.{md,meta,-summary.md,-decisions.md}`, OR
    - A markdown implementation plan (e.g., `docs/plans/YYYY-MM-DD-<topic>-plan.md`), optionally with an associated design/spec file.
    - If neither was provided, say exactly `"Give me the path to the plan file (or tasks directory) you want to execute."` and wait.
 2. **Set `TOPIC` and `DATE`:** `TOPIC` is a 2–4 word kebab-case slug derived from the plan filename or title; `DATE` is today (`YYYY-MM-DD`).
@@ -55,15 +55,15 @@ Read `<SKILL_DIR>/references/capsule-communicator.md` in full, then run Step 1 i
 
 Branch based on what the user provided:
 
-- **Case A — Ready plan bundle** (`run-values.txt` + `tasks/<id>.{md,meta,-summary.md,-decisions.md}` + design file already exist):
-  1. Copy the design file, plan file, `DECISIONS_LOG` (create `<DOCS_DIR>/<DATE>-<TOPIC>-decisions.md` with `"none"` if none exists), `run-values.txt`, and `tasks/` into `<DOCS_DIR>`.
-  2. Ensure `DESIGN_FILE` and `DECISIONS_LOG` inside `<DOCS_DIR>/run-values.txt` point to their absolute paths inside `<DOCS_DIR>`, and ensure `DESIGN_FILE` lists acceptance criteria (`AC-1`, `AC-2`, ...) matching task `ACS` (or if `run-values.txt` lacks `DRIFT_CHECK`, ask the user once whether to run the end-of-run drift check and set `DRIFT_CHECK=yes|no`).
+- **Case A — Ready plan bundle** (`flight-manifest.txt` + `tasks/<id>.{md,meta,-summary.md,-decisions.md}` + design file already exist):
+  1. Copy the design file, plan file, `DECISIONS_LOG` (create `<DOCS_DIR>/<DATE>-<TOPIC>-decisions.md` with `"none"` if none exists), `flight-manifest.txt`, and `tasks/` into `<DOCS_DIR>`.
+  2. Ensure `DESIGN_FILE` and `DECISIONS_LOG` inside `<DOCS_DIR>/flight-manifest.txt` point to their absolute paths inside `<DOCS_DIR>`, and ensure `DESIGN_FILE` lists acceptance criteria (`AC-1`, `AC-2`, ...) matching task `ACS` (or if `flight-manifest.txt` lacks `DRIFT_CHECK`, ask the user once whether to run the end-of-run drift check and set `DRIFT_CHECK=yes|no`).
   3. Commit those files in `<DOCS_WORKTREE>` (`git -C <DOCS_WORKTREE> add ... && git -C <DOCS_WORKTREE> commit ...`).
   4. Set `STATE set PHASE=execution STEP="3 setup" WAITING_ON=` and jump straight to `<SKILL_DIR>/references/capsule-communicator.md` **Step 3** (starting at item 2).
 
-- **Case B — Standalone markdown plan only** (no `tasks/*.meta` or `run-values.txt` yet):
+- **Case B — Standalone markdown plan only** (no `tasks/*.meta` or `flight-manifest.txt` yet):
   1. Copy the plan file to `<RUN_DIR>/plan-input.md` (never into `<DOCS_DIR>` before starting, so tree checks stay clean). If a linked or separate design/spec doc was named, copy it to `<RUN_DIR>/design-input.md` and pass `INPUT="<RUN_DIR>/plan-input.md <RUN_DIR>/design-input.md"`; otherwise `INPUT="<RUN_DIR>/plan-input.md"`.
   2. Build `director-start.txt` with `FIRST_JOB=prepare-plan`, `INPUT=<that input>`, and all run values it names.
   3. `STATE set PHASE=design LAST_JOB=prepare-plan LAST_JOB_INPUT=<input> STEP="2 design" WAITING_ON=director`, and run `DIRECTOR start --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_DIRECTOR> --keep-open`.
   4. Handle `run_director.py` exits using `<SKILL_DIR>/references/capsule-communicator.md` ("Running the Flight Director": `11` RELAY, `12` NOTIFY, `31` USAGE_LIMIT, `1`/`13` Flight Director lost -> `FIRST_JOB=resume`).
-  5. When `DIRECTOR` returns `0` (`RESULT <saved>`) with `RESULT: PLAN_APPROVED <run-values>`, continue straight to `<SKILL_DIR>/references/capsule-communicator.md` **Step 3** (item 1 unsets `DIRECTOR_CONVERSATION_ID` and `DIRECTOR_KEEP_OPEN` and proceeds through Steps 3, 4, and 8).
+  5. When `DIRECTOR` returns `0` (`RESULT <saved>`) with `RESULT: PLAN_APPROVED <flight-manifest>`, continue straight to `<SKILL_DIR>/references/capsule-communicator.md` **Step 3** (item 1 unsets `DIRECTOR_CONVERSATION_ID` and `DIRECTOR_KEEP_OPEN` and proceeds through Steps 3, 4, and 8).

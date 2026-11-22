@@ -98,8 +98,8 @@ class TestWorkspace(unittest.TestCase):
         self.assertTrue((docs_wt / "my-api" / "README.md").is_file())
         self.assertTrue((docs_wt / "web-app" / "README.md").is_file())
 
-        # Write state & run-values.txt
-        rv = docs_dir / "run-values.txt"
+        # Write state & flight-manifest.txt
+        rv = docs_dir / "flight-manifest.txt"
         rv.write_text(
             "FEATURE_BRANCH=feat/auth\n"
             "VERIFY_my_api_1=test -f README.md\n"
@@ -113,7 +113,7 @@ class TestWorkspace(unittest.TestCase):
             "DOCS_WORKTREE": str(docs_wt),
             "DOCS_DIR": str(docs_dir),
             "RUN_DIR": str(run_dir),
-            "RUN_VALUES": str(rv),
+            "FLIGHT_MANIFEST": str(rv),
             "REPO_PATH_my_api": str(ws / "my-api"),
             "REPO_PATH_web_app": str(ws / "web-app"),
             "BASE_BRANCH_my_api": "main",
@@ -149,7 +149,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertTrue((Path(st["IMPL_WT_web_app"]) / "README.md").is_file())
 
         # gate.py --repo runs per-repo checks
-        r_gate = py(GATE, "--run-values", str(rv), "--worktree", st["IMPL_WT_my_api"],
+        r_gate = py(GATE, "--flight-manifest", str(rv), "--worktree", st["IMPL_WT_my_api"],
                     "--head", sha_api, "--log", str(run_dir / "gates" / "api.log"),
                     "--prefix", "VERIFY", "--repo", "my_api")
         self.assertEqual(r_gate.returncode, 0, r_gate.stdout + r_gate.stderr)
@@ -214,7 +214,7 @@ class TestWorkspace(unittest.TestCase):
             (docs_dir / "tasks" / f"{tid}-summary.md").write_text(f"Summary {tid}\n")
             (docs_dir / "tasks" / f"{tid}-decisions.md").write_text("none\n")
 
-        rv = docs_dir / "run-values.txt"
+        rv = docs_dir / "flight-manifest.txt"
         rv.write_text(
             "FEATURE_BRANCH=feat/multi\n"
             "VERIFY_my_api_1=test -f README.md\n"
@@ -243,7 +243,7 @@ class TestWorkspace(unittest.TestCase):
             "DOCS_WORKTREE": kv["DOCS_WORKTREE"],
             "DOCS_DIR": str(docs_dir),
             "RUN_DIR": str(run_dir),
-            "RUN_VALUES": str(rv),
+            "FLIGHT_MANIFEST": str(rv),
             "DESIGN_FILE": str(design),
             "DECISIONS_LOG": str(decisions),
             "CONVENTION_PATHS": "README.md",
@@ -318,7 +318,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertTrue((docs_wt / "services" / "auth-api" / "README.md").is_file())
         self.assertTrue((docs_wt / "clients" / "web-app" / "README.md").is_file())
 
-        rv = Path(kv["DOCS_DIR"]) / "run-values.txt"
+        rv = Path(kv["DOCS_DIR"]) / "flight-manifest.txt"
         rv.write_text("FEATURE_BRANCH=feat/nested\n")
         state = Path(kv["RUN_DIR"]) / "state.json"
         state.write_text(json.dumps({
@@ -328,7 +328,7 @@ class TestWorkspace(unittest.TestCase):
             "DOCS_WORKTREE": str(docs_wt),
             "DOCS_DIR": kv["DOCS_DIR"],
             "RUN_DIR": kv["RUN_DIR"],
-            "RUN_VALUES": str(rv),
+            "FLIGHT_MANIFEST": str(rv),
             "REPO_PATH_services_auth_api": str(ws / "services" / "auth-api"),
             "REPO_PATH_clients_web_app": str(ws / "clients" / "web-app"),
             "BASE_BRANCH_services_auth_api": "main",

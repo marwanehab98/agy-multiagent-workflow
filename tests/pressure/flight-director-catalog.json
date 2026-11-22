@@ -100,9 +100,9 @@
     "brainstorming": "/home/u/.gemini/config/skills/brainstorming",
     "writing-plans": "/home/u/.gemini/config/skills/writing-plans",
     "test-driven-development": "/home/u/.gemini/config/skills/test-driven-development",
-    "egm-brainstorm": "/home/u/.gemini/config/skills/egm-brainstorm",
-    "egm-review": "/home/u/.gemini/config/skills/egm-review",
-    "egm-review-loop": "/home/u/.gemini/config/skills/egm-review-loop"
+    "rso-brainstorm": "/home/u/.gemini/config/skills/rso-brainstorm",
+    "rso-review": "/home/u/.gemini/config/skills/rso-review",
+    "rso-review-loop": "/home/u/.gemini/config/skills/rso-review-loop"
    },
    "plugins": [
     "superpowers",

@@ -1,9 +1,9 @@
 ---
-name: draft-spec
+name: mission-brief
 description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
 ---
 
-# Brainstorming
+# Mission Brief
 
 You are very good at building. You build what you believe your human
 partner wants, and that belief is usually thinner than it feels. This
@@ -83,7 +83,7 @@ Move the work forward, with one of these:
   different site. What do you want someone to do when they land on it?"
 
 How the message ends depends on whether their message asked for
-draft-spec:
+mission-brief:
 
 - **They asked for it** (by name, by invoking it, or by asking for a
   design discussion): end there. They want this conversation.
@@ -233,15 +233,15 @@ from without going back to your human partner. Cover:
 
 For a small change, the short design covers the same points in a line
 or two each and goes straight to your human partner, without the
-builder check.
+preflight check.
 
 **Where it goes:** in a software repo,
 `docs/plans/YYYY-MM-DD-<topic>-design.md`, committed.
 Otherwise, pick a sensible place and say where. Your human partner's
 preferences override both.
 
-**Builder check** (for a project): dispatch a fresh subagent with
-`builder-check-prompt.md` in this directory. When you tell your human
+**Preflight check** (for a project): dispatch a fresh subagent with
+`preflight-check-prompt.md` in this directory. When you tell your human
 partner you're writing it up, say a reviewer will read it first and you
 may come back once with a few questions. Don't hand over the document
 until the check is back. Sort what the builder asks into three piles:
@@ -272,7 +272,7 @@ stays labeled throwaway, and keeping what it produced is a new request
 that comes back through this gate.
 
 If you or the user want an independent multi-angle design audit first,
-optionally run `gauntlet` on the approved design doc. Otherwise, the
+optionally run `flight-readiness` on the approved design doc. Otherwise, the
 next step is the plan: invoke `flight-plan` and no other skill.
 </HARD-GATE>
 

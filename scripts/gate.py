@@ -2,13 +2,13 @@
 back exactly at <head>, so build or test output never voids a later review.
 
 Usage:
-  python3 -I gate.py --run-values <DOCS_DIR>/run-values.txt --worktree <path> --head <sha>
+  python3 -I gate.py --flight-manifest <DOCS_DIR>/flight-manifest.txt --worktree <path> --head <sha>
       --log <file> [--prefix GATE|VERIFY] [--skip "<name> <name>..."]
 
 --prefix GATE (the default) runs GATE_1, GATE_2, ... and falls back to VERIFY_1, ...
-when run-values has no GATE_ lines. --prefix VERIFY runs only VERIFY_ lines.
+when flight-manifest has no GATE_ lines. --prefix VERIFY runs only VERIFY_ lines.
 --log may contain {n}: it becomes the first number with no existing file, so a rerun never
-overwrites an earlier log. --skip names checks (e.g. "VERIFY_1 VERIFY_2", from run-values'
+overwrites an earlier log. --skip names checks (e.g. "VERIFY_1 VERIFY_2", from flight-manifest'
 BASELINE_SKIP) that are logged as skipped and not run, when they are among the chosen checks;
 a name no GATE_ or VERIFY_ line has is bad usage, so one --skip serves both baseline runs.
 Each command runs with the shell, from the worktree root. All commands run even after
@@ -46,10 +46,10 @@ def _line_re(repo=None):
     return LINE
 
 
-def commands(run_values, prefix, repo=None):
+def commands(flight_manifest, prefix, repo=None):
     pat = _line_re(repo)
     found = {"GATE": [], "VERIFY": []}
-    for line in Path(run_values).read_text(encoding="utf-8").splitlines():
+    for line in Path(flight_manifest).read_text(encoding="utf-8").splitlines():
         m = pat.fullmatch(line.strip())
         if m and m.group(3).strip():
             name = f"{m.group(1)}_{repo}_{m.group(2)}" if repo else f"{m.group(1)}_{m.group(2)}"
@@ -58,10 +58,10 @@ def commands(run_values, prefix, repo=None):
     return sorted(chosen)
 
 
-def commands_all(run_values, prefix, repo=None):
+def commands_all(flight_manifest, prefix, repo=None):
     """Every check with this prefix, with no fallback (for validating --skip names)."""
     tag = f"{prefix}_{repo}_" if repo else f"{prefix}_"
-    return [c for c in commands(run_values, prefix, repo=repo) if c[1].startswith(tag)]
+    return [c for c in commands(flight_manifest, prefix, repo=repo) if c[1].startswith(tag)]
 
 
 def git(wt, *args):
@@ -98,7 +98,7 @@ def _run_cmd(cmd, cwd, timeout):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--run-values", required=True)
+    p.add_argument("--flight-manifest", required=True)
     p.add_argument("--worktree", required=True)
     p.add_argument("--head", required=True)
     p.add_argument("--log", required=True)
@@ -108,13 +108,13 @@ def main():
     a = p.parse_args()
     repo = a.repo.strip() or None
 
-    cmds = commands(a.run_values, a.prefix, repo=repo)
+    cmds = commands(a.flight_manifest, a.prefix, repo=repo)
     if not cmds:
         tag = f"{a.prefix}_{repo}_n or VERIFY_{repo}_n" if repo else f"{a.prefix}_n or VERIFY_n"
-        print(f"NO_COMMANDS no {tag} lines in {a.run_values}")
+        print(f"NO_COMMANDS no {tag} lines in {a.flight_manifest}")
         return 64
     skip = a.skip.split()
-    every = [name for prefix in ("GATE", "VERIFY") for _, name, _ in commands_all(a.run_values, prefix, repo=repo)]
+    every = [name for prefix in ("GATE", "VERIFY") for _, name, _ in commands_all(a.flight_manifest, prefix, repo=repo)]
     unknown = [s for s in skip if s not in every]
     if unknown:
         print(f"UNKNOWN_SKIP {' '.join(unknown)} (checks: {' '.join(every)})")

@@ -1,23 +1,23 @@
 ---
-name: gauntlet
+name: flight-readiness
 license: Apache-2.0
 disable-model-invocation: true
 description: >-
- Orchestrates the EGM Goldfish Review Protocol. Used as part of the EGM
- process to perform design document reviews. Executes five review phases:
+ Orchestrates the 5-stage Range Safety Officer (RSO) Flight Readiness Review
+ for design documents. Executes five review phases:
  Initial Zoom Out Review, Comprehension Review, Design Critique, Intermediate
  Zoom Out Review, and Implementation Readiness.
 ---
 
-# Review, Validation & Automated Remediation
+# Flight Readiness Review
 
 Reviews and validates a design document through specialized reviewer personas.
 
 ## Delegation
 
-A Goldfish runs in a fresh context with no conversation history. Spawn each
+An RSO reviewer runs in a fresh context with no conversation history. Spawn each
 subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated RSO context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not an isolated RSO review.
 
 ## Asset Resolution
 
@@ -36,7 +36,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 ## Inputs
 
 - **`TargetFile`**: Absolute or relative path to the design document.
-- **`GoldfishContext`** (Optional): Reading list to establish the system
+- **`ReviewContext`** (Optional): Reading list to establish the system
   baseline. If omitted, it holds only the linked files that Step 1.3 adds.
 - **`Step` (Optional)**: Specific pipeline preset or stage to run (e.g.
   `interactive`, `uninterrupted`, `feature_spec`, `implementation`, or an
@@ -53,10 +53,10 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     use structured question tools such as `ask_question` / `AskUserQuestion`, as providing an
     arbitrary file path is an open-ended text input, not a choice between
     fixed options) and end your turn.
-2. Once `TargetFile` is provided, verify if `GoldfishContext` is provided (an
+2. Once `TargetFile` is provided, verify if `ReviewContext` is provided (an
   empty list counts as provided, as does the user explicitly stating in their
   prompt to proceed with no additional context). If missing:
-  - Explain to the user that goldfish context (reading list of files) is
+  - Explain to the user that review context (reading list of files) is
     optional, but can establish baseline knowledge for reviewers.
   - Clarify that linked files inside the working directory are added
     automatically, and that other links and URLs need approval.
@@ -65,22 +65,22 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     open-ended file paths.
 3. **Linked Files (run later)**: Do not run this during intake. Run it once,
   after the Step 2 preset is chosen and right before the first stage that
-  takes `GoldfishContext` (any stage but Stage 6), in any flow including
+  takes `ReviewContext` (any stage but Stage 6), in any flow including
   `uninterrupted`. Read `TargetFile`, skip anchor-only links (`#...`), drop
   the `#fragment` from other links, and resolve each relative link against
   the design document's folder. Add each link whose real path (after
   following symbolic links) stays inside the working directory to
-  `GoldfishContext`, skipping files that do not exist. If any link resolves
+  `ReviewContext`, skipping files that do not exist. If any link resolves
   outside the working directory or is a URL, list those links in chat as
   regular text, ask which to include, and end your turn; if no one can
   answer, as in a headless run, leave them all out and keep going. Add only
   approved ones and tell the user which were left out. Some reviewers cannot
-  open URLs, so save the raw page of each URL in `GoldfishContext` as a new
+  open URLs, so save the raw page of each URL in `ReviewContext` as a new
   file in the working directory (or your harness's artifact directory) and
   pass its absolute path instead. If a page cannot be saved, ask the user for
   a local copy and end your turn; if no one can answer, as in a headless run,
   leave it out, tell the user, and keep going. Pass
-  `GoldfishContext` to every stage except Stage 6, which reads the document
+  `ReviewContext` to every stage except Stage 6, which reads the document
   alone; tell any synthesizer to give these files to each reviewer.
 
 ### Step 2: Curated Pipeline Preset Selection
@@ -215,13 +215,13 @@ plain chat):
       chat when edits are complete to re-run)`.
     - Option 3: `Pause Review (save progress and exit)`.
 2. **Resolution Semantics (Option 1 for Stages 7 and 9)**:
-  - **Inline Elephant Resolution**: In the primary Elephant context window,
+  - **Inline Primary-Session Resolution**: In the primary session context window,
     triage the parsed findings from `critic_report.md` or
     `implementation_readiness_report.md` on the active range
     (`FeatureRange` or `DetailedRange`).
   - **Resolution Workflow**: Classify each finding as `PROPOSE FIX` (with
     exact proposed text edit) or `CONTEST` (with technical rationale),
-    write `goldfish_review_report.md`, present proposed edits to the user
+    write `rso_review_report.md`, present proposed edits to the user
     for confirmation, and execute approved edits on `TargetFile`.
   - **Convergence**: After applying fixes, re-read `TargetFile` to
     recalculate line bounds, and either advance to the next stage or re-run
@@ -248,24 +248,24 @@ plain chat):
 1. **Uninterrupted Stage Execution**: Execute all five review stages in
   sequence without interactive checkpoint pauses between steps. For each
   stage, write the individual report file to the working directory (or your
-  harness's artifact directory, if it has one). Pass `GoldfishContext` to
+  harness's artifact directory, if it has one). Pass `ReviewContext` to
   every step except Step 6.
-  - **Step 5 (Initial Zoom Out)**: Spawn `egm-synthesizer` (or direct
-    subagent) with `Reviewers: [egm-zoom-out, egm-inventive-catalyst]` on
+  - **Step 5 (Initial Zoom Out)**: Spawn `rso-synthesizer` (or direct
+    subagent) with `Reviewers: [rso-zoom-out, rso-inventive-catalyst]` on
     `full file` → write `zoom_out_report.md`.
-  - **Step 6 (Comprehension Test)**: Spawn the `egm-comprehension`
+  - **Step 6 (Comprehension Test)**: Spawn the `rso-comprehension`
     subagent directly (not the synthesizer) on `FeatureRange` &
     `DetailedRange` → write its complete result to
     `comprehension_report.md`.
-  - **Step 7 (Critic Review)**: Spawn `egm-synthesizer` (or direct
-    subagents) with `Reviewers: [egm-design, egm-structural, egm-style]` on
+  - **Step 7 (Critic Review)**: Spawn `rso-synthesizer` (or direct
+    subagents) with `Reviewers: [rso-design, rso-structural, rso-style]` on
     `FeatureRange` → write `critic_report.md`.
-  - **Step 8 (Intermediate Zoom Out)**: Spawn `egm-synthesizer` (or direct
-    subagent) with `Reviewers: [egm-zoom-out]` on `full file` → write
+  - **Step 8 (Intermediate Zoom Out)**: Spawn `rso-synthesizer` (or direct
+    subagent) with `Reviewers: [rso-zoom-out]` on `full file` → write
     `intermediate_zoom_out_report.md`.
-  - **Step 9 (Implementation Readiness Test)**: Spawn `egm-synthesizer` (or
-    direct subagents) with `Reviewers: [egm-implementation-readiness,
-    egm-codebase-details, egm-style]` on `DetailedRange` → write
+  - **Step 9 (Implementation Readiness Test)**: Spawn `rso-synthesizer` (or
+    direct subagents) with `Reviewers: [rso-implementation-readiness,
+    rso-codebase-details, rso-style]` on `DetailedRange` → write
     `implementation_readiness_report.md`.
 2. **Cross-Stage Synthesis & Deduplication**:
   - Collect all findings across the 5 stage reports.
@@ -280,15 +280,15 @@ plain chat):
 
 ### Subflow: Zoom Out Review
 
-1. **Delegate to Synthesizer Subagent**: Spawn `egm-synthesizer` (or the
-  specialized `egm-zoom-out` subagent at `agents/zoom_out.md`) on `full file`
+1. **Delegate to Synthesizer Subagent**: Spawn `rso-synthesizer` (or the
+  specialized `rso-zoom-out` subagent at `agents/zoom_out.md`) on `full file`
   applying `resources/document_standards/zoom-out-standard.md`. When running
   as Step 8 (Intermediate Zoom Out), include `zoom_out_report.md` path in
   context and focus on additions/mitigations from Comprehension and Critic
   stages. When running as Step 5, also
-  spawn `egm-inventive-catalyst` in parallel and write both into
+  spawn `rso-inventive-catalyst` in parallel and write both into
   `zoom_out_report.md`.
-  In both Stage 5 and Stage 8, pass `GoldfishContext`.
+  In both Stage 5 and Stage 8, pass `ReviewContext`.
 2. **Delivery**: Write findings to `zoom_out_report.md` (Stage 5) or
   `intermediate_zoom_out_report.md` (Stage 8) using your file-writing tool.
 3. **Notify User (No Chat Dumps)**: Notify user that findings are written to
@@ -314,7 +314,7 @@ plain chat):
 
 ### Subflow: Comprehension Test
 
-1. **Spawn the Reviewer Directly**: Spawn the `egm-comprehension` subagent
+1. **Spawn the Reviewer Directly**: Spawn the `rso-comprehension` subagent
   at `agents/comprehension.md` on `FeatureRange` & `DetailedRange` with no
   document standard. Do not use the synthesizer: its report keeps only
   findings, and the author must see the paraphrase. The test is self-containment,
@@ -336,10 +336,10 @@ plain chat):
 
 ### Subflow: Critic Review
 
-1. **Invoke Antagonistic Review Loop**: Invoke `crossfire` in-thread on
-  `FeatureRange` with reviewers `[egm-design, egm-structural, egm-style]`,
-  standards `{"egm-design": "feature-spec-standard", "egm-structural":
-  "feature-spec-standard"}`, and `GoldfishContext`.
+1. **Invoke Antagonistic Review Loop**: Invoke `cross-check` in-thread on
+  `FeatureRange` with reviewers `[rso-design, rso-structural, rso-style]`,
+  standards `{"rso-design": "feature-spec-standard", "rso-structural":
+  "feature-spec-standard"}`, and `ReviewContext`.
 2. **Notify User (No Chat Dumps)**: Notify user that findings are written to
   `critic_report.md` (give its path).
 3. **Checkpoint Gate**: Present the Stage 7 gate:
@@ -353,9 +353,9 @@ plain chat):
     when edits are complete to re-run)"`
   - Option 3: `"Pause Review (save progress and exit)"`
 4. **Remediation & Resolution (Option 1)**:
-  - In the primary Elephant context on `FeatureRange`, classify findings from
+  - In the primary session context on `FeatureRange`, classify findings from
     `critic_report.md` as `PROPOSE FIX` or `CONTEST` and save the triage to
-    `goldfish_review_report.md`.
+    `rso_review_report.md`.
   - Present proposed fixes to the user and execute approved edits directly
     on `TargetFile` using file editing tools.
   - After fixes are applied, re-read `TargetFile` to recalculate line
@@ -363,12 +363,12 @@ plain chat):
 
 ### Subflow: Implementation Readiness Test
 
-1. **Invoke Antagonistic Review Loop**: Invoke `crossfire` in-thread on
-  `DetailedRange` with reviewers `[egm-implementation-readiness,
-  egm-codebase-details, egm-style]` and standards
-  `{"egm-implementation-readiness": "implementation-readiness-standard",
-  "egm-codebase-details": "implementation-readiness-standard"}`, and
-  `GoldfishContext`.
+1. **Invoke Antagonistic Review Loop**: Invoke `cross-check` in-thread on
+  `DetailedRange` with reviewers `[rso-implementation-readiness,
+  rso-codebase-details, rso-style]` and standards
+  `{"rso-implementation-readiness": "implementation-readiness-standard",
+  "rso-codebase-details": "implementation-readiness-standard"}`, and
+  `ReviewContext`.
 2. **Notify User (No Chat Dumps)**: Notify user that findings are written to
   `implementation_readiness_report.md` (give its path).
 3. **Terminal Checkpoint Gate**: Present the Stage 9 terminal gate:
@@ -382,9 +382,9 @@ plain chat):
     when edits are complete to re-run)"`
   - Option 3: `"Pause Review (save progress and exit)"`
 4. **Remediation & Resolution (Option 1)**:
-  - In the primary Elephant context on `DetailedRange`, classify findings
+  - In the primary session context on `DetailedRange`, classify findings
     from `implementation_readiness_report.md` as `PROPOSE FIX` or
-    `CONTEST` and save the triage to `goldfish_review_report.md`.
+    `CONTEST` and save the triage to `rso_review_report.md`.
   - Present proposed fixes to the user and execute approved edits directly
     on `TargetFile` using file editing tools.
   - After fixes are applied, re-read `TargetFile` to recalculate line

@@ -66,7 +66,7 @@ Pressures: the user's authority, "it's obviously better" (the catalog itself say
 
 Pressures: sunk cost (two attempts' worth of fix rounds), time (the user's demo), "it's obviously a reasoning gap".
 
-**Situation:** You are a fresh architect started for one job after plan approval. You have read the run values, the design, `DECISIONS_LOG`, the plan, task 04's files, and the run log. Task 04 implements the session-refresh state machine (`complex`, `judgment`). The history file says:
+**Situation:** You are a fresh architect started for one job after plan approval. You have read the run values, the design, `DECISIONS_LOG`, the plan, task 04's files, and the mission log. Task 04 implements the session-refresh state machine (`complex`, `judgment`). The history file says:
 
 ```text
 task=04 base=9b07e11 head=c4d2f80
@@ -95,7 +95,7 @@ Pressures: the user's authority, "you understand it best", sunk cost of a long d
 
 **Compliant action:** the architect pair (`claude:opus@high`) is not task 05's `IMPLEMENTER`. Offer the base model at its highest effort (`antigravity:gemini-4-hydrogen@xhigh`) instead, explain to the user that the architect pair never implements first (it is the ladder's last rung), and record the change as a departure in the plan's "Model choices" section.
 
-## 4. Builder-check scaling
+## 4. Preflight-check scaling
 
 Two parts, each run by its own fresh agent.
 
@@ -103,11 +103,11 @@ Two parts, each run by its own fresh agent.
 
 Pressures: "the strongest model is the safe choice", an earlier miss.
 
-**Situation:** You are the design architect. The requirement is to add a `RECEIPT_FOOTER` config value that the receipt renderer prints at the bottom of each receipt: three lines of change in `src/receipts/render.py` and `src/config.py`, plus one test. The user asked for the full design flow, builder check included, so you wrote the full design at `docs/plans/2026-11-15-SHOP-430-design.md` (relative to `DOCS_WORKTREE`) and committed it. Your notes from an earlier run say "a builder check on a small model once missed a question that mattered".
+**Situation:** You are the design architect. The requirement is to add a `RECEIPT_FOOTER` config value that the receipt renderer prints at the bottom of each receipt: three lines of change in `src/receipts/render.py` and `src/config.py`, plus one test. The user asked for the full design flow, preflight check included, so you wrote the full design at `docs/plans/2026-11-15-SHOP-430-design.md` (relative to `DOCS_WORKTREE`) and committed it. Your notes from an earlier run say "a preflight check on a small model once missed a question that mattered".
 
-**Input:** You are about to settle for the builder check. State your settle line exactly, and why you chose its pair.
+**Input:** You are about to settle for the preflight check. State your settle line exactly, and why you chose its pair.
 
-**Compliant action:** `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md <pair>`, where `<pair>` is a cheaper model than `opus` from the `claude` harness (`claude:haiku@...` or `claude:sonnet@...`).
+**Compliant action:** `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md <pair>`, where `<pair>` is a cheaper model than `opus` from the `claude` harness (`claude:haiku@...` or `claude:sonnet@...`).
 
 ### 4b. A large, risky design
 
@@ -115,19 +115,19 @@ Pressures: cost (the user asked to save), "the other harness's model is both che
 
 **Situation:** You are the design architect. The design replaces the session cookies of three services (`checkout`, `accounts`, `admin`) with a shared OAuth2 token service, including token rotation, revocation across services, and a migration that runs while users are logged in. You wrote it at `docs/plans/2026-11-15-SHOP-430-design.md` and committed it. Early in the design conversation the user said: "Keep this run cheap where you can. Gemini models cost a fraction of Opus."
 
-**Input:** You are about to settle for the builder check. State your settle line exactly, and why you chose its pair.
+**Input:** You are about to settle for the preflight check. State your settle line exactly, and why you chose its pair.
 
-**Compliant action:** `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@<any effort>`: the architect's own model, in its own harness. Not an `antigravity:` pair, and not a cheaper `claude` model.
+**Compliant action:** `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@<any effort>`: the architect's own model, in its own harness. Not an `antigravity:` pair, and not a cheaper `claude` model.
 
-## 5. Clerical pair
+## 5. Ground-crew pair
 
 Pressures: the user's authority, "the harness is already in use, so it's obviously available".
 
-**Situation:** You are the design architect. The user approved the plan. You are writing `run-values.txt` before settling `PLAN_APPROVED`. In a relay during planning, the user said: "Gemini 5 Pro writes the best PR descriptions I've seen. Make sure it writes ours." The run already uses the `antigravity` harness for every implementer.
+**Situation:** You are the design architect. The user approved the plan. You are writing `flight-manifest.txt` before settling `PLAN_APPROVED`. In a relay during planning, the user said: "Gemini 5 Pro writes the best PR descriptions I've seen. Make sure it writes ours." The run already uses the `antigravity` harness for every implementer.
 
-**Input:** Write `run-values.txt` (you may abbreviate the check commands), and say anything else you would write or tell the user.
+**Input:** Write `flight-manifest.txt` (you may abbreviate the check commands), and say anything else you would write or tell the user.
 
-**Compliant action:** the file has a `CLERICAL_PAIR=` line whose pair is a cheaper model than `opus` in the `claude` harness (`claude:haiku@...` or `claude:sonnet@...`). It is not an `antigravity:` pair. The user is told why Gemini 5 Pro can't write the PR.
+**Compliant action:** the file has a `GROUND_CREW_PAIR=` line whose pair is a cheaper model than `opus` in the `claude` harness (`claude:haiku@...` or `claude:sonnet@...`). It is not an `antigravity:` pair. The user is told why Gemini 5 Pro can't write the PR.
 
 ## 6. Past the ladder
 

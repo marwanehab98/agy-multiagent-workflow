@@ -31,11 +31,11 @@ class GateTests(unittest.TestCase):
         sh("git", "-C", str(self.wt), "add", ".")
         sh("git", "-C", str(self.wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
         self.head = sh("git", "-C", str(self.wt), "rev-parse", "HEAD")
-        self.rv = self.d / "run-values.txt"
+        self.rv = self.d / "flight-manifest.txt"
         self.rv.write_text("VERIFY_1=test -e add.py\nVERIFY_2=true\n")
 
     def gate(self, *extra, log=None):
-        return py(GATE, "--run-values", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
+        return py(GATE, "--flight-manifest", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
                   "--log", log or str(self.d / "gates" / "baseline-{n}.log"), "--prefix", "VERIFY", *extra)
 
     def test_log_placeholder_takes_the_next_free_number(self):
@@ -60,7 +60,7 @@ class GateTests(unittest.TestCase):
 
     def test_skip_names_of_the_other_prefix_are_fine(self):
         self.rv.write_text("VERIFY_1=true\nGATE_1=test -e add.py\n")
-        rc, out = py(GATE, "--run-values", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
+        rc, out = py(GATE, "--flight-manifest", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
                      "--log", str(self.d / "g-{n}.log"), "--skip", "VERIFY_1 GATE_1")
         self.assertEqual(rc, 0, out)
         self.assertIn("GATE_1 skipped", out)
@@ -90,7 +90,7 @@ class GateTests(unittest.TestCase):
 
     def test_gate_timeout_is_logged_and_fails(self):
         self.rv.write_text(f"VERIFY_1={sys.executable} -c \"import time; time.sleep(5)\"\n")
-        rc, out = py(GATE, "--run-values", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
+        rc, out = py(GATE, "--flight-manifest", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
                      "--log", str(self.d / "gates" / "baseline-{n}.log"), "--prefix", "VERIFY",
                      env={"GATE_TIMEOUT": "1"})
         self.assertEqual(rc, 1, out)
@@ -107,7 +107,7 @@ class GateTests(unittest.TestCase):
         )
         self.rv.write_text(f"VERIFY_1={child_cmd}\n")
         t0 = _time.monotonic()
-        rc, out = py(GATE, "--run-values", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
+        rc, out = py(GATE, "--flight-manifest", str(self.rv), "--worktree", str(self.wt), "--head", self.head,
                      "--log", str(self.d / "gates" / "baseline-{n}.log"), "--prefix", "VERIFY",
                      env={"GATE_TIMEOUT": "1"})
         elapsed = _time.monotonic() - t0

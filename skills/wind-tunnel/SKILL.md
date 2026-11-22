@@ -1,29 +1,29 @@
 ---
-name: crucible
+name: wind-tunnel
 license: Apache-2.0
 disable-model-invocation: true
 description: >-
-  Interactive ideation and draft-spec skill for the Elephant &
-  Goldfish Model (EGM). Helps turn half-baked concepts into structured
-  hypotheses via clarifying questions, review, and iterative refinement.
-  Produces an RFC summary (`concepts_brief.md`) for human review or downstream design/planning with `draft-spec` or `flight-plan`.
+  Interactive ideation and concept stress-testing skill using stateless
+  Range Safety Officer (RSO) lenses. Helps turn half-baked concepts into structured
+  hypotheses via clarifying questions, multi-lens review, and iterative refinement.
+  Produces an RFC summary (`concepts_brief.md`) for human review or downstream design/planning with `mission-brief` or `flight-plan`.
 ---
 
-# EGM Brainstorm: Interactive Multi-Lens Ideation & Refinement
+# Wind Tunnel: Interactive Multi-Lens Ideation & Refinement
 
 ## Overview
 
-This skill acts as the upstream conversational draft-spec engine for the
-Elephant-Goldfish Model (EGM). It turns "half-baked" or raw concepts into
+This skill acts as the upstream conversational ideation engine for Mission
+Control. It turns "half-baked" or raw concepts into
 hypotheses by combining **interactive clarifying questions** with an automated
-**Goldfish review**. The outcome is an iteratively refined RFC summary
-(`concepts_brief.md`) that leads into `draft-spec`, `flight-plan`, or review with peers.
+**Range Safety Officer (RSO) review**. The outcome is an iteratively refined RFC summary
+(`concepts_brief.md`) that leads into `mission-brief`, `flight-plan`, or review with peers.
 
 ## Delegation
 
-A Goldfish runs in a fresh context with no conversation history. Spawn each
+An RSO reviewer runs in a fresh context with no conversation history. Spawn each
 subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated RSO context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not an isolated RSO review.
 
 ## Asset Resolution
 
@@ -47,8 +47,8 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     **STRICTLY FORBIDDEN** from using structured question tools (`ask_question` / `AskUserQuestion`)
     or supplying pre-canned multiple-choice candidate answers during open-ended
     questioning.
-3.  **Parallel Goldfish Reviews**: You **MUST** evaluate the feature concept
-    across specialized Goldfish lenses simultaneously to prevent sequential bias
+3.  **Parallel RSO Reviews**: You **MUST** evaluate the feature concept
+    across specialized RSO lenses simultaneously to prevent sequential bias
     and maximize critique breadth.
 4.  **Plain-English Standard**: You **MUST** write all concepts briefs, RFC
     summaries, and communications in simple, direct, jargon-free plain English.
@@ -83,7 +83,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     turn, and provide clear, action-oriented options without `(Recommended)`
     prefixes.
 
-## The Goldfish Brainstorming Lenses
+## The Range Safety (RSO) Wind-Tunnel Lenses
 
 | Lens / Persona          | Core Objective          | Key Questions Challenged |
 | :---------------------- | :---------------------- | :----------------------- |
@@ -132,7 +132,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
         {
           "question": "Anchored feature hypothesis: [2-3 sentence summary]. How would you like to proceed?",
           "options": [
-            "Review with Goldfishes",
+            "Run Wind-Tunnel RSO Review",
             "Clarify additional constraints or assumptions in chat"
           ],
           "is_multi_select": false
@@ -141,9 +141,9 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     }
     ```
 
-    *   **Option 0: `Review with Goldfishes`**: The user confirms readiness.
-        Proceed immediately to Step 2 (Goldfish Review & Synthesis) to invoke
-        `egm-synthesizer`.
+    *   **Option 0: `Run Wind-Tunnel RSO Review`**: The user confirms readiness.
+        Proceed immediately to Step 2 (RSO Review & Synthesis) to invoke
+        `rso-synthesizer`.
     *   **Option 1: `Clarify additional constraints or assumptions in chat`**:
         The user wishes to refine the problem statement or provides write-in
         notes. Stay in Step 1, yield the turn in chat for details, incorporate
@@ -153,22 +153,22 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 4.  **Proceed to Step 2 ONLY** after Option 0 is confirmed. Do NOT spawn
     subagents before this gate confirms readiness.
 
-### Step 2: Goldfish Review & Synthesis
+### Step 2: RSO Review & Synthesis
 
 1.  **Delegate to Synthesizer Subagent**: Spawn the intermediate
-    **`egm-synthesizer`** agent (or parallel Goldfish subagents across the 7
+    **`rso-synthesizer`** agent (or parallel RSO subagents across the 7
     specialized lenses if your harness cannot nest subagents):
-    *   Subagent: `egm-synthesizer` (`agents/synthesizer.md`)
+    *   Subagent: `rso-synthesizer` (`agents/synthesizer.md`)
     *   `Prompt`: >- Conduct multi-lens brainstorm for feature concept:
         `[AnchoredFeatureHypothesis]`. Mode: `BRAINSTORM`. Reviewers:
-        `[egm-design, egm-codebase-details, egm-zoom-out, egm-comprehension,
-        egm-implementation-readiness, egm-structural, egm-inventive-catalyst]`.
-2.  **Synthesizer Execution**: The `egm-synthesizer` subagent launches the
-    parallel Goldfish reviewers across the specialized lenses (`egm-design`,
-    `egm-codebase-details`, `egm-zoom-out`, `egm-comprehension`,
-    `egm-implementation-readiness`, `egm-structural`,
-    `egm-inventive-catalyst`) with `Mode: BRAINSTORM`.
-3.  **Deduplication**: Collect the raw findings from the Goldfish reviewers,
+        `[rso-design, rso-codebase-details, rso-zoom-out, rso-comprehension,
+        rso-implementation-readiness, rso-structural, rso-inventive-catalyst]`.
+2.  **Synthesizer Execution**: The `rso-synthesizer` subagent launches the
+    parallel RSO reviewers across the specialized lenses (`rso-design`,
+    `rso-codebase-details`, `rso-zoom-out`, `rso-comprehension`,
+    `rso-implementation-readiness`, `rso-structural`,
+    `rso-inventive-catalyst`) with `Mode: BRAINSTORM`.
+3.  **Deduplication**: Collect the raw findings from the RSO reviewers,
     deduplicate overlapping points, and format them into a cohesive analysis.
 4.  **Write/Update Artifact**: Format and write the synthesized brief to
     `concepts_brief.md` in the working directory (or your harness's artifact
@@ -201,17 +201,17 @@ The `concepts_brief.md` artifact follows this structure:
 
 ## Key Decisions & Staging for Next Steps
 
-[Key decisions resolved during ideation to be carried forward into `draft-spec` or `flight-plan`.]
+[Key decisions resolved during ideation to be carried forward into `mission-brief` or `flight-plan`.]
 ```
 
 ### Step 3: Interactive Iteration & Refinement Loop
 
 1.  **Notify & Highlight (No Chat Dumps)**: Notify the user in chat that
     `concepts_brief.md` has been updated (give its path). Highlight 2-3 key
-    objections or open risks raised by the Goldfish reviewers.
-2.  **Iterate**: Ask the user how they wish to address the Goldfish objections
+    objections or open risks raised by the RSO reviewers.
+2.  **Iterate**: Ask the user how they wish to address the RSO objections
     (e.g., pivoting the approach, narrowing scope, or adding constraints).
-3.  **Loop Back**: Repeat Steps 1 and 2 to re-run or update the Goldfish
+3.  **Loop Back**: Repeat Steps 1 and 2 to re-run or update the RSO
     analysis until the concept has survived scrutiny and the user is satisfied.
 
 ### Step 4: Finalize & Handoff
@@ -229,9 +229,9 @@ The `concepts_brief.md` artifact follows this structure:
           "question": "Brainstorming complete. concepts_brief.md is finalized. Select next step:",
           "options": [
             "Publish concepts_brief.md as RFC for team feedback",
-            "Proceed to flight-plan / draft-spec (Create formal design or implementation plan)",
+            "Proceed to flight-plan / mission-brief (Create formal design or implementation plan)",
             "Continue refining concepts_brief.md in ideation mode",
-            "Conclude draft-spec and keep brief for later"
+            "Conclude wind-tunnel and keep brief for later"
           ],
           "is_multi_select": false
         }
@@ -247,18 +247,18 @@ The `concepts_brief.md` artifact follows this structure:
         *   Notify the user in chat that the RFC has been published and can be
             shared with the team for feedback. Remind the user that once
             feedback is gathered, a formal design or plan can be created by
-            invoking `draft-spec` or `flight-plan` on
+            invoking `mission-brief` or `flight-plan` on
             `docs/designs/<feature_name>.md`.
-    *   **Option 1: `Proceed to flight-plan / draft-spec (Create formal design or implementation plan)`**:
+    *   **Option 1: `Proceed to flight-plan / mission-brief (Create formal design or implementation plan)`**:
         *   Confirm that `concepts_brief.md` is saved in the working directory
             or artifact directory.
-        *   Instruct the user to invoke `draft-spec` (to draft a full design
+        *   Instruct the user to invoke `mission-brief` (to draft a full design
             doc) or `flight-plan` (if the design is ready to break into
             implementation tasks) using `concepts_brief.md` as input.
     *   **Option 2: `Continue refining concepts_brief.md in ideation mode`**:
         *   Return to Step 3 iteration loop to drill into further edge cases or
             update the brief based on user chat input.
-    *   **Option 3: `Conclude draft-spec and keep brief for later`**:
+    *   **Option 3: `Conclude wind-tunnel and keep brief for later`**:
         *   Conclude the session gracefully. Remind the user that
             `concepts_brief.md` remains saved for future reference.
 

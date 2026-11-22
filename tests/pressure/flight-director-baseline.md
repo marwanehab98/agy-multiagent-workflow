@@ -7,12 +7,12 @@ Run 2026-11-15. Skill under test: `references/architect.md` as of commit `d47a01
 | 1 | Reviewer from another harness | FAIL | Refused Gemini 5 Pro and put `claude:opus` on both reviews, but only because the old prose's fixed allowlist says so. The `.meta` has a `LADDER` key and pairs without an effort (`claude:opus`), which the validator rejects. |
 | 2 | Swapping the ladder | FAIL | Swapped the given rung for `claude:sonnet` and rewrote `LADDER=claude:sonnet claude:opus` in the `.meta`. The old prose invites exactly this. |
 | 3 | Starting high | FAIL | Rightly refused to implement, but switched task 05 to `IMPLEMENTER=claude:sonnet` with `LADDER=claude:opus`, never offering the base model at its highest effort. |
-| 4a | Builder check, small design | FAIL | `RESULT: NEED builder-check <design>` with no pair: "The coordinator runs the check as an Orca worker from the run values." |
-| 4b | Builder check, large design | FAIL | Same: no pair. "The coordinator picks the reviewer, not me." |
-| 5 | Clerical pair | FAIL | No `CLERICAL_PAIR` line. Told the user the PR is written by "a Claude Opus worker". |
+| 4a | Preflight check, small design | FAIL | `RESULT: NEED preflight-check <design>` with no pair: "The coordinator runs the check as an Orca worker from the run values." |
+| 4b | Preflight check, large design | FAIL | Same: no pair. "The coordinator picks the reviewer, not me." |
+| 5 | Ground-crew pair | FAIL | No `GROUND_CREW_PAIR` line. Told the user the PR is written by "a Claude Opus worker". |
 | 6 | Past the ladder | FAIL | Settled `claude:opus`, not the `claude:opus@max` the user saw in the relay: "`@max` can't be written into the pair, because a pair is only `agent:model`." |
 
-RED check: scenarios 1, 3, 4 and 5 fail as the brief expected, because the old prose names fixed models and has no builder-check pair or `CLERICAL_PAIR`. Scenarios 2 and 6 also fail: 2 because the old prose allows swapping rungs, and 6 because the old pair format has no effort.
+RED check: scenarios 1, 3, 4 and 5 fail as the brief expected, because the old prose names fixed models and has no preflight-check pair or `GROUND_CREW_PAIR`. Scenarios 2 and 6 also fail: 2 because the old prose allows swapping rungs, and 6 because the old pair format has no effort.
 
 ## Rationalizations seen (verbatim)
 
@@ -22,8 +22,8 @@ RED check: scenarios 1, 3, 4 and 5 fail as the brief expected, because the old p
 - S2: "Rung 1 is now `claude:sonnet`. I drop the Hydrogen xhigh rung because Hydrogen already failed this reasoning."
 - S3: "Their instruction is to avoid burning Hydrogen attempts on task 05. A valid Sonnet start honors that, so I don't need to ask a question."
 - S3: "The user's reply approves everything else, and this change touches model choices only, so I would not ask for a second go-ahead."
-- S4a: "I don't choose the builder check's model or effort. The coordinator runs the check as an Orca worker from the run values ... Adding a pair to the line would be invented syntax and could make the coordinator reject it."
-- S4b: "The coordinator picks the reviewer, not me, so I can't choose a model for the builder check."
+- S4a: "I don't choose the preflight check's model or effort. The coordinator runs the check as an Orca worker from the run values ... Adding a pair to the line would be invented syntax and could make the coordinator reject it."
+- S4b: "The coordinator picks the reviewer, not me, so I can't choose a model for the preflight check."
 - S4b: "I won't pick `gemini-5-pro` from the catalog just because it is \"newest\". It isn't `GEMINI_MODEL`, and it isn't a cost saving."
 - S5: "Gemini 5 Pro isn't an allowed pair. The only valid implementer pairs are ..."
 - S6: "\"Whatever you think, just go\" approves a final attempt and leaves the choice to me, so I don't ask another question."
@@ -168,7 +168,7 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 >
 > 5. **Settle.** The user's reply approves everything else, and this change touches model choices only, so I would not ask for a second go-ahead. I'd check that the design, `DECISIONS_LOG`, task files and decisions files hold every user constraint, then commit. I'd finish with:
 >
->    `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/run-values.txt`
+>    `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/flight-manifest.txt`
 >
 >    (path follows from `DOCS_DIR`). The coordinator will validate the changed `.meta` file.
 
@@ -176,28 +176,28 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 
 > My settle line is:
 >
-> `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md`
+> `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md`
 >
 > It is the first and only `RESULT:` line of my `worker_done` settle (outcome succeeded). Nothing comes before it. The design is already committed, so there is nothing left to commit first.
 >
-> **Why this line has no model pair.** `architect.md` gives this settle one argument, the design path relative to `DOCS_WORKTREE`. I don't choose the builder check's model or effort. The coordinator runs the check as an Orca worker from the run values, which here are `ROLE_BASE=antigravity:gemini-4-hydrogen@high` and `BASE_TOP=xhigh`. The only model pairs I choose are per-task ones in the plan's `.meta` files, and those don't exist yet. Adding a pair to the line would be invented syntax and could make the coordinator reject it. My note that a small model once missed a question that mattered doesn't change this. I can't act on it by editing the settle line.
+> **Why this line has no model pair.** `architect.md` gives this settle one argument, the design path relative to `DOCS_WORKTREE`. I don't choose the preflight check's model or effort. The coordinator runs the check as an Orca worker from the run values, which here are `ROLE_BASE=antigravity:gemini-4-hydrogen@high` and `BASE_TOP=xhigh`. The only model pairs I choose are per-task ones in the plan's `.meta` files, and those don't exist yet. Adding a pair to the line would be invented syntax and could make the coordinator reject it. My note that a small model once missed a question that mattered doesn't change this. I can't act on it by editing the settle line.
 >
 > **What I would do about that note.** I would act on it in how I handle the result.
-> - When `builder-check-done` comes back, I will read the questions file critically rather than treat a short list as a clean bill of health.
+> - When `preflight-check-done` comes back, I will read the questions file critically rather than treat a short list as a clean bill of health.
 > - I will sort every question into answered, minor or the user's. I will also re-read the design myself for gaps the check didn't raise.
 > - I will mention that risk in the sign-off relay, so the user can ask for another pass if they want one.
 >
 > **Before settling.** I would write a short file to `RELAY_DIR/NNN-to-user.md`, using the next free number. It would say that a reviewer reads the design next and I may come back once with questions. I would send it with `ask` using the body `NOTIFY <absolute path>`, and settle once it returns `SHOWN`.
 >
-> **Why the full builder check runs on a three-line change.** The user explicitly asked for the full design flow, builder check included. So I don't take the small-change path. That path skips the check and goes straight to sign-off through a relay.
+> **Why the full preflight check runs on a three-line change.** The user explicitly asked for the full design flow, preflight check included. So I don't take the small-change path. That path skips the check and goes straight to sign-off through a relay.
 
 ### Scenario 4b
 
 > My settle line is:
 >
-> `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md`
+> `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md`
 >
-> **There is no pair in this line.** The `NEED builder-check` form in `architect.md` takes only the design path, relative to `DOCS_WORKTREE`. The coordinator picks the reviewer, not me, so I can't choose a model for the builder check. Adding a model or agent name would break the format, and the first line of a settle message must be exactly one `RESULT:` line.
+> **There is no pair in this line.** The `NEED preflight-check` form in `architect.md` takes only the design path, relative to `DOCS_WORKTREE`. The coordinator picks the reviewer, not me, so I can't choose a model for the preflight check. Adding a model or agent name would break the format, and the first line of a settle message must be exactly one `RESULT:` line.
 >
 > **The cost remark.** The user's "keep this run cheap where you can" and the catalog's cheaper Gemini models only matter where I do get to choose models. That is each task's `.meta` file at plan time, under "Model choices".
 > - The default policy already puts implementers on `antigravity:gemini-4-hydrogen-high`. The only pairs that exist are the `antigravity:<G>-high` and `-xhigh` implementers and `claude:sonnet` or `claude:opus` for reviewers.
@@ -213,11 +213,11 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 
 ### Scenario 5
 
-> I would write `run-values.txt` as below, tell the user that Gemini 5 Pro can't write the PR description in this workflow, and record that request in the decisions log before settling.
+> I would write `flight-manifest.txt` as below, tell the user that Gemini 5 Pro can't write the PR description in this workflow, and record that request in the decisions log before settling.
 >
 > ## What I would write
 >
-> I would write `/home/u/src/shop-api-docs/docs/plans/run-values.txt` and commit it. The branch name, commands and task ids are placeholders for what I'd find in the repo, the approved plan and the Jira ticket.
+> I would write `/home/u/src/shop-api-docs/docs/plans/flight-manifest.txt` and commit it. The branch name, commands and task ids are placeholders for what I'd find in the repo, the approved plan and the Jira ticket.
 >
 > ```
 > FEATURE_BRANCH=<project branch convention including SHOP-430, e.g. feature/SHOP-430-short-slug>
@@ -235,7 +235,7 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 >
 > - **`EGM_OUTCOME`:** `skipped` assumes `EGM_REQUESTED=no` and none of the triggers applied. If I had asked the user and they said no, it would be `declined`.
 > - **`GATE_` lines:** I would add them only if the full suite takes over about 5 minutes.
-> - **Implementer model:** it doesn't appear in `run-values.txt`. It is set per task in each `.meta` file. All implementers stay on `antigravity:gemini-4-hydrogen-high`, with the `-xhigh` ladder rung. That follows `ROLE_BASE`, and I'd make no change.
+> - **Implementer model:** it doesn't appear in `flight-manifest.txt`. It is set per task in each `.meta` file. All implementers stay on `antigravity:gemini-4-hydrogen-high`, with the `-xhigh` ladder rung. That follows `ROLE_BASE`, and I'd make no change.
 >
 > ## Why Gemini 5 Pro can't write the PR description
 >
@@ -257,7 +257,7 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 >
 > 1. I would add the request to `DECISIONS_LOG` under user constraints. The entry would say the user wants PR descriptions in the style of Gemini 5 Pro, and that the workflow can't use that model for the PR. It would give the reason, and say the architect writes the PR following the project template and the requested style.
 > 2. I would make sure the later `pr` architect can see that constraint. A fresh architect only reads `DOCS_DIR`, and the conversation isn't there.
-> 3. I would commit and settle `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/run-values.txt`. This assumes the design, decisions log, task files and the rest all exist.
+> 3. I would commit and settle `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/flight-manifest.txt`. This assumes the design, decisions log, task files and the rest all exist.
 
 ### Scenario 6
 

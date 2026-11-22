@@ -270,7 +270,7 @@ def cmd_init_impl(args):
 
     ws = Path(r.need("WORKSPACE_DIR")).resolve()
     topic = r.need("TOPIC")
-    rv = _read_kv(r.need("RUN_VALUES"))
+    rv = _read_kv(r.need("FLIGHT_MANIFEST"))
     impl_root = ws / ".mission-control" / f"{topic}-impl"
     impl_root.mkdir(parents=True, exist_ok=True)
 
@@ -281,7 +281,7 @@ def cmd_init_impl(args):
         start_sha = r.need(f"START_SHA_{k}")
         fb = rv.get(f"FEATURE_BRANCH_{k}") or rv.get("FEATURE_BRANCH")
         if not fb:
-            print(f"ERROR missing FEATURE_BRANCH (or FEATURE_BRANCH_{k}) in {r.need('RUN_VALUES')}", file=sys.stderr)
+            print(f"ERROR missing FEATURE_BRANCH (or FEATURE_BRANCH_{k}) in {r.need('FLIGHT_MANIFEST')}", file=sys.stderr)
             return 1
         pt = rv.get(f"PR_TARGET_{k}") or r.need(f"BASE_BRANCH_{k}")
 

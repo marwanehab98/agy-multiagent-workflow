@@ -161,7 +161,7 @@ class TreeAndWorkers(Base):
         self.expect(0, "QUEUE_EMPTY")
         commit_calls = [c for c in self.calls() if "left uncommitted changes" in c["prompt"]]
         self.assertEqual(len(commit_calls), 1)
-        log = (self.run_dir / "run-log.md").read_text()
+        log = (self.run_dir / "mission-log.md").read_text()
         self.assertIn("removed what the commit worker left uncommitted", log)
         self.assertIn("__pycache__/work.cpython-313.pyc", log)
 

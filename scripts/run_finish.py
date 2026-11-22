@@ -192,7 +192,7 @@ class Finish:
             for repo in repos:
                 rk = repo_key(repo)
                 sub_log = r.run_dir / f"verify-{k}-{rk}.log"
-                rc, out = tool("gate.py", "--run-values", r.need("RUN_VALUES"), "--worktree", r.repo_impl(repo),
+                rc, out = tool("gate.py", "--flight-manifest", r.need("FLIGHT_MANIFEST"), "--worktree", r.repo_impl(repo),
                                "--head", r.repo_last_merged(repo), "--log", str(sub_log), "--prefix", "VERIFY",
                                "--repo", rk)
                 r.log(f"verify {k} [{repo}] exit={rc} {sub_log}")
@@ -206,7 +206,7 @@ class Finish:
             rc = 1 if any_failed else 0
             out = ""
         else:
-            rc, out = tool("gate.py", "--run-values", r.need("RUN_VALUES"), "--worktree", r.impl,
+            rc, out = tool("gate.py", "--flight-manifest", r.need("FLIGHT_MANIFEST"), "--worktree", r.impl,
                            "--head", r.need("LAST_MERGED"), "--log", str(log), "--prefix", "VERIFY")
             r.log(f"verify {k} exit={rc} {log}")
         r.set(FIN_VERIFY_LOG=log)

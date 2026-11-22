@@ -11,14 +11,14 @@ ROOT = Path(__file__).resolve().parent.parent
 EXPECTED_SKILLS = {
     "mission",
     "launch-plan",
-    "draft-spec",
+    "mission-brief",
     "flight-plan",
     "red-green",
     "gatecheck",
     "touchdown",
-    "crucible",
-    "gauntlet",
-    "crossfire",
+    "wind-tunnel",
+    "flight-readiness",
+    "cross-check",
     "spec-drift",
 }
 

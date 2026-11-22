@@ -76,17 +76,17 @@ class ProbeTest(Base):
         w["reject_rules"] = [RULE("small-high", "default"), RULE("small", "high")]
         self.world.write_text(json.dumps(w))
         s = self.st()
-        s["CLERICAL_PAIR"] = "antigravity:small@high"
+        s["GROUND_CREW_PAIR"] = "antigravity:small@high"
         self.state.write_text(json.dumps(s))
         last = self.expect_probe(21, "FIX_META", "--set", "step3")
         text = Path(last.split()[1]).read_text()
         self.assertIn("PROBLEM 01: REVIEW_1 antigravity:small@high failed its test launch; see ", text)
-        self.assertIn("PROBLEM pair 'antigravity:small@high': CLERICAL_PAIR failed its test launch; see ", text)
+        self.assertIn("PROBLEM pair 'antigravity:small@high': GROUND_CREW_PAIR failed its test launch; see ", text)
         for t in ("01", "02"):
             m = self.docs / "tasks" / f"{t}.meta"
             m.write_text(m.read_text().replace("antigravity:small@high", "antigravity:big@high"))
         s = self.st()
-        s["CLERICAL_PAIR"] = "antigravity:big@high"
+        s["GROUND_CREW_PAIR"] = "antigravity:big@high"
         self.state.write_text(json.dumps(s))
         self.behave("ok")
         self.expect_probe(0, "PROBED", "--set", "step3")
@@ -96,7 +96,7 @@ class ProbeTest(Base):
         self.expect_probe(0, "PROBED", "--set", "step1")
         self.assertEqual(self.st("LAUNCH_STYLE_antigravity_big_high"), "slug")
         self.assertEqual(sh("git", "-C", str(self.docswt), "status", "--porcelain"), "")
-        self.assertIn("discarded", (self.run_dir / "run-log.md").read_text())
+        self.assertIn("discarded", (self.run_dir / "mission-log.md").read_text())
 
     def test_pair_set_and_skip_known(self):
         self.behave("ok")
@@ -108,7 +108,7 @@ class ProbeTest(Base):
         self.behave("ok", "ok", "ok")
         self.expect_probe(0, "PROBED", "--set", "step1")
         s = self.st()
-        s["CLERICAL_PAIR"] = "antigravity:big@low"
+        s["GROUND_CREW_PAIR"] = "antigravity:big@low"
         self.state.write_text(json.dumps(s))
         self.behave("ok", "ok", "ok", "ok", "ok")
         self.expect_probe(0, "PROBED", "--set", "resume")
@@ -135,7 +135,7 @@ class ProbeTest(Base):
         self.behave("ok", "ok", "ok", "ok")
         self.expect_probe(0, "PROBED", "--set", "resume")
         self.assertEqual((self.docswt / "notes.md").read_text(), "uncommitted flight director notes\n")
-        self.assertIn("left as is", (self.run_dir / "run-log.md").read_text())
+        self.assertIn("left as is", (self.run_dir / "mission-log.md").read_text())
         self.assertIn("left as is", (self.run_dir / "results" / "probe-antigravity_big_high.md").read_text())
 
     def test_old_format_state_is_refused(self):
@@ -151,7 +151,7 @@ class ProbeTest(Base):
         before = len(self.calls())
         self.expect_probe(0, "PROBED", "--set", "resume", "--if-changed")
         self.assertEqual(len(self.calls()), before)
-        self.assertIn("reusing recorded launch styles", (self.run_dir / "run-log.md").read_text())
+        self.assertIn("reusing recorded launch styles", (self.run_dir / "mission-log.md").read_text())
 
     def test_resume_if_changed_probes_only_new_pair_when_version_unchanged(self):
         self.behave("ok", "ok", "ok", "ok")
@@ -159,7 +159,7 @@ class ProbeTest(Base):
         self.expect_probe(0, "PROBED", "--set", "step3")
         before = len(self.calls())
         s = self.st()
-        s["CLERICAL_PAIR"] = "antigravity:big@low"
+        s["GROUND_CREW_PAIR"] = "antigravity:big@low"
         self.state.write_text(json.dumps(s))
         self.behave("ok")
         self.expect_probe(0, "PROBED", "--set", "resume", "--if-changed")

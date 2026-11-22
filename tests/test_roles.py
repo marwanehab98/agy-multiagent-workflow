@@ -45,10 +45,10 @@ class RolesTests(unittest.TestCase):
         self.assertIn("OK crew antigravity:g@high", out)
 
     def test_check_reports_missing_session_and_role_skills(self):
-        self.edit_catalog(lambda c: c["harnesses"]["antigravity"]["skills"].pop("gauntlet"))
+        self.edit_catalog(lambda c: c["harnesses"]["antigravity"]["skills"].pop("flight-readiness"))
         rc, out = self.roles("check", safety="antigravity:g@high")
         self.assertEqual(rc, 1)
-        self.assertIn("MISSING safety antigravity:g@high gauntlet in antigravity: put it in /home/u/.gemini/config/skills, "
+        self.assertIn("MISSING safety antigravity:g@high flight-readiness in antigravity: put it in /home/u/.gemini/config/skills, "
                       "or enable a plugin that has it (agy plugin list)", out)
         self.edit_catalog(lambda c: c["harnesses"]["antigravity"]["skills"].pop("mission"))
         rc, out = self.roles("check")
@@ -57,13 +57,13 @@ class RolesTests(unittest.TestCase):
 
     def test_missing_without_where_in_an_old_catalog(self):
         def strip(c):
-            c["harnesses"]["antigravity"]["skills"].pop("gauntlet")
+            c["harnesses"]["antigravity"]["skills"].pop("flight-readiness")
             for k in ("skill_dirs", "plugin_cmd", "mcp_cmd"):
                 c["harnesses"]["antigravity"].pop(k)
         self.edit_catalog(strip)
         rc, out = self.roles("check")
         self.assertEqual(rc, 1)
-        self.assertIn("MISSING safety antigravity:g@high gauntlet in antigravity\n", out + "\n")
+        self.assertIn("MISSING safety antigravity:g@high flight-readiness in antigravity\n", out + "\n")
 
     def test_jira_needs_connected_atlassian(self):
         self.assertEqual(self.roles("check", jira="yes")[0], 0)
@@ -179,7 +179,7 @@ class RolesTests(unittest.TestCase):
 
     def test_execute_plan_mode_requires_execution_skills_only(self):
         def strip_design(c):
-            for s in ("mission", "draft-spec", "flight-plan", "crucible", "gauntlet", "crossfire"):
+            for s in ("mission", "mission-brief", "flight-plan", "wind-tunnel", "flight-readiness", "cross-check"):
                 c["harnesses"]["antigravity"]["skills"].pop(s, None)
         self.edit_catalog(strip_design)
         self.assertEqual(self.roles("check")[0], 1)

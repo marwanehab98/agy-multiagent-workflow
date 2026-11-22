@@ -1,8 +1,8 @@
 """Run the capsule communicator's Step 2 read-only design workers synchronously via headless CLI workers.
 
-The flight director asks for a worker with a NEED result: a builder check, a Range Safety design review,
+The flight director asks for a worker with a NEED result: a preflight check, a Range Safety design review,
 a Range Safety lens pass or a Range Safety plan review. Each call runs every deterministic action it can
-(check the docs worktree, test-launch the builder pair, run the worker, save its response, restore the
+(check the docs worktree, test-launch the preflight pair, run the worker, save its response, restore the
 docs worktree, retry once, count runs) and exits at the first point that needs the flight director.
 
 Usage:
@@ -12,7 +12,7 @@ Usage:
   python3 -I run_design.py --state <file> advance --docs-moved
 
 Results it accepts (the first non-empty line of the file):
-  RESULT: NEED builder-check <design rel> <pair>
+  RESULT: NEED preflight-check <design rel> <pair>
   RESULT: NEED safety <design rel> <findings rel>
   RESULT: NEED lens <concepts abs>
   RESULT: NEED plan-review <plan abs> <context abs>
@@ -21,7 +21,7 @@ Anything else is ERROR UNEXPECTED_RESULT.
 
 The last line of stdout is the status.
 Exit 20  DIRECTOR_JOB <job> <input>        send that flight director job with INPUT=<everything after the job name>.
-                                           Jobs: commit-docs, builder-check-done, lens-done, safety-done,
+                                           Jobs: commit-docs, preflight-check-done, lens-done, safety-done,
                                            safety-limit, plan-review-done. Save its RESULT line to a file and
                                            call advance --result <file>
 Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight director job `consult` with
@@ -29,7 +29,7 @@ Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
-The builder check runs on the pair in its NEED line (checked with validate_meta.py harness-pair and
+The preflight check runs on the pair in its NEED line (checked with validate_meta.py harness-pair and
 test-launched first); lens, Range Safety design review and plan review run on ROLE_SAFETY. A worker fails
 when it exits failed, is stopped, hits a usage limit, or leaves its output file missing or empty. A failure
 is retried once (RETRY_<kind>), then the done job gets "failed: <saved file>". Run limits: SAFETY_RUNS 3,
@@ -47,8 +47,8 @@ from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build,
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
 
-NEED_ARGS = {"builder-check": 2, "safety": 2, "lens": 1, "plan-review": 2}
-DONE_JOB = {"builder-check": "builder-check-done", "safety": "safety-done", "lens": "lens-done",
+NEED_ARGS = {"preflight-check": 2, "safety": 2, "lens": 1, "plan-review": 2}
+DONE_JOB = {"preflight-check": "preflight-check-done", "safety": "safety-done", "lens": "lens-done",
             "plan-review": "plan-review-done"}
 
 
@@ -119,12 +119,12 @@ class Design:
             r.log(f"docs worktree dirty before a design worker: {check}")
             self.job("commit-docs", str(check), phase="commit-docs")
         kind, args = self.need()
-        if kind != "builder-check":
+        if kind != "preflight-check":
             return self.dispatch()
         pair = args[1]
         rc, out = tool("validate_meta.py", "harness-pair", "--state", str(r.path), "--pair", pair)
         if rc != 0:
-            bad = next_free(r.run_dir / "results", "builder-pair-{n}.txt")
+            bad = next_free(r.run_dir / "results", "preflight-pair-{n}.txt")
             bad.write_text(out + "\n", encoding="utf-8")
             self.job(DONE_JOB[kind], f"failed: {bad}")
         self.set_phase("probe")
@@ -135,11 +135,11 @@ class Design:
             Prober(self.r, self.runner).advance([pair])
         except Done as d:
             if d.code == STOP and d.line.startswith("PROBE_FAILED"):
-                self.job(DONE_JOB["builder-check"], f"failed: {d.line.split()[-1]}")
+                self.job(DONE_JOB["preflight-check"], f"failed: {d.line.split()[-1]}")
             raise
         self.set_phase("dispatch")
 
-    def safety_skills(self, skill_name="gauntlet"):
+    def safety_skills(self, skill_name="flight-readiness"):
         r = self.r
         harness = parse_pair(r.need("ROLE_SAFETY")).harness
         rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
@@ -150,7 +150,7 @@ class Design:
             skills_dir = bundled_skills_dir(skill_name)
             if not skills_dir:
                 raise Done(ERROR, f"ERROR SAFETY_SKILLS {out}")
-        if skill_name == "gauntlet":
+        if skill_name == "flight-readiness":
             r.set(SAFETY_SKILLS=skills_dir)
         return skills_dir
 
@@ -158,14 +158,14 @@ class Design:
         r = self.r
         kind, args = self.need()
         spec = next_free(r.run_dir / "specs", kind + "-{n}.txt")
-        names = {"builder-check": "builder-check-{n}.md", "safety": "safety-{n}.md", "lens": "lens-{n}.md",
+        names = {"preflight-check": "preflight-check-{n}.md", "safety": "safety-{n}.md", "lens": "lens-{n}.md",
                  "plan-review": "plan-review-{n}.md"}
         out = next_free(r.run_dir, names[kind])
-        if kind == "builder-check":
-            build("builder-check.txt", spec, {"DESIGN_FILE": args[0], "OUTPUT_FILE": out})
+        if kind == "preflight-check":
+            build("preflight-check.txt", spec, {"DESIGN_FILE": args[0], "OUTPUT_FILE": out})
             pair = args[1]
         else:
-            skill_map = {"safety": "gauntlet", "lens": "crucible", "plan-review": "crossfire"}
+            skill_map = {"safety": "flight-readiness", "lens": "wind-tunnel", "plan-review": "cross-check"}
             skills = self.safety_skills(skill_map[kind])
             pair = r.need("ROLE_SAFETY")
             if kind == "safety":

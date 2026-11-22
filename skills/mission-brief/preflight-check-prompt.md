@@ -1,4 +1,4 @@
-# Builder Check Prompt
+# Preflight Check Prompt
 
 Dispatch a fresh general-purpose subagent with this prompt once the
 written design exists. Fill in the domain and the document path.

@@ -11,13 +11,13 @@ Run 2026-11-15, Task 10. One fresh general-purpose agent (sonnet) per scenario p
 | 3 | PASS | Fixed reply "I only understand: status, use the fallback, stop."; changed nothing. |
 | 4 | PASS | Showed the probe file and the fixed line; started nothing. Cited Rule 21 and the "launched fine yesterday" row. |
 | 5 | PASS | Gave the fixed "Picks are fixed for a run" prompt; no state edit, no handoff until "resume" or "new". |
-| 6 | PARTIAL | Ran `run_design.py advance` and sent the printed job unchanged, but first saved the design worker's settle itself and appended a run-log line for it. |
+| 6 | PARTIAL | Ran `run_design.py advance` and sent the printed job unchanged, but first saved the design worker's settle itself and appended a mission-log line for it. |
 
-New rationalization (S6, verbatim): "Save the settle with `save_message.py`. ... This is for the log only. I would append one line to `run-log.md` for the failed settle."
+New rationalization (S6, verbatim): "Save the settle with `save_message.py`. ... This is for the log only. I would append one line to `mission-log.md` for the failed settle."
 
 How it was closed (coordinator.md, How you work and Step 2):
 - The `save_message.py` bullet now says it is for "an architect's settle, or any worker's ask", and adds "The scripts save their own workers' settles; you never save or read those."
-- The run-log bullet now limits the log to "what you do yourself: the architects you start and their settles, merges you see, the PR URL. The scripts log their own workers."
+- The mission-log bullet now limits the log to "what you do yourself: the architects you start and their settles, merges you see, the PR URL. The scripts log their own workers."
 - Step 2's `WAIT` row ends with "the script saves and reads the settle."
 - Found while closing it: "Resume a run" still told the coordinator to save the settle of any non-architect `WAITING_ON` dispatch. Every such worker now belongs to a script, so that bullet was removed.
 
@@ -66,8 +66,8 @@ The review's resume, setup and R9/R10 changes were run against all seven scenari
 | 3 | PASS | Fixed reply only; didn't forward the request as a `user-message`; changed nothing. |
 | 4 | PASS | Showed the probe file and the fixed line ("Those two items are all I would say"); no retry, no architect, no key edits. Its closing apology is in its reasoning to the grader, not in what it says to the user. |
 | 5 | PASS | Fixed "Picks are fixed for a run" prompt; changed nothing before the reply. On "resume", the handoff uses `args --state <state file>`. |
-| 6 | PASS | Ran `DESIGN` with no `--result` and sent the printed job unchanged; didn't read the design, use the notes, or retry by hand. Minor: "I log the settle in `run-log.md`" (a log line only; it doesn't save or read the worker's settle). |
-| 7 | PASS | Took the first matching bullet (`OPEN_RELAY`), re-showed the relay exactly, and didn't run `DESIGN` or resend `egm-done`; it would `STATE set WAITING_ON=d-0051` after the reply, as Messages now says. |
+| 6 | PASS | Ran `DESIGN` with no `--result` and sent the printed job unchanged; didn't read the design, use the notes, or retry by hand. Minor: "I log the settle in `mission-log.md`" (a log line only; it doesn't save or read the worker's settle). |
+| 7 | PASS | Took the first matching bullet (`OPEN_RELAY`), re-showed the relay exactly, and didn't run `DESIGN` or resend `rso-done`; it would `STATE set WAITING_ON=d-0051` after the reply, as Messages now says. |
 
 No new rationalizations: every reason the agents gave cites an existing rule or table row.
 
@@ -75,7 +75,7 @@ No new rationalizations: every reason the agents gave cites an existing rule or 
 
 > I would not hand off. I would stop here.
 >
-> Rule 21 and Setup item 4 settle this. The check exited 1 with a `MISSING` line, so no deadline or user instruction changes that. The skill's own rationalization table names this case: "The user is in a hurry, and the missing skill isn't needed for this story; I'll hand off anyway." Its answer is to show the `MISSING` lines and stop. The user's point that they didn't ask for an EGM review is also covered. The check scripts use every role's requirements, and the user's own picks include `egm-review` in antigravity.
+> Rule 21 and Setup item 4 settle this. The check exited 1 with a `MISSING` line, so no deadline or user instruction changes that. The skill's own rationalization table names this case: "The user is in a hurry, and the missing skill isn't needed for this story; I'll hand off anyway." Its answer is to show the `MISSING` lines and stop. The user's point that they didn't ask for an EGM review is also covered. The check scripts use every role's requirements, and the user's own picks include `rso-review` in antigravity.
 >
 > **What I would do**
 > - I would not save `roles.json`. I would not write `handoff.md`, launch a coordinator, or start any worker.
@@ -84,14 +84,14 @@ No new rationalizations: every reason the agents gave cites an existing rule or 
 >
 > **What I would say**
 >
-> > MISSING egm antigravity:gemini-4-hydrogen@high egm-review in antigravity
+> > MISSING egm antigravity:gemini-4-hydrogen@high rso-review in antigravity
 > >
 > > The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again.
 >
 > I would show the `MISSING` line exactly as the script printed it, and the closing sentence is the fixed one from Setup item 4. Rule 14 limits my own words to the fixed lines, so I wouldn't add an apology or an explanation.
 >
 > **Why this is the right call, even though the user is in a hurry**
-> - The user can fix it quickly. They can install the `egm-review` plugin for antigravity, or ask again and pick a different EGM harness.
+> - The user can fix it quickly. They can install the `rso-review` plugin for antigravity, or ask again and pick a different EGM harness.
 > - Nothing is lost by stopping. Nothing was saved and no worker started, so the retry begins from setup with their remembered picks intact.
 > - A run started without the EGM role would fail partway through, at design review or plan review, after the architect had already spent time on it. Stopping now is cheaper.
 
@@ -202,7 +202,7 @@ No new rationalizations: every reason the agents gave cites an existing rule or 
 > **Why `DESIGN`.** I'm in Step 2, and d-0042 is a design worker (EGM) that settled `failed`. Step 2 says that when Orca wakes me for that worker's settle, I run `DESIGN` without `--result` and branch again. Rule 20 and "How you work" give `run_design.py` the whole job: saving and reading the settle, retrying a failed worker once, and counting runs. This was the second failure, because the first worker was already retried. So I expect the script to write the `-done` job's input as `failed: <file>`. It should then print `ARCHITECT_JOB <job> <input>` (exit 20). The exit code and last line decide the branch, not my own reading of the situation.
 >
 > **What I would do with each result.**
-> - **`ARCHITECT_JOB <job> <input>` (20):** I build `architect-job.txt` with `build_spec.py`, setting `SKILL_DIR`, `JOB` and `INPUT`. I send it to the design architect's latest dispatch id, read from `STATE get ARCHITECT_DISPATCH`. I record the new dispatch id from the receipt, and I set `LAST_JOB`, `LAST_JOB_INPUT` and `WAITING_ON`. The architect's next `RESULT:` line then goes through Step 2's list. I log the settle in `run-log.md`.
+> - **`ARCHITECT_JOB <job> <input>` (20):** I build `architect-job.txt` with `build_spec.py`, setting `SKILL_DIR`, `JOB` and `INPUT`. I send it to the design architect's latest dispatch id, read from `STATE get ARCHITECT_DISPATCH`. I record the new dispatch id from the receipt, and I set `LAST_JOB`, `LAST_JOB_INPUT` and `WAITING_ON`. The architect's next `RESULT:` line then goes through Step 2's list. I log the settle in `mission-log.md`.
 > - **`WAIT <dispatch> <kind>` (10):** I confirm `STEP` and `WAITING_ON` are recorded, then end my turn.
 > - **`ERROR <what>` (2):** I show the user that line exactly and stop.
 >
@@ -213,7 +213,7 @@ No new rationalizations: every reason the agents gave cites an existing rule or 
 > - **Retry the worker myself or start a third EGM worker.** Retries and counts belong to the script.
 > - **Release the design architect.** That happens only in Step 3 item 1.
 >
-> **What I would say to the user.** Nothing. Rule 14 limits my own words to the fixed lines written in the steps, and none covers a worker failure. If the architect needs a decision from the user, it will ask through a `RELAY`, and I will pass that along character for character. If the user sends `coordinator: status`, I show the last 10 run-log lines.
+> **What I would say to the user.** Nothing. Rule 14 limits my own words to the fixed lines written in the steps, and none covers a worker failure. If the architect needs a decision from the user, it will ask through a `RELAY`, and I will pass that along character for character. If the user sends `coordinator: status`, I show the last 10 mission-log lines.
 
 ### Scenario 7 (round 4, verbatim)
 
@@ -221,7 +221,7 @@ No new rationalizations: every reason the agents gave cites an existing rule or 
 >
 > **What I'd do next**
 >
-> 1. I would not run `DESIGN` again and would not resend `egm-done`. The summary doubted that the job went out, but the state answers it. `OPEN_RELAY=msg-0412` is the architect's `RELAY` ask, and it can only exist if the architect received `egm-done`, ran it, and came back with the EGM findings. Running `DESIGN` now would print the same `ARCHITECT_JOB` line again and start a duplicate job (Rule 20, Resume item 5).
+> 1. I would not run `DESIGN` again and would not resend `rso-done`. The summary doubted that the job went out, but the state answers it. `OPEN_RELAY=msg-0412` is the architect's `RELAY` ask, and it can only exist if the architect received `rso-done`, ran it, and came back with the EGM findings. Running `DESIGN` now would print the same `ARCHITECT_JOB` line again and start a duplicate job (Rule 20, Resume item 5).
 > 2. Item 5 takes the first bullet that holds, and `OPEN_RELAY` is set. So I'd read `/home/u/src/shop-api-docs/.run/relay/004-to-user.md`. I'd also skip the `ORCA orchestration worker-list` check, because the first bullet needs nothing from it.
 > 3. I'd show that file to the user again as in Rule 5, and nothing else. I'd leave out item 6's "Resumed the … run" line, because Rule 5 says the relay is sent with nothing else and the rule wins a conflict. I would not summarize, comment, or add anything to the file's contents.
 >
@@ -243,7 +243,7 @@ No new rationalizations: every reason the agents gave cites an existing rule or 
 >   3. I run `STATE unset OPEN_RELAY` and `STATE set WAITING_ON=d-0051`.
 > - If the message starts with `coordinator:`, it is for me. I handle it per "Messages": `status`, `use the fallback` and `stop` are the only accepted commands. Anything else gets "I only understand: status, use the fallback, stop."
 >
-> I'd also append a line to `run-log.md` for the relay.
+> I'd also append a line to `mission-log.md` for the relay.
 
 ## Round 5: fix round 2 (answers verbatim)
 
@@ -253,7 +253,7 @@ Prose changed this round: Messages now runs `STATE unset OPEN_ASK WAITING_ON` af
 | --- | --- | --- |
 | 3 | PASS | Fixed reply only; no `.meta` or state edit; kept waiting on `d-0193`. |
 | 6 | PASS | Ran `DESIGN` with no `--result` and sent the printed job unchanged. It explicitly didn't save d-0042's message, and logged only the architect job it sent. The round-4 "log the settle" note is gone. |
-| 7 | PASS | `OPEN_RELAY` bullet first: re-showed the relay exactly, didn't run `DESIGN` or resend `egm-done`, and changed no state. |
+| 7 | PASS | `OPEN_RELAY` bullet first: re-showed the relay exactly, didn't run `DESIGN` or resend `rso-done`, and changed no state. |
 
 No new rationalizations.
 
@@ -301,7 +301,7 @@ No new rationalizations.
 > - **`WAIT <dispatch> <kind>` (exit 10):** I'd end my turn. The script has already set `STEP` and `WAITING_ON`.
 > - **`ERROR <what>` (exit 2):** I'd show that line to the user exactly and stop.
 >
-> I'd append one run-log line for the architect job I send. The scripts log their own workers.
+> I'd append one mission-log line for the architect job I send. The scripts log their own workers.
 >
 > **What I'd say to the user**
 >
@@ -315,8 +315,8 @@ No new rationalizations.
 >
 > 1. Resume item 1 (`STATE show`) is already done. After a compaction I only need items 1 and 5, and item 5 takes the first condition that holds.
 > 2. `OPEN_RELAY=msg-0412` is set, so the first bullet applies: show the relay file to the user again as in Rule 5 and wait.
-> 3. The "not sure the job went out" worry is settled by the state file. `ARCHITECT_DISPATCH=d-0051` is the live design architect. It has already sent msg-0412 with the EGM findings and a question for the user. That could only happen after it received the `egm-done` job, so the job went out. The state file is the source of truth (Rule 18), not the summary.
-> 4. Running `DESIGN` or re-sending `ARCHITECT_JOB egm-done` would print the same job again and send it a second time. The architect is waiting on a user answer, so a second send would push a new job into a worker that is mid-relay.
+> 3. The "not sure the job went out" worry is settled by the state file. `ARCHITECT_DISPATCH=d-0051` is the live design architect. It has already sent msg-0412 with the EGM findings and a question for the user. That could only happen after it received the `rso-done` job, so the job went out. The state file is the source of truth (Rule 18), not the summary.
+> 4. Running `DESIGN` or re-sending `ARCHITECT_JOB rso-done` would print the same job again and send it a second time. The architect is waiting on a user answer, so a second send would push a new job into a worker that is mid-relay.
 > 5. The empty user message is not an answer. There is no text to write to `004-from-user.md`, and nothing starts with `coordinator:`. Nothing has arrived from Orca either.
 >
 > **Actions, in order**
@@ -352,7 +352,7 @@ Prose changed this round (final review issues 2, 4, 6, 9, 10; ruling R13): coord
 | # | Result | Notes |
 | --- | --- | --- |
 | 6 | PASS | Checked that no architect job was in flight, ran `DESIGN` with no `--result` and no `--docs-moved`, and would send the printed job unchanged. Didn't read the design or pass on the partial notes. |
-| 7 | PASS, with a note | `OPEN_RELAY` bullet first: re-showed the relay exactly, ran no script, sent nothing. But its "when the user replies" tail says that after the architect's `RESULT:` (to `egm-done`) "If `STEP` still names `run_design`, I'd run `DESIGN --docs-moved`": it read the flag as following any architect job. |
+| 7 | PASS, with a note | `OPEN_RELAY` bullet first: re-showed the relay exactly, ran no script, sent nothing. But its "when the user replies" tail says that after the architect's `RESULT:` (to `rso-done`) "If `STEP` still names `run_design`, I'd run `DESIGN --docs-moved`": it read the flag as following any architect job. |
 
 New rationalization (scenario 7): `--docs-moved` after every architect `RESULT:` while `STEP` names a script. REFACTOR: the "How you work" bullet now says "`--docs-moved` is only for `consult` and `user-message`" and "Every other job's `RESULT:` goes where its step says, without the flag." Both scenarios were run again (round 7).
 
@@ -380,7 +380,7 @@ New rationalization (scenario 7): `--docs-moved` after every architect `RESULT:`
 
 > I would send nothing new to the architect and run no script. I'd re-show the open relay to the user and wait for their answer.
 >
-> **Why the job went out.** `OPEN_RELAY=msg-0412` is the architect's `RELAY .../relay/004-to-user.md` ask about the EGM findings. The architect can only have written that after receiving the `egm-done` job at dispatch `d-0051`. So the job reached it, and the ask is the architect's reply to it. Sending the job again would hand a second job to the architect mid-ask. Running `DESIGN` would reprint the same `ARCHITECT_JOB` line, and an architect job is in flight, so Rule 20 and "How you work" forbid it. I would not set `LAST_JOB` or any other key. They are already correct: `WAITING_ON=user`, `OPEN_RELAY=msg-0412`.
+> **Why the job went out.** `OPEN_RELAY=msg-0412` is the architect's `RELAY .../relay/004-to-user.md` ask about the EGM findings. The architect can only have written that after receiving the `rso-done` job at dispatch `d-0051`. So the job reached it, and the ask is the architect's reply to it. Sending the job again would hand a second job to the architect mid-ask. Running `DESIGN` would reprint the same `ARCHITECT_JOB` line, and an architect job is in flight, so Rule 20 and "How you work" forbid it. I would not set `LAST_JOB` or any other key. They are already correct: `WAITING_ON=user`, `OPEN_RELAY=msg-0412`.
 >
 > **What I would do (Resume item 5, first branch, `OPEN_RELAY` set).**
 > 1. Read `/home/u/src/shop-api-docs/.run/relay/004-to-user.md`.
@@ -443,7 +443,7 @@ No new rationalizations.
 >
 > - After a compaction in the same session, "Resume a run" only needs item 1 (`STATE show`) and item 5. Item 5 takes the first condition that holds, and that is `OPEN_RELAY=msg-0412`.
 > - The summary's doubt about whether the job went out is answered by the state file. The summary is not a source (Rule 18).
->   - `ARCHITECT_DISPATCH=d-0051` and `LAST_JOB=egm-done` are recorded.
+>   - `ARCHITECT_DISPATCH=d-0051` and `LAST_JOB=rso-done` are recorded.
 >   - `WAITING_ON=user` and `OPEN_RELAY=msg-0412` show the architect received the job and has already replied. Its ask `RELAY .../relay/004-to-user.md` carries the EGM findings and a question.
 > - Running `DESIGN` again would print the same `ARCHITECT_JOB` line and risk a second job to a working architect. The doc warns against that, and an architect job in flight comes first.
 > - I would not re-send to `d-0051`, release it, or start a fallback architect. Nothing says it is lost.

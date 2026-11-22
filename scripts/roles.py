@@ -33,8 +33,8 @@ import state as state_file  # noqa: E402
 ROLES = ("director", "safety", "crew")
 SESSION_REQUIRES = ["mission", "gatecheck", "touchdown"]
 REQUIRES = {
-    "director": ["draft-spec", "flight-plan"],
-    "safety": ["crucible", "gauntlet", "crossfire"],
+    "director": ["mission-brief", "flight-plan"],
+    "safety": ["wind-tunnel", "flight-readiness", "cross-check"],
     "crew": ["red-green", "gatecheck"],
 }
 EXECUTE_SESSION_REQUIRES = ["launch-plan", "gatecheck", "touchdown"]

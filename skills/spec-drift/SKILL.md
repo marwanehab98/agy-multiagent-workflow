@@ -9,7 +9,7 @@ description: >-
   or READMEs in a directory.
 ---
 
-# Detect Drift In Designs and Code
+# Spec Drift
 
 When the user asks to detect drift across all designs or a set of READMEs, the
 goal is to identify all instances where the codebase has diverged or failed to

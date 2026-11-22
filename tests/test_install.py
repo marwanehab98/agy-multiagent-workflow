@@ -35,8 +35,8 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((self.target / "THIRD_PARTY_NOTICES.md").is_file())
         self.assertTrue((self.target / "skills" / "mission" / "SKILL.md").is_file())
         self.assertTrue((self.target / "skills" / "launch-plan" / "SKILL.md").is_file())
-        self.assertTrue((self.target / "skills" / "draft-spec" / "SKILL.md").is_file())
-        self.assertTrue((self.target / "skills" / "gauntlet" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "mission-brief" / "SKILL.md").is_file())
+        self.assertTrue((self.target / "skills" / "flight-readiness" / "SKILL.md").is_file())
         self.assertTrue((self.target / "agents" / "zoom_out.md").is_file())
         self.assertTrue((self.target / "resources" / "document_standards" / "feature-spec-standard.md").is_file())
         self.assertTrue((self.target / "scripts" / "run_task.py").is_file())
@@ -103,9 +103,9 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertTrue((kept[0] / "mission" / "marker").is_file())
         for name in (
-            "launch-plan", "draft-spec", "flight-plan", "red-green",
+            "launch-plan", "mission-brief", "flight-plan", "red-green",
             "gatecheck", "touchdown",
-            "crucible", "gauntlet", "crossfire", "spec-drift",
+            "wind-tunnel", "flight-readiness", "cross-check", "spec-drift",
         ):
             self.assertFalse((skills_root / name).exists(), name)
             self.assertTrue((kept[0] / name / "SKILL.md").is_file(), name)
@@ -164,8 +164,8 @@ class InstallTests(unittest.TestCase):
         self.assertIn("INSTALLED", r2.stdout)
         skills_root = self.d / "home" / ".gemini" / "config" / "skills"
         self.assertTrue((skills_root / "mission" / "SKILL.md").is_file())
-        self.assertTrue((skills_root / "gauntlet" / "SKILL.md").is_file())
-        self.assertFalse((skills_root / "gauntlet" / "gauntlet").exists(), "fallback must not nest skill dir")
+        self.assertTrue((skills_root / "flight-readiness" / "SKILL.md").is_file())
+        self.assertFalse((skills_root / "flight-readiness" / "flight-readiness").exists(), "fallback must not nest skill dir")
 
     def harness_install(self, *extra):
         r = sh("bash", str(INSTALL), "--home", str(self.d / "home"), "--harness-fixtures", str(FIXTURES),
@@ -182,24 +182,24 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((dest / "references" / "capsule-communicator.md").is_file())
         self.assertTrue((dest / "agents" / "zoom_out.md").is_file())
         for name in (
-            "launch-plan", "draft-spec", "flight-plan", "red-green",
+            "launch-plan", "mission-brief", "flight-plan", "red-green",
             "gatecheck", "touchdown",
-            "crucible", "gauntlet", "crossfire", "spec-drift",
+            "wind-tunnel", "flight-readiness", "cross-check", "spec-drift",
         ):
             self.assertTrue((skills_root / name / "SKILL.md").is_file(), name)
 
     def test_no_option_updates_existing_antigravity_install(self):
         self.harness_install("--harness", "antigravity")
         skills_root = self.d / "home" / ".gemini" / "config" / "skills"
-        (skills_root / "draft-spec" / "marker").write_text("old\n")
+        (skills_root / "mission-brief" / "marker").write_text("old\n")
         rc, out = self.harness_install()
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.count("INSTALLED"), 1)
         self.assertIn(".gemini/config/skills/mission", out)
         kept = list((self.backups / "antigravity").iterdir())
         self.assertEqual(len(kept), 1)
-        self.assertTrue((kept[0] / "draft-spec" / "marker").is_file())
-        self.assertFalse((skills_root / "draft-spec" / "marker").exists())
+        self.assertTrue((kept[0] / "mission-brief" / "marker").is_file())
+        self.assertFalse((skills_root / "mission-brief" / "marker").exists())
 
     def test_no_option_and_no_existing_install_asks_for_a_harness(self):
         rc, out = self.harness_install()
@@ -229,9 +229,9 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((dest / "agents" / "zoom_out.md").is_file())
         self.assertTrue((dest / ".managed-skills").is_file())
         for name in (
-            "launch-plan", "draft-spec", "flight-plan", "red-green",
+            "launch-plan", "mission-brief", "flight-plan", "red-green",
             "gatecheck", "touchdown",
-            "crucible", "gauntlet", "crossfire", "spec-drift",
+            "wind-tunnel", "flight-readiness", "cross-check", "spec-drift",
         ):
             self.assertTrue((skills_root / name / "SKILL.md").is_file(), name)
 
@@ -240,8 +240,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(self.harness_install("--harness", "claude")[0], 0)
         agy_root = self.d / "home" / ".gemini" / "config" / "skills"
         claude_root = self.d / "home" / ".claude" / "skills"
-        (agy_root / "draft-spec" / "marker").write_text("old-agy\n")
-        (claude_root / "draft-spec" / "marker").write_text("old-claude\n")
+        (agy_root / "mission-brief" / "marker").write_text("old-agy\n")
+        (claude_root / "mission-brief" / "marker").write_text("old-claude\n")
         rc, out = self.harness_install()
         self.assertEqual(rc, 0, out)
         self.assertEqual(out.count("INSTALLED"), 2)
@@ -251,10 +251,10 @@ class InstallTests(unittest.TestCase):
         claude_backups = list((self.backups / "claude").iterdir())
         self.assertEqual(len(agy_backups), 1)
         self.assertEqual(len(claude_backups), 1)
-        self.assertTrue((agy_backups[0] / "draft-spec" / "marker").is_file())
-        self.assertTrue((claude_backups[0] / "draft-spec" / "marker").is_file())
-        self.assertFalse((agy_root / "draft-spec" / "marker").exists())
-        self.assertFalse((claude_root / "draft-spec" / "marker").exists())
+        self.assertTrue((agy_backups[0] / "mission-brief" / "marker").is_file())
+        self.assertTrue((claude_backups[0] / "mission-brief" / "marker").is_file())
+        self.assertFalse((agy_root / "mission-brief" / "marker").exists())
+        self.assertFalse((claude_root / "mission-brief" / "marker").exists())
 
     def test_target_install_includes_claude_plugin_manifest_when_committed(self):
         # Verify install.sh's --target bundle copy includes .claude-plugin/plugin.json from a committed ref.

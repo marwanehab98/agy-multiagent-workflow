@@ -13,7 +13,7 @@ Usage:
   python3 -I probe.py --state <file> advance --docs-moved
 
 Sets: step1 = ROLE_DIRECTOR, ROLE_SAFETY, ROLE_CREW and the crew model at CREW_TOP;
-step3 = every REVIEW_1/REVIEW_2 in the queue's .meta files plus CLERICAL_PAIR; pair = one pair;
+step3 = every REVIEW_1/REVIEW_2 in the queue's .meta files plus GROUND_CREW_PAIR; pair = one pair;
 resume = step1 and step3 together, re-probed even when they hold LAUNCH_STYLE_<key>.
 
 The last line of stdout is the status.
@@ -165,8 +165,8 @@ def set_pairs(r, name, one=None):
     if name == "step3":
         queue = r.run_dir / "queue.txt"
         found = review_pairs(r, queue.read_text(encoding="utf-8").split() if queue.exists() else [])
-        if r.get("CLERICAL_PAIR"):
-            found.append(r.get("CLERICAL_PAIR"))
+        if r.get("GROUND_CREW_PAIR"):
+            found.append(r.get("GROUND_CREW_PAIR"))
         return [parse_pair(x) for x in found]
     raise Done(ERROR, f"ERROR UNKNOWN_SET {name}")
 
@@ -201,14 +201,14 @@ def run_advance(r, set_name, one, moved=False, if_changed=False):
 
 
 def step3_problems(r, failed_line):
-    """Step 3's pairs are the flight director's choices (reviewers, CLERICAL_PAIR), so a failed launch goes back
+    """Step 3's pairs are the flight director's choices (reviewers, GROUND_CREW_PAIR), so a failed launch goes back
     to it as fix-meta input, in validate_meta.py's PROBLEM form, instead of stopping the run."""
     _, pair, results = failed_line.split()
     queue = r.run_dir / "queue.txt"
     ids = queue.read_text(encoding="utf-8").split() if queue.exists() else []
     lines = [l for l in launch_problems(r, ids, failed_line).splitlines() if l.startswith("PROBLEM ") and ":" in l.split()[1]]
-    if r.get("CLERICAL_PAIR") == pair:
-        lines.append(f"PROBLEM pair '{pair}': CLERICAL_PAIR failed its test launch; see {results}")
+    if r.get("GROUND_CREW_PAIR") == pair:
+        lines.append(f"PROBLEM pair '{pair}': GROUND_CREW_PAIR failed its test launch; see {results}")
     out = next_free(r.run_dir, "validate-{n}.txt")
     out.write_text("\n".join(lines or [f"PROBLEM pair '{pair}': failed its test launch; see {results}"]) + "\n",
                    encoding="utf-8")

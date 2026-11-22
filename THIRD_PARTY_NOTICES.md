@@ -11,7 +11,7 @@ external plugin dependencies.
 Source repository: https://github.com/obra/superpowers
 Upstream commit: `22f0b463e7a5e579904dd6211a520321035526f7`
 Vendored and adapted skills:
-- `skills/draft-spec/` (from `brainstorming`: `SKILL.md`, `builder-check-prompt.md`) — adapted to remove `superpowers:` prefixes and `visual-companion` server scripts, and default spec path to `docs/plans/`.
+- `skills/mission-brief/` (from `brainstorming`: `SKILL.md`, `preflight-check-prompt.md`) — adapted to remove `superpowers:` prefixes and `visual-companion` server scripts, and default spec path to `docs/plans/`.
 - `skills/flight-plan/` (from `writing-plans`: `SKILL.md`) — adapted to remove `superpowers:` prefixes and offer `launch-plan` handoff.
 - `skills/red-green/` (from `test-driven-development`: `SKILL.md`, `writing-good-tests.md`) — minor prefix cleanup in `writing-good-tests.md`.
 - `skills/gatecheck/` (from `verification-before-completion`: `SKILL.md`)
@@ -50,9 +50,9 @@ SOFTWARE.
 Source repository: https://github.com/google/elephant-goldfish-model
 Upstream commit: `7d1b721e51448518cc9b0336465041230200dd10`
 Vendored and adapted components:
-- `skills/crucible/SKILL.md` (from `egm-brainstorm`) — adapted for Antigravity & Claude Code standalone and headless worker execution and plugin-relative asset paths.
-- `skills/gauntlet/SKILL.md` (from `egm-review`) — adapted for Antigravity & Claude Code standalone and headless worker execution, inline finding resolution, and plugin-relative asset paths.
-- `skills/crossfire/SKILL.md` (from `egm-review-loop`) — adapted for Antigravity & Claude Code standalone and headless worker execution, inline finding resolution, and plugin-relative asset paths.
+- `skills/wind-tunnel/SKILL.md` (from `egm-brainstorm`) — adapted for Antigravity & Claude Code standalone and headless worker execution and plugin-relative asset paths.
+- `skills/flight-readiness/SKILL.md` (from `egm-review`) — adapted for Antigravity & Claude Code standalone and headless worker execution, inline finding resolution, and plugin-relative asset paths.
+- `skills/cross-check/SKILL.md` (from `egm-review-loop`) — adapted for Antigravity & Claude Code standalone and headless worker execution, inline finding resolution, and plugin-relative asset paths.
 - `skills/spec-drift/SKILL.md` (from `egm-drift-report`) — adapted for harness-neutral standalone and worker execution.
 - `agents/` (`codebase_details.md`, `comprehension.md`, `design_critic.md`, `implementation_readiness.md`, `inventive_catalyst.md`, `structural.md`, `style.md`, `synthesizer.md`, `zoom_out.md`)
 - `resources/execution_instructions.md` and `resources/document_standards/*.md`

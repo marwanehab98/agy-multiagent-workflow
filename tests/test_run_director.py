@@ -57,7 +57,7 @@ class RunDirectorTests(Base):
         notify.write_text("Starting review.\n")
         self.behave(
             {"do": "response", "text": f"RESULT: NOTIFY {notify}\n", "conv_id": "dir_2"},
-            {"do": "response", "text": "RESULT: NEED builder-check design.md antigravity:small@high\n", "conv_id": "dir_2"},
+            {"do": "response", "text": "RESULT: NEED preflight-check design.md antigravity:small@high\n", "conv_id": "dir_2"},
         )
         rc, last = self.director("start", "--state", str(self.state), "--spec", str(self.spec),
                                  "--pair", "antigravity:big@high", "--keep-open")

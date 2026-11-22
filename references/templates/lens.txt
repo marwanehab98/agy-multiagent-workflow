@@ -1,4 +1,4 @@
-Run the Goldfish review phase of the Range Safety `crucible` skill. The skill is a file, not a command you can call: read {{SAFETY_SKILLS}}/crucible/SKILL.md, then follow only its Step 2 "Goldfish Review & Synthesis", in Mode: BRAINSTORM.
+Run the RSO review phase of the Range Safety `wind-tunnel` skill. The skill is a file, not a command you can call: read {{SAFETY_SKILLS}}/wind-tunnel/SKILL.md, then follow only its Step 2 "RSO Review & Synthesis", in Mode: BRAINSTORM.
 Skip Step 1 entirely: the clarification with the user is already done. The anchored feature hypothesis is the full text of {{CONCEPTS_FILE}}. Treat that as confirmed; do not ask the user anything and do not present any readiness gate. Skip Steps 3 and 4.
 Use the brainstorm lenses to find edge cases, risks, and blind spots in that hypothesis, reading the code in this repository where it helps. One round only.
 Write the synthesized findings to {{OUTPUT_FILE}}, as a plain list of findings, each with the lens that raised it and why it matters. Do not write concepts_brief.md or any other file, do not edit any file, and do not commit.

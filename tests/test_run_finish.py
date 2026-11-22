@@ -335,7 +335,7 @@ class Verify(Finish):
                          f"{log}. Reply \"continue\" to open the PR anyway, or \"stop\" to stop the run.\n")
         last, _ = self.expect(0, "VERIFIED", "--reply", "continue")
         self.assertEqual(last, f"VERIFIED {log}")
-        self.assertIn("accepted a failing verification", (self.run_dir / "run-log.md").read_text())
+        self.assertIn("accepted a failing verification", (self.run_dir / "mission-log.md").read_text())
 
     def test_final_clean_after_failed_verification_stop(self):
         self.commit_broken()
@@ -353,7 +353,7 @@ class Verify(Finish):
         self.assertEqual(first, again)
 
     def test_gate_that_cannot_run_is_an_error(self):
-        Path(self.st("RUN_VALUES")).write_text("FEATURE_BRANCH=feature\n")
+        Path(self.st("FLIGHT_MANIFEST")).write_text("FEATURE_BRANCH=feature\n")
         self.behave("pass")
         last, _ = self.expect(2, "ERROR")
         self.assertIn("NO_COMMANDS", last)

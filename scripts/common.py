@@ -63,7 +63,7 @@ def result_words(text):
     """The words of a flight director's RESULT line, without what it may add around the line itself.
 
     Flight directors sometimes wrap the line in backticks or bold, end it with a period, or carry on with
-    prose on the same line ("RESULT: RUN_VALUES_FIXED. The baseline failed because ..."; live test
+    prose on the same line ("RESULT: FLIGHT_MANIFEST_FIXED. The baseline failed because ..."; live test
     2026-11-15). Take the first non-empty line from "RESULT:", cut it at the first sentence break
     (". ", "; ", " - ", a backtick), and drop trailing punctuation from each argument.
     """
@@ -88,7 +88,7 @@ class Done(Exception):
 
 
 def repo_key(name):
-    """Normalize a repo directory name into a safe state/run-values key suffix."""
+    """Normalize a repo directory name into a safe state/flight-manifest key suffix."""
     return re.sub(r"[^A-Za-z0-9_]", "_", name)
 
 
@@ -195,7 +195,7 @@ class Run:
 
     def log(self, event):
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with (self.run_dir / "run-log.md").open("a", encoding="utf-8") as f:
+        with (self.run_dir / "mission-log.md").open("a", encoding="utf-8") as f:
             f.write(f"{stamp} {event}\n")
 
 

@@ -1,6 +1,6 @@
 ---
 name: mission
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers or Claude Code headless claude -p workers, asks to continue an earlier run of this workflow, or names mission-control. For individual stages (draft-spec, flight-plan, launch-plan, gauntlet, etc.), invoke those bundled skills directly.
+description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers or Claude Code headless claude -p workers, asks to continue an earlier run of this workflow, or names mission-control. For individual stages (mission-brief, flight-plan, launch-plan, flight-readiness, etc.), invoke those bundled skills directly.
 ---
 
 # Mission Control
@@ -9,7 +9,7 @@ description: Use when the user hands over a JIRA key or hand-written requirement
 
 ## Overview
 
-This skill takes a JIRA story, or requirements the user wrote by hand, to a reviewed PR. The user picks a model and effort for three worker roles; every other worker follows from those picks. The invoking session runs the whole run as the **Capsule Communicator**—a traffic cop that runs the bundled scripts, dispatches headless CLI workers through those scripts, relays messages unchanged, and merges atomically. It does no design, code, or judgment work itself. Each kind of thinking goes to the worker suited to it:
+This skill takes a JIRA story, or requirements the user wrote by hand, to a reviewed PR. The user picks a model and effort for three worker roles; every other worker follows from those picks. The invoking session runs the whole run as the **Capsule Communicator**—an air-traffic controller that runs the bundled scripts, dispatches headless CLI workers through those scripts, relays messages unchanged, and merges atomically. It does no design, code, or judgment work itself. Each kind of thinking goes to the worker suited to it:
 
 - the **Flight Director** (`director`) designs, plans, answers every question the run raises, and writes everything the user reads. One Flight Director conversation stays open through the design phase (resumed across turns); after plan approval, each job gets a fresh headless Flight Director that works from the run's documents;
 - **Range Safety** (`safety`) workers review the design, the plan, and end-of-run drift;
@@ -23,7 +23,7 @@ A pair is written `<harness>:<model>@<effort>`. Only `scripts/harnesses.py` know
 The session that loads this skill **is the Capsule Communicator**:
 
 - **The user asks to continue or resume an earlier run:** go to "Continue a run" below.
-- **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`draft-spec`, `flight-plan`, `launch-plan`, `crucible`, `gauntlet`, `crossfire`, `spec-drift`, `red-green`, `gatecheck`, `touchdown`) directly.
+- **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`mission-brief`, `flight-plan`, `launch-plan`, `wind-tunnel`, `flight-readiness`, `cross-check`, `spec-drift`, `red-green`, `gatecheck`, `touchdown`) directly.
 - **Otherwise:** run Setup below, then go straight to `references/capsule-communicator.md` Step 1 in this same session.
 
 `SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/` (two directories above this `SKILL.md` in a plugin or repo checkout, or this skill's folder in a flat `install.sh --harness` install). `CFG` is `$HOME/.config/mission-control`, and `CATALOG` is `<CFG>/catalog.json`.
@@ -60,7 +60,7 @@ The session that loads this skill **is the Capsule Communicator**:
 2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
 3. Read `<SKILL_DIR>/references/capsule-communicator.md` in full and run "Resume a run" with that state file in this same session.
 
-All required skills (`draft-spec`, `flight-plan`, `red-green`, `gatecheck`, `touchdown`, `crucible`, `gauntlet`, `crossfire`, `spec-drift`, `launch-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
+All required skills (`mission-brief`, `flight-plan`, `red-green`, `gatecheck`, `touchdown`, `wind-tunnel`, `flight-readiness`, `cross-check`, `spec-drift`, `launch-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
 The Flight Director worker reads `references/flight-director.md`; its spec tells it to. Confirmed headless CLI worker behavior is in `references/agy-facts.md`.
 
 ## Roles
@@ -69,8 +69,8 @@ The Flight Director worker reads `references/flight-director.md`; its spec tells
 | --- | --- | --- |
 | Capsule Communicator | The invoking session | Current session |
 | Design Flight Director, and fallback Flight Director | Headless CLI (`run_director.py`), resumed across turns until plan approval | The Flight Director pick (`ROLE_DIRECTOR`) |
-| Fresh Flight Director, one per job after plan approval | Headless CLI (`run_director.py`) | The Flight Director pick (`ROLE_DIRECTOR`); `CLERICAL_PAIR` for `fix-meta`, `pr`, `jira-close`, `report` |
-| Builder check | Headless CLI, read-only (`run_design.py`) | Chosen by the Flight Director in its `NEED builder-check` line, from its own harness |
+| Fresh Flight Director, one per job after plan approval | Headless CLI (`run_director.py`) | The Flight Director pick (`ROLE_DIRECTOR`); `GROUND_CREW_PAIR` for `fix-meta`, `pr`, `jira-close`, `report` |
+| Preflight check | Headless CLI, read-only (`run_design.py`) | Chosen by the Flight Director in its `NEED preflight-check` line, from its own harness |
 | Range Safety lens pass, design review, and plan review | Headless CLI (`run_design.py`) | The Range Safety pick (`ROLE_SAFETY`) |
 | Crew | Headless CLI (`run_task.py`), resumed across fix/commit rounds | The task's `.meta` `CREW`: the Crew pick, or the Crew model at its highest effort |
 | Escalation attempts | Headless CLI (`run_task.py`) | The ladder `run_task.py` computes: the Crew model at its highest effort, then the Flight Director pick. Past the ladder, a pair the user approved |
@@ -85,7 +85,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 2. **All headless worker calls go through the bundled scripts.** The Capsule Communicator never invokes worker CLIs directly by hand; it only runs the scripts.
 3. **Every worker runs on a pair, and nobody but the user and the Flight Director chooses one.**
    - **The user's three picks** (Flight Director, Range Safety, Crew) are fixed for a run. Nobody changes a `ROLE_*` or `LAUNCH_STYLE_*` key, or `roles.json`, during a run; a different pick means a new run.
-   - **The Flight Director chooses** each task's reviewers, the builder check and `CLERICAL_PAIR`, from its own harness's detected models, and may start a hard complex task at the Crew model's highest effort (Flight Director "Model choices").
+   - **The Flight Director chooses** each task's reviewers, the preflight check and `GROUND_CREW_PAIR`, from its own harness's detected models, and may start a hard complex task at the Crew model's highest effort (Flight Director "Model choices").
    - **`scripts/validate_meta.py` checks every choice** against the catalog and the picks before it is used. `run_task.py` computes the escalation ladder from the picks.
    - **The Capsule Communicator never picks, changes, or writes a pair.** Model and effort reach the worker CLI only through `harnesses.py args` or the scripts, never typed by hand.
 4. **The Capsule Communicator decides nothing.** It branches only on what the steps name: script exit codes and last lines, `RESULT:` lines, and counters.
@@ -137,7 +137,7 @@ Run bundled scripts through their interpreter: `bash <SKILL_DIR>/scripts/<name>.
 
 ## Session values
 
-Every value is a key in `<RUN_DIR>/state.json` (Rule 18); Capsule Communicator "State keys" lists them. `<NAME>` in a step means the value of that key. The task queue is `<RUN_DIR>/queue.txt`, which `REPLAN` and `FINAL_FIX` change. The `VERIFY_<n>` and `GATE_<n>` commands stay in `run-values.txt`, where `gate.py` reads them.
+Every value is a key in `<RUN_DIR>/state.json` (Rule 18); Capsule Communicator "State keys" lists them. `<NAME>` in a step means the value of that key. The task queue is `<RUN_DIR>/queue.txt`, which `REPLAN` and `FINAL_FIX` change. The `VERIFY_<n>` and `GATE_<n>` commands stay in `flight-manifest.txt`, where `gate.py` reads them.
 
 ## Rationalizations that break the run
 

@@ -10,10 +10,10 @@ Every stage of the workflow is available both as an **independently invocable sk
 
 | Starting point | Use | What it does |
 | --- | --- | --- |
-| **Fuzzy / half-baked idea** ("should we even build this?") | `crucible` (standalone) | Runs all 4 steps: deep open-ended questioning, 7-lens stress testing, iterative refinement, and an RFC brief (`concepts_brief.md`) you can feed into `mission` or `draft-spec`. |
+| **Fuzzy / half-baked idea** ("should we even build this?") | `wind-tunnel` (standalone) | Runs all 4 steps: deep open-ended questioning, 7-lens stress testing, iterative refinement, and an RFC brief (`concepts_brief.md`) you can feed into `mission` or `mission-brief`. |
 | **Concrete feature or JIRA story** | `mission` | Full end-to-end pipeline from requirements to a reviewed PR: spec drafting, automated stress-test & design review, task planning, per-task TDD + code review, drift check, and branch landing. |
-| **Existing markdown plan** (or `tasks/` + `run-values.txt`) | `launch-plan` | Skips design/planning and jumps straight into the per-task TDD execution, gate, review, and landing loop. |
-| **Single focused task** (review a doc, fix a bug with TDD, land a branch) | Standalone skill | Call `draft-spec`, `flight-plan`, `gauntlet`, `crossfire`, `red-green`, `gatecheck`, `spec-drift`, or `touchdown` directly in your session. |
+| **Existing markdown plan** (or `tasks/` + `flight-manifest.txt`) | `launch-plan` | Skips design/planning and jumps straight into the per-task TDD execution, gate, review, and landing loop. |
+| **Single focused task** (review a doc, fix a bug with TDD, land a branch) | Standalone skill | Call `mission-brief`, `flight-plan`, `flight-readiness`, `cross-check`, `red-green`, `gatecheck`, `spec-drift`, or `touchdown` directly in your session. |
 
 ---
 
@@ -25,21 +25,21 @@ When you run `mission` or `launch-plan`, your active chat session acts purely as
 Requirements / JIRA Key
         │
         ▼
-  1. Setup & Probe        Detect installed CLIs/models, confirm 3 role picks, probe CLI flags
+  1. Preflight & Systems Check   Detect installed CLIs/models, confirm 3 role picks, probe CLI flags
         │
         ▼
-  2. Design & Review      Flight Director clarifies & drafts spec (draft-spec)
-        │                 ──► 7-lens stress test (crucible Step 2) + 5-stage audit (gauntlet)
-        │                 ──► You approve the spec
+  2. Mission Brief & Safety Review  Flight Director clarifies & drafts spec (mission-brief)
+        │                           ──► 7-lens stress test (wind-tunnel Step 2) + 5-stage audit (flight-readiness)
+        │                           ──► You approve the spec
         ▼
-  3. Task Plan            Flight Director breaks spec into ordered TDD tasks (flight-plan)
-        │                 ──► Adversarial plan audit (crossfire) ──► You approve the plan
+  3. Flight Plan                 Flight Director breaks spec into ordered TDD tasks (flight-plan)
+        │                        ──► Adversarial plan audit (cross-check) ──► You approve the plan
         ▼
-  4. Per-Task Loop        Isolated git worktree ──► Crew implements (red-green TDD)
-        │                 ──► Automated gate (tests/lint) ──► Spec & quality review
-        │                 ──► Atomic fast-forward merge into feature branch
+  4. In-Flight Execution         Isolated git worktree ──► Crew implements (red-green TDD)
+        │                        ──► Automated gate (tests/lint) ──► Spec & quality review
+        │                        ──► Atomic fast-forward merge into feature branch
         ▼
-  5. Finalize & Land      Full-branch verification + spec-drift check ──► PR, local merge, or keep
+  5. Final Check & Touchdown     Full-branch verification + spec-drift check ──► PR, local merge, or keep
 ```
 
 ### Key Mechanics
@@ -47,10 +47,10 @@ Requirements / JIRA Key
 - **Two-phase Flight Director lifecycle (context vs. freshness):**
   - During **design and planning**, one Flight Director session stays open across turns via CLI session resumption (`--conversation` on `agy`, `--resume` on `claude`), so it remembers your Q&A and design rationale.
   - After **plan approval**, every Flight Director job (answering a Crew question, replanning, handling metadata fixes) starts a **fresh** headless session with no prior chat history—forcing it to answer strictly from the committed spec, plan, and files on disk.
-- **Right-sized design review:** `mission` uses `draft-spec` to inspect your codebase first and draft the spec, then automatically runs `crucible` Step 2 (7-lens stress test) and `gauntlet` (5-stage review) on non-trivial designs while skipping heavy passes on small changes.
+- **Right-sized design review:** `mission` uses `mission-brief` to inspect your codebase first and draft the spec, then automatically runs `wind-tunnel` Step 2 (7-lens stress test) and `flight-readiness` (5-stage review) on non-trivial designs while skipping heavy passes on small changes.
 - **Multi-harness & cross-harness role routing:** You assign a `<harness>:<model>@<effort>` pair to three roles during setup:
   - **Flight Director** (`director`) — designs the spec, writes the task plan, answers questions raised mid-run, and picks per-task reviewers.
-  - **Range Safety** (`safety`) — runs fresh-context `crucible` Step 2, `gauntlet`, `crossfire`, and `spec-drift` reviews.
+  - **Range Safety** (`safety`) — runs fresh-context `wind-tunnel` Step 2, `flight-readiness`, `cross-check`, and `spec-drift` reviews.
   - **Crew** (`crew`) — writes code and tests for each task (must differ from the Flight Director pick so stuck tasks can escalate up the effort/model ladder).
 
   Roles can all run on Antigravity, all on Claude Code, or be **mixed in the same run** (for example, `claude:opus@high` for the Flight Director and `antigravity:<model>@high` for Crew). Only [`scripts/harnesses.py`](scripts/harnesses.py) knows harness-specific CLI flags, JSON envelopes, and model catalogs.
@@ -88,7 +88,7 @@ Invoke `mission` with either a JIRA key or written requirements:
 
 ### 2. Execute an existing plan (`launch-plan`)
 
-Already have a markdown plan (or a `tasks/` directory with `run-values.txt`)? Skip design and jump straight into execution, review, and landing:
+Already have a markdown plan (or a `tasks/` directory with `flight-manifest.txt`)? Skip design and jump straight into execution, review, and landing:
 
 > "Use `launch-plan` on `docs/my-feature-plan.md`."
 
@@ -104,9 +104,9 @@ The Capsule Communicator locates `.run/state.json` in the `<topic>-docs` worktre
 
 Every stage works on its own in your current chat session without starting the full `mission` orchestrator:
 
-- **Early ideation (`crucible`):** *"Use `crucible` to stress-test my idea for multi-tenant rate limiting."* Runs all 4 steps (deep questioning, 7-lens parallel critique, refinement, `concepts_brief.md`).
-- **Spec & planning (`draft-spec`, `flight-plan`):** *"Use `draft-spec` to design webhook retries"* or *"Use `flight-plan` to break `docs/plans/webhooks.md` into TDD tasks."*
-- **Document review (`gauntlet`, `crossfire`):** *"Run `gauntlet` on `docs/design.md`"* for a 5-stage design review, or *"Run `crossfire` on `docs/plan.md`"* for an adversarial multi-reviewer audit loop.
+- **Early ideation (`wind-tunnel`):** *"Use `wind-tunnel` to stress-test my idea for multi-tenant rate limiting."* Runs all 4 steps (deep questioning, 7-lens parallel critique, refinement, `concepts_brief.md`).
+- **Spec & planning (`mission-brief`, `flight-plan`):** *"Use `mission-brief` to design webhook retries"* or *"Use `flight-plan` to break `docs/plans/webhooks.md` into TDD tasks."*
+- **Document review (`flight-readiness`, `cross-check`):** *"Run `flight-readiness` on `docs/design.md`"* for a 5-stage design review, or *"Run `cross-check` on `docs/plan.md`"* for an adversarial multi-reviewer audit loop.
 - **Coding & verification (`red-green`, `gatecheck`, `spec-drift`):** *"Use `red-green` to fix the token expiry bug"*, *"Use `gatecheck` before claiming tests pass"*, or *"Run `spec-drift` against `docs/design.md`."*
 - **Landing (`touchdown`):** *"Use `touchdown` to verify and open a PR for this branch."*
 
@@ -117,12 +117,12 @@ Every stage works on its own in your current chat session without starting the f
 | Skill | When to use | Execution style |
 | --- | --- | --- |
 | `mission` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Capsule Communicator + headless `agy -p` / `claude -p` workers |
-| `launch-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through execution, verification, and landing | Capsule Communicator + headless `agy -p` / `claude -p` workers |
-| `draft-spec` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
+| `launch-plan` | Execute an existing markdown plan (or `tasks/` + `flight-manifest.txt`) through execution, verification, and landing | Capsule Communicator + headless `agy -p` / `claude -p` workers |
+| `mission-brief` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
 | `flight-plan` | Break a spec or design doc into TDD tasks and verification steps | Interactive in-session |
-| `crucible` | Full 4-step ideation + 7-lens stress-testing (`concepts_brief.md`); Step 2 is also used automatically inside `mission` | Fresh-context subagent lenses |
-| `gauntlet` | 5-stage design document review (zoom-out, comprehension, critique, readiness) | Fresh-context subagent reviewers |
-| `crossfire` | Adversarial multi-reviewer audit loop on specs, plans, or docs | Fresh-context subagent reviewers |
+| `wind-tunnel` | Full 4-step ideation + 7-lens stress-testing (`concepts_brief.md`); Step 2 is also used automatically inside `mission` | Fresh-context subagent lenses |
+| `flight-readiness` | 5-stage design document review (zoom-out, comprehension, critique, readiness) | Fresh-context subagent reviewers |
+| `cross-check` | Adversarial multi-reviewer audit loop on specs, plans, or docs | Fresh-context subagent reviewers |
 | `spec-drift` | Compare finished source code against design docs | In-session / drift check |
 | `red-green` | Strict RED-GREEN-REFACTOR test-first workflow (lean, behavior-focused tests) | In-session or worker |
 | `gatecheck` | Require fresh command output before claiming success | In-session or worker |

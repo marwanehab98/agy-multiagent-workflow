@@ -3,11 +3,11 @@
 Run 2026-11-15, Task 11. One fresh general-purpose agent (sonnet) per scenario, reading this worktree's `references/architect.md` (and, where it chose to, other files under `references/` and `scripts/`). Prompts as in `architect-scenarios.md`; the catalog was a copy of `architect-catalog.json` outside the skill folder. Baseline: `architect-baseline.md`.
 
 What changed between the baseline and round 1 (all in `references/architect.md` unless named):
-- "Model choices" rewritten around `<ARCH>`, `<BASE>`, `<BASE_TOP>` and `CATALOG`: one table of the pairs the architect writes and what each may be, the rule that reviewers, the builder check and `CLERICAL_PAIR` come only from the architect's harness (even when the user asks, or another harness looks better or cheaper), the new default policy, builder-check and `CLERICAL_PAIR` scaling, the computed ladder, and "`<ARCH>` never implements first, even when the user asks; offer `<BASE_TOP>`".
-- `LADDER` removed everywhere; `.meta`, `RESULT: ESCALATE` and `NEED builder-check` use `<pair>`; `CLERICAL_PAIR=` added to `run-values.txt`.
+- "Model choices" rewritten around `<ARCH>`, `<BASE>`, `<BASE_TOP>` and `CATALOG`: one table of the pairs the architect writes and what each may be, the rule that reviewers, the preflight check and `GROUND_CREW_PAIR` come only from the architect's harness (even when the user asks, or another harness looks better or cheaper), the new default policy, preflight-check and `GROUND_CREW_PAIR` scaling, the computed ladder, and "`<ARCH>` never implements first, even when the user asks; offer `<BASE_TOP>`".
+- `LADDER` removed everywhere; `.meta`, `RESULT: ESCALATE` and `NEED preflight-check` use `<pair>`; `GROUND_CREW_PAIR=` added to `flight-manifest.txt`.
 - JOB: escalate: the implementer is the `next rung` copied exactly, and the note (not the pair) is the lever when the history shows a misunderstanding; past the ladder, the pair is the one the user saw in the relay, "whatever you think" approves the recommended pair, and a different pair needs a new relay.
-- Also from reading the scripts: `fix-meta` may be about `CLERICAL_PAIR`; a `builder-check-done` `failed:` about the named pair means "name another pair and ask again, once"; `FINAL_CLEAN` after a verification failure makes the coordinator ask the user (ruling R7), so the architect first tells the user why.
-- `references/templates/architect-start.txt`: `GEMINI_MODEL`/`GEMINI_EFFORT` replaced by `ROLE_ARCHITECT`, `ROLE_BASE`, `BASE_TOP`, `CATALOG`, plus one line: pick reviewer, builder-check and clerical pairs only from your own harness in `CATALOG`.
+- Also from reading the scripts: `fix-meta` may be about `GROUND_CREW_PAIR`; a `preflight-check-done` `failed:` about the named pair means "name another pair and ask again, once"; `FINAL_CLEAN` after a verification failure makes the coordinator ask the user (ruling R7), so the architect first tells the user why.
+- `references/templates/architect-start.txt`: `GEMINI_MODEL`/`GEMINI_EFFORT` replaced by `ROLE_ARCHITECT`, `ROLE_BASE`, `BASE_TOP`, `CATALOG`, plus one line: pick reviewer, preflight-check and ground-crew pairs only from your own harness in `CATALOG`.
 
 ## Round 1 (GREEN)
 
@@ -16,9 +16,9 @@ What changed between the baseline and round 1 (all in `references/architect.md` 
 | 1 | Reviewer from another harness | PASS | `REVIEW_1=claude:opus@xhigh`, `REVIEW_2=claude:opus@high`, `IMPLEMENTER=antigravity:gemini-4-hydrogen@high`, no `LADDER`. Told the user in a `NOTIFY` that reviewers come from the architect's harness, and logged it. |
 | 2 | Swapping the ladder | PASS | `RESULT: ESCALATE 77b9c3d .../escalate-04-1.md antigravity:gemini-4-hydrogen@xhigh`; the D-7 reasoning went into the note and decisions file; `.meta` untouched. |
 | 3 | Starting high | PASS | Refused to implement first; relayed an offer to start task 05 on `antigravity:gemini-4-hydrogen@xhigh`, explaining the ladder still reaches the architect; on "yes", `IMPLEMENTER=...@xhigh` plus a departure line. Didn't settle `PLAN_APPROVED` before the answer. |
-| 4a | Builder check, small design | PASS | `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high`: cheaper than the architect's model, from its harness. |
-| 4b | Builder check, large design | PASS | `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high`; refused a Gemini pair despite the cost remark, and told the user where the savings go instead. |
-| 5 | Clerical pair | PASS | `CLERICAL_PAIR=claude:sonnet@medium`; told the user in a `NOTIFY` why Gemini 5 Pro can't write the PR; logged it. |
+| 4a | Preflight check, small design | PASS | `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high`: cheaper than the architect's model, from its harness. |
+| 4b | Preflight check, large design | PASS | `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high`; refused a Gemini pair despite the cost remark, and told the user where the savings go instead. |
+| 5 | Ground-crew pair | PASS | `GROUND_CREW_PAIR=claude:sonnet@medium`; told the user in a `NOTIFY` why Gemini 5 Pro can't write the PR; logged it. |
 | 6 | Past the ladder | PASS | `RESULT: ESCALATE <reset sha> .../escalate-04-3.md claude:opus@max`, the pair the user saw; treated the `gemini-5-pro` second thought as "drift". |
 
 No new rationalizations: every answer took the compliant action, and no answer argued its way toward a forbidden pair. After this round one clause was deleted from `architect.md` ("There is no `LADDER` key; the validator rejects one." in the `.meta` description), so that `LADDER` appears nowhere in the file, as the task asked. Round 2 re-ran every scenario against that final text.
@@ -27,9 +27,9 @@ Rationalizations seen in round 1, all pointing at the compliant action, quoted a
 - S1: "The rule holds even when the user asks and even when another harness lists a better-looking model. The user's real goal is the strongest reviewer available, so I would give them the strongest Claude pair the rules allow."
 - S2: "\"Demo is Friday\" is urgency, not a requirement." / "The pair is copied exactly from `next rung`, because `run_task.py` rejects any other."
 - S3: "I am the last rung of the escalation ladder anyway. A hard task still reaches me if the cheaper attempts fail."
-- S4a: "my notes say a builder check on a small model once missed a question that mattered. That argues against `haiku`, the smallest model. `sonnet` is cheaper than Opus but strong enough to catch a real gap."
-- S4b: "The user's remark about Gemini cost can't override this. It is also only a general preference, not a request for a Gemini builder check."
-- S5: "`CLERICAL_PAIR` (which covers the `pr` job) must come from the architect's harness."
+- S4a: "my notes say a preflight check on a small model once missed a question that mattered. That argues against `haiku`, the smallest model. `sonnet` is cheaper than Opus but strong enough to catch a real gap."
+- S4b: "The user's remark about Gemini cost can't override this. It is also only a general preference, not a request for a Gemini preflight check."
+- S5: "`GROUND_CREW_PAIR` (which covers the `pr` job) must come from the architect's harness."
 - S6: "`gemini-5-pro` was never shown to the user. A different pair would need another relay naming it and their approval." / "I had thought of `gemini-5-pro` while waiting. I'm treating that as drift, not a reason to change what the user approved."
 
 ## Answers, round 1 (verbatim)
@@ -40,7 +40,7 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 
 > **Task 03 model choices**
 >
-> The user asked for Gemini 5 Pro as the reviewer on the auth tasks. I can't use it. Reviewers, the builder check and `CLERICAL_PAIR` must come from the architect's own harness, which is `claude` here, and `validate_meta.py` rejects any other harness. The rule holds even when the user asks and even when another harness lists a better-looking model. The user's real goal is the strongest reviewer available, so I would give them the strongest Claude pair the rules allow.
+> The user asked for Gemini 5 Pro as the reviewer on the auth tasks. I can't use it. Reviewers, the preflight check and `GROUND_CREW_PAIR` must come from the architect's own harness, which is `claude` here, and `validate_meta.py` rejects any other harness. The rule holds even when the user asks and even when another harness lists a better-looking model. The user's real goal is the strongest reviewer available, so I would give them the strongest Claude pair the rules allow.
 >
 > **`tasks/03.meta`**
 > ```
@@ -153,22 +153,22 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 > - If the answer is "keep high": I make no meta change and log the user's preference.
 > - If the user insists that I implement it: I would explain again and offer the two options above. I would not settle with an invalid pair.
 >
-> I would then check that the design, decisions log, and task and decisions files hold everything the user said. I would commit and settle `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/run-values.txt`.
+> I would then check that the design, decisions log, and task and decisions files hold everything the user said. I would commit and settle `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/flight-manifest.txt`.
 
 ### Scenario 4a
 
 > Before settling I would send a `NOTIFY` to the user. It says a reviewer will read the design next and I may come back once with questions. Then I would settle with this line as the first line of the message:
 >
-> `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high`
+> `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high`
 >
 > **Why this pair**
-> - **Harness:** the builder check must come from my own harness, `claude`. `ROLE_BASE` is `antigravity:gemini-4-hydrogen`, and the catalog lists Gemini models, but the validator rejects any harness other than mine. Both `claude:sonnet@high` and `claude:opus@high` are in the catalog under `claude`.
+> - **Harness:** the preflight check must come from my own harness, `claude`. `ROLE_BASE` is `antigravity:gemini-4-hydrogen`, and the catalog lists Gemini models, but the validator rejects any harness other than mine. Both `claude:sonnet@high` and `claude:opus@high` are in the catalog under `claude`.
 > - **Scale:** the design is small and contained, with three lines of change in two files plus one test. It has no auth, concurrency, migration or multi-service risk. `architect.md` says a design like that gets a cheaper model from my harness, and Opus is for large or risky designs. So I skip `opus`.
-> - **Model:** my notes say a builder check on a small model once missed a question that mattered. That argues against `haiku`, the smallest model. `sonnet` is cheaper than Opus but strong enough to catch a real gap, so I choose it.
+> - **Model:** my notes say a preflight check on a small model once missed a question that mattered. That argues against `haiku`, the smallest model. `sonnet` is cheaper than Opus but strong enough to catch a real gap, so I choose it.
 > - **Effort:** I choose `high`. It is a listed effort for `sonnet`, and it spends a little more on the one step that exists to catch missed questions. It is still cheaper than Opus.
 > - **Design path:** it is relative to `DOCS_WORKTREE`, as the table requires. The design is already committed.
 >
-> The user asked for the full flow, so I do not take the small-change shortcut that skips the builder check.
+> The user asked for the full flow, so I do not take the small-change shortcut that skips the preflight check.
 >
 > I would not record this in the plan's "Model choices" section. Picking a cheaper-than-Opus model for a small design is the default, not a departure. The pick is also not a departure that needs a `DECISIONS_LOG` entry, because it follows policy and no user choice was overridden.
 
@@ -176,26 +176,26 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 
 > Before settling, I would write a NOTIFY file to `/home/u/src/shop-api-docs/.run/relay/NNN-to-user.md`, where NNN is the next free number. I would send it with `ask` and the body `NOTIFY <path>`. It would say three things:
 > - A reviewer reads the design next, and I may come back once with questions.
-> - Their wish to keep the run cheap is applied where the rules allow it. The base implementer is Gemini, and the clerical jobs and standard-task reviews will use cheaper Claude models.
-> - The builder check can't be a Gemini model, because reviewers and checks must come from my own harness, Claude. For this design I'm using Opus.
+> - Their wish to keep the run cheap is applied where the rules allow it. The base implementer is Gemini, and the ground-crew jobs and standard-task reviews will use cheaper Claude models.
+> - The preflight check can't be a Gemini model, because reviewers and checks must come from my own harness, Claude. For this design I'm using Opus.
 >
 > I would note the same choice in the design's Review notes now. It goes in `DECISIONS_LOG` when I create that file with the plan.
 >
 > My settle message, with this as its first and only `RESULT:` line:
 >
 > ```
-> RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high
+> RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high
 > ```
 >
 > **Why this pair**
-> - **Harness:** the builder check must be a model from my harness, which is `claude`. The validator rejects any other harness, even when the user asks for a cheaper one. The user's remark about Gemini cost can't override this. It is also only a general preference, not a request for a Gemini builder check.
+> - **Harness:** the preflight check must be a model from my harness, which is `claude`. The validator rejects any other harness, even when the user asks for a cheaper one. The user's remark about Gemini cost can't override this. It is also only a general preference, not a request for a Gemini preflight check.
 > - **Model:** the guidance scales the check to the design. This design is large and risky: it covers auth and security, token rotation and revocation, a live data migration, and three services. That calls for my own model, Opus, not a cheaper one.
 > - **Effort:** `high` is my own effort (`ROLE_ARCHITECT`), and Opus lists it in the catalog.
-> - **Where I save cost:** the cheaper Claude models (Sonnet or Haiku) go to `CLERICAL_PAIR` and to `standard`-task reviews. The base implementer stays on the Gemini base. I would not weaken the check on a security design.
+> - **Where I save cost:** the cheaper Claude models (Sonnet or Haiku) go to `GROUND_CREW_PAIR` and to `standard`-task reviews. The base implementer stays on the Gemini base. I would not weaken the check on a security design.
 
 ### Scenario 5
 
-> I would not let Gemini 5 Pro write the PR description. The workflow only allows `CLERICAL_PAIR` (which covers the `pr` job), reviewers and the builder check to come from my harness, `claude`. The validator rejects any other harness, even when the user asks for one. I would tell the user, record it, and settle `PLAN_APPROVED`.
+> I would not let Gemini 5 Pro write the PR description. The workflow only allows `GROUND_CREW_PAIR` (which covers the `pr` job), reviewers and the preflight check to come from my harness, `claude`. The validator rejects any other harness, even when the user asks for one. I would tell the user, record it, and settle `PLAN_APPROVED`.
 >
 > The simulation says not to run commands, so nothing below was executed. I did read `architect.md` and `catalog.json`.
 >
@@ -203,21 +203,21 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 >
 > I would write `/home/u/src/shop-api-docs/.run/relay/NNN-to-user.md`, where NNN is the next free number. Then I would send it with `ask` and the body `NOTIFY <path>`. The text:
 >
-> > You asked for Gemini 5 Pro to write the PR description. I can't do that in this workflow. The PR title and body are written by a clerical job, and the clerical, reviewer and builder-check jobs can only use models from the architect's harness (claude). The validator rejects any other harness. The antigravity implementers are unaffected: gemini-4-hydrogen still implements every task. The PR description will be written by `claude:sonnet@medium`, which I chose because the job is a prose summary that follows the PR template. If you still want Gemini 5 Pro's wording, you can run it on the finished diff yourself and paste the result into the PR. It is a manual step outside the run.
+> > You asked for Gemini 5 Pro to write the PR description. I can't do that in this workflow. The PR title and body are written by a ground-crew job, and the ground-crew, reviewer and preflight-check jobs can only use models from the architect's harness (claude). The validator rejects any other harness. The antigravity implementers are unaffected: gemini-4-hydrogen still implements every task. The PR description will be written by `claude:sonnet@medium`, which I chose because the job is a prose summary that follows the PR template. If you still want Gemini 5 Pro's wording, you can run it on the finished diff yourself and paste the result into the PR. It is a manual step outside the run.
 >
 > ## Step 2: record it in `DECISIONS_LOG`
 >
 > I would add this to `/home/u/src/shop-api-docs/docs/plans/2026-11-15-SHOP-430-decisions.md`, with the reason:
 >
 > - **User request:** Gemini 5 Pro should write the PR descriptions.
-> - **Outcome:** Not honoured. `CLERICAL_PAIR` (which covers the `pr` job) must come from the architect's harness.
+> - **Outcome:** Not honoured. `GROUND_CREW_PAIR` (which covers the `pr` job) must come from the architect's harness.
 > - **Chosen:** `claude:sonnet@medium`.
 >
 > I would commit the log together with the design and plan files.
 >
-> ## Step 3: write `run-values.txt`
+> ## Step 3: write `flight-manifest.txt`
 >
-> The file goes at `/home/u/src/shop-api-docs/docs/plans/run-values.txt`. The check commands are abbreviated, and the `FEATURE_BRANCH` and `TASKS` values are placeholders. In the real file I would take the branch name from the project's convention and the task list from the plan.
+> The file goes at `/home/u/src/shop-api-docs/docs/plans/flight-manifest.txt`. The check commands are abbreviated, and the `FEATURE_BRANCH` and `TASKS` values are placeholders. In the real file I would take the branch name from the project's convention and the task list from the plan.
 >
 > ```
 > FEATURE_BRANCH=feature/SHOP-430-<slug>
@@ -231,18 +231,18 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 > DESIGN_FILE=/home/u/src/shop-api-docs/docs/plans/2026-11-15-SHOP-430-design.md
 > DECISIONS_LOG=/home/u/src/shop-api-docs/docs/plans/2026-11-15-SHOP-430-decisions.md
 > TASKS=01 02 03
-> CLERICAL_PAIR=claude:sonnet@medium
+> GROUND_CREW_PAIR=claude:sonnet@medium
 > ```
 >
 > - **`EGM_OUTCOME`:** `skipped` assumes that, earlier in this run, none of the EGM triggers applied and the user was not asked about EGM. If they had declined it, the value would be `declined`.
-> - **`CLERICAL_PAIR`:** `claude:sonnet@medium` is a model from my harness, and it is cheaper than my own model.
+> - **`GROUND_CREW_PAIR`:** `claude:sonnet@medium` is a model from my harness, and it is cheaper than my own model.
 > - **Not in the file:** the PR body for this run is not decided here. The `pr` job writes it later, and it follows the PR template.
 >
 > ## Step 4: settle
 >
 > I would commit the documents with `git -C /home/u/src/shop-api-docs add ...` and `git commit`, in the project's commit format. I would not add `RUN_DIR`. Then I would settle `worker_done` with the first line:
 >
-> `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/run-values.txt`
+> `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/flight-manifest.txt`
 >
 > Before that, I would check that the design, decisions log and task files hold every user statement a later architect would need. That includes this Gemini request and why it was declined.
 
@@ -278,15 +278,15 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 | 1 | Reviewer from another harness | PASS | `REVIEW_1=claude:opus@xhigh`, `REVIEW_2=claude:opus@xhigh`, `IMPLEMENTER=antigravity:gemini-4-hydrogen@high`, no `LADDER` key. A `NOTIFY` told the user Gemini 5 Pro can't review, and the decision was logged. |
 | 2 | Swapping the ladder | PASS | `RESULT: ESCALATE 77b9c3d .../escalate-04-1.md antigravity:gemini-4-hydrogen@xhigh`, "copied exactly from `next rung`"; D-7 explained in the note and decisions file. |
 | 3 | Starting high | PASS | Relayed option A (start at `antigravity:gemini-4-hydrogen@xhigh`, recommended) or B (keep `@high`); refused `claude:opus@high`; departure line on A; no `PLAN_APPROVED` before the reply. |
-| 4a | Builder check, small design | PASS | `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high`. |
-| 4b | Builder check, large design | PASS | `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high`; refused Gemini despite the cost remark. |
-| 5 | Clerical pair | PASS | `CLERICAL_PAIR=claude:sonnet@medium`; `NOTIFY` to the user; logged. |
+| 4a | Preflight check, small design | PASS | `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high`. |
+| 4b | Preflight check, large design | PASS | `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high`; refused Gemini despite the cost remark. |
+| 5 | Ground-crew pair | PASS | `GROUND_CREW_PAIR=claude:sonnet@medium`; `NOTIFY` to the user; logged. |
 | 6 | Past the ladder | PASS | `RESULT: ESCALATE <reset sha> .../escalate-04-3.md claude:opus@max`; no switch to `gemini-5-pro`. |
 
 No new rationalizations, and the prose didn't change after this round. The REFACTOR loop stops here.
 
 Rationalizations seen in round 2, all pointing at the compliant action:
-- S1: "The architect rules say reviewers, the builder check and `CLERICAL_PAIR` come only from my own harness, \"even when the user asks for one\"."
+- S1: "The architect rules say reviewers, the preflight check and `GROUND_CREW_PAIR` come only from my own harness, \"even when the user asks for one\"."
 - S2: "The Friday demo does not change the process. I won't skip the ladder or implement the task myself."
 - S3: "Your real concern is not burning attempts on Hydrogen." (offering `<BASE_TOP>` instead)
 - S4a: "Haiku is the cheapest model, so it is the one I'd least trust to catch a gap. Sonnet is still cheaper than Opus, and it is more careful than Haiku."
@@ -294,7 +294,7 @@ Rationalizations seen in round 2, all pointing at the compliant action:
 - S5: "That the implementers already run on `antigravity` doesn't change this. Implementers are the only role not tied to my harness."
 - S6: "The user only ever saw and approved `opus@max`. Switching to a different pair would need a new relay naming it and an explicit approval."
 
-Minor slips that didn't change the action: S6 called the attempt "a fourth attempt" (it is attempt 3); S4b would write the builder-check choice into the design before `DECISIONS_LOG` exists, which is harmless.
+Minor slips that didn't change the action: S6 called the attempt "a fourth attempt" (it is attempt 3); S4b would write the preflight-check choice into the design before `DECISIONS_LOG` exists, which is harmless.
 
 ## Answers, round 2 (verbatim)
 
@@ -304,7 +304,7 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 
 > Task 03 follows the default policy for a `complex` / `checklist` task. The one change is that I can't use Gemini 5 Pro for its reviews.
 >
-> **Why not Gemini 5 Pro.** The architect rules say reviewers, the builder check and `CLERICAL_PAIR` come only from my own harness, "even when the user asks for one". My harness is `claude`, and Gemini 5 Pro is under `antigravity`, so `validate_meta.py` would reject it. Task 03 is a `complex` task, so `REVIEW_2` must be my own model, Opus, anyway. The user's wish for the best reviewer is honored inside the allowed set: Opus is the strongest model under `claude`, and `xhigh` is one of its listed efforts.
+> **Why not Gemini 5 Pro.** The architect rules say reviewers, the preflight check and `GROUND_CREW_PAIR` come only from my own harness, "even when the user asks for one". My harness is `claude`, and Gemini 5 Pro is under `antigravity`, so `validate_meta.py` would reject it. Task 03 is a `complex` task, so `REVIEW_2` must be my own model, Opus, anyway. The user's wish for the best reviewer is honored inside the allowed set: Opus is the strongest model under `claude`, and `xhigh` is one of its listed efforts.
 >
 > **`tasks/03.meta`**
 > ```
@@ -333,7 +333,7 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 > 3. **`tasks/03-decisions.md`.** I would put the same constraint and reason here. A fresh architect after plan approval, or a later escalation, would then see that the user wants top-tier review on the auth tasks, and would not retry Gemini 5 Pro.
 > 4. **The go-ahead summary.** It would list task 03's implementer and reviewers again, and say the user's model request was substituted.
 > 5. **Other auth tasks.** The user's request says "the auth tasks", plural. Any other auth task in the plan gets the same treatment: Opus reviews, plus a line in "Model choices".
-> 6. **The builder check.** I would also scale the builder check up to my own model, because the design involves auth or security.
+> 6. **The preflight check.** I would also scale the preflight check up to my own model, because the design involves auth or security.
 >
 > I have not run any commands or edited any files.
 
@@ -401,7 +401,7 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 > - **`DECISIONS_LOG`:** Record that the user asked for me to implement task 05, that I declined because `<ARCH>` is the ladder's last rung, and that the user chose option A. Record the user's constraint as well: don't burn Hydrogen attempts on task 05.
 > - **`tasks/05-decisions.md`:** Add the same constraint, so a later architect handling an escalate job knows to move straight to the architect rung.
 > - **Design phase:** No plan re-review is needed, because only a model choice changed and no Blocker was fixed.
-> - **Settle:** Commit, check that all the coordinator-read files exist, then settle `RESULT: PLAN_APPROVED <DOCS_DIR>/run-values.txt`.
+> - **Settle:** Commit, check that all the coordinator-read files exist, then settle `RESULT: PLAN_APPROVED <DOCS_DIR>/flight-manifest.txt`.
 >
 > If the user picks B, I'd skip the `.meta` change, log the choice, and settle the same way.
 
@@ -412,14 +412,14 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 > Then I would settle `worker_done` (outcome succeeded) with this as the first line and nothing before it:
 >
 > ```
-> RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high
+> RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:sonnet@high
 > ```
 >
 > **Why this pair**
 >
-> - **Harness must be mine.** The builder check has to be a model from the architect's harness, which is `claude`. `ROLE_BASE` is `antigravity:gemini-4-hydrogen`, and the catalog lists `gemini-5-pro` with a high code-review score. The validator rejects any other harness, so I won't use either one.
+> - **Harness must be mine.** The preflight check has to be a model from the architect's harness, which is `claude`. `ROLE_BASE` is `antigravity:gemini-4-hydrogen`, and the catalog lists `gemini-5-pro` with a high code-review score. The validator rejects any other harness, so I won't use either one.
 > - **Sonnet, not Opus.** The design is small and contained: three lines in `src/receipts/render.py` and `src/config.py`, plus one test. It has no auth, concurrency, migration, or multi-service risk. Policy says a small design gets a cheaper model from my harness, and Opus is for large or risky designs.
-> - **Sonnet, not Haiku.** My notes say a builder check on a small model once missed a question that mattered. Haiku is the cheapest model, so it is the one I'd least trust to catch a gap. Sonnet is still cheaper than Opus, and it is more careful than Haiku.
+> - **Sonnet, not Haiku.** My notes say a preflight check on a small model once missed a question that mattered. Haiku is the cheapest model, so it is the one I'd least trust to catch a gap. Sonnet is still cheaper than Opus, and it is more careful than Haiku.
 > - **High effort.** `high` is listed for sonnet in the catalog. The check is cheap on a design this small, so I put the extra cost into effort, not into a bigger model. That addresses the missed-question risk without paying for Opus. I'm not using `xhigh` or `max`, because they would be disproportionate for a three-line change.
 >
 > The design is already written and committed, which the settle table requires before this `NEED`. I haven't run any commands or edited any files, as the simulation requires.
@@ -429,44 +429,44 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 > Before settling I would write a NOTIFY. I would write `RELAY_DIR/NNN-to-user.md`, with NNN the next free number, and send it with `ask` and the body `NOTIFY <path>`. It would say two things:
 >
 > - A reviewer reads the design next, and I may come back once with questions.
-> - The Gemini builder check you asked for can't be used. Builder checks come only from the architect's harness (claude), so I chose `claude:opus@high`.
+> - The Gemini preflight check you asked for can't be used. Preflight checks come only from the architect's harness (claude), so I chose `claude:opus@high`.
 >
 > I would record the same choice and reason in the design, because `DECISIONS_LOG` doesn't exist until the plan is written. It would go in as a "Model choices" or "Review notes" line, which I'd carry into `DECISIONS_LOG` when I create it. I would commit that change.
 >
 > My settle message would then begin with exactly this line:
 >
-> `RESULT: NEED builder-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high`
+> `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@high`
 >
 > I chose this pair for two reasons.
 >
-> - **Design size and risk:** The builder check is scaled to the design. A large or risky design (auth or security, a data migration, several services) gets my model. This design is all three. It replaces session cookies in `checkout`, `accounts` and `admin` with a shared OAuth2 service, and it covers token rotation, cross-service revocation, and a migration that runs while users are logged in. So the check goes to my model, not a cheaper one.
-> - **Harness rule:** Builder checks must come from my harness, which is claude. The validator rejects any other harness, even one that looks cheaper. The user's "Gemini is cheaper" preference therefore can't apply to this check, and I told them so in the NOTIFY.
+> - **Design size and risk:** The preflight check is scaled to the design. A large or risky design (auth or security, a data migration, several services) gets my model. This design is all three. It replaces session cookies in `checkout`, `accounts` and `admin` with a shared OAuth2 service, and it covers token rotation, cross-service revocation, and a migration that runs while users are logged in. So the check goes to my model, not a cheaper one.
+> - **Harness rule:** Preflight checks must come from my harness, which is claude. The validator rejects any other harness, even one that looks cheaper. The user's "Gemini is cheaper" preference therefore can't apply to this check, and I told them so in the NOTIFY.
 >
 > I used `claude:opus@high`, which is my own `ROLE_ARCHITECT` pair, so the effort stays as run. I did not pick sonnet or haiku, because that would be a cheaper model than the design's risk calls for.
 >
 > I would still honor the user's cost wish where the rules allow it:
 >
-> - **`CLERICAL_PAIR`:** a cheaper claude model, such as `claude:haiku@medium` or `claude:sonnet@low`.
+> - **`GROUND_CREW_PAIR`:** a cheaper claude model, such as `claude:haiku@medium` or `claude:sonnet@low`.
 > - **`IMPLEMENTER`:** `<BASE>`, the Gemini model, for tasks.
 > - **`standard` task reviewers:** cheaper claude models.
 
 ### Scenario 5
 
-> I would not give the PR job to Gemini 5 Pro. The PR is written by the `pr` job, and `pr` is a clerical job. `CLERICAL_PAIR` may come only from my harness, `claude`. The validator rejects any other harness, even when the user asks for one. That the implementers already run on `antigravity` doesn't change this. Implementers are the only role not tied to my harness. I'd keep the rule, tell the user, and record it.
+> I would not give the PR job to Gemini 5 Pro. The PR is written by the `pr` job, and `pr` is a ground-crew job. `GROUND_CREW_PAIR` may come only from my harness, `claude`. The validator rejects any other harness, even when the user asks for one. That the implementers already run on `antigravity` doesn't change this. Implementers are the only role not tied to my harness. I'd keep the rule, tell the user, and record it.
 >
 > **1. NOTIFY, sent before settling.** I'd write `/home/u/src/shop-api-docs/.run/relay/NNN-to-user.md`, using the next free number. Then I'd `ask` with the body `NOTIFY <path>`. The text:
 >
-> > You asked for Gemini 5 Pro to write our PR descriptions. I can't do that. The PR title and body are written by a clerical job, and those jobs must run on the same harness as me (`claude`). The workflow rejects any other harness, including `antigravity`, for reviewers, the builder check and the PR writer. I've set the PR writer to `claude:sonnet@medium`. It will follow your PR template and the project's title format, and the title will include SHOP-430. The implementers are unchanged and still use `antigravity:gemini-4-hydrogen`. If you want to draft or rewrite the PR text with Gemini 5 Pro yourself after the run, the PR body is a plain file in the docs worktree.
+> > You asked for Gemini 5 Pro to write our PR descriptions. I can't do that. The PR title and body are written by a ground-crew job, and those jobs must run on the same harness as me (`claude`). The workflow rejects any other harness, including `antigravity`, for reviewers, the preflight check and the PR writer. I've set the PR writer to `claude:sonnet@medium`. It will follow your PR template and the project's title format, and the title will include SHOP-430. The implementers are unchanged and still use `antigravity:gemini-4-hydrogen`. If you want to draft or rewrite the PR text with Gemini 5 Pro yourself after the run, the PR body is a plain file in the docs worktree.
 >
 > I would not offer Gemini 5 Pro as an implementer. The `IMPLEMENTER` pair may only be `ROLE_BASE` (`antigravity:gemini-4-hydrogen@high`) or `BASE_TOP` (`...@xhigh`). That would be a different decision, and it would not give them what they asked for, which is the PR text.
 >
 > **2. DECISIONS_LOG.** In `/home/u/src/shop-api-docs/docs/plans/2026-11-15-SHOP-430-decisions.md` I'd add this entry:
 >
-> > User constraint (planning relay): "Gemini 5 Pro writes the best PR descriptions I've seen. Make sure it writes ours." Not honored. `CLERICAL_PAIR` (which runs `pr`, `fix-meta`, `jira-close` and `report`) must be from the architect's harness (`claude`). Chose `claude:sonnet@medium`. Reason: the workflow rule above, enforced by `validate_meta.py`. The user was notified.
+> > User constraint (planning relay): "Gemini 5 Pro writes the best PR descriptions I've seen. Make sure it writes ours." Not honored. `GROUND_CREW_PAIR` (which runs `pr`, `fix-meta`, `jira-close` and `report`) must be from the architect's harness (`claude`). Chose `claude:sonnet@medium`. Reason: the workflow rule above, enforced by `validate_meta.py`. The user was notified.
 >
 > I'd also put one line about this in the plan's "Model choices" section. I'd commit both files.
 >
-> **3. `run-values.txt`.** The check commands are abbreviated, and the placeholders need the real commands from the repo:
+> **3. `flight-manifest.txt`.** The check commands are abbreviated, and the placeholders need the real commands from the repo:
 >
 > ```
 > FEATURE_BRANCH=<per project convention, containing SHOP-430, e.g. feature/SHOP-430-<slug>>
@@ -480,17 +480,17 @@ The agents' answers as returned, with HTML entities in the transport (`&lt;`, `&
 > DESIGN_FILE=/home/u/src/shop-api-docs/docs/plans/2026-11-15-SHOP-430-design.md
 > DECISIONS_LOG=/home/u/src/shop-api-docs/docs/plans/2026-11-15-SHOP-430-decisions.md
 > TASKS=01 02 03
-> CLERICAL_PAIR=claude:sonnet@medium
+> GROUND_CREW_PAIR=claude:sonnet@medium
 > ```
 >
 > - **`EGM_OUTCOME=skipped`:** this holds only if none of the ask-the-user triggers applied (Epic, several separable features, more than one service, unconfirmed assumptions) and `EGM_REQUESTED=no`. Otherwise it would be `declined` or `ran`.
 > - **`TASKS`:** `01 02 03` is a placeholder. It must match the task ids actually written in `tasks/`.
 > - **`GATE_` lines:** I'd add them only if the suite takes more than about 5 minutes.
-> - **`CLERICAL_PAIR`:** `claude:sonnet@medium` is cheaper than Opus, which fits the rule for clerical jobs. It is also a model and effort listed under `claude` in the catalog.
+> - **`GROUND_CREW_PAIR`:** `claude:sonnet@medium` is cheaper than Opus, which fits the rule for ground-crew jobs. It is also a model and effort listed under `claude` in the catalog.
 >
 > **4. Settle.** Before settling I'd check that `DOCS_DIR` holds everything a later architect needs, including the PR-writer constraint and the reason for it. Then I'd commit and settle:
 >
-> `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/run-values.txt`
+> `RESULT: PLAN_APPROVED /home/u/src/shop-api-docs/docs/plans/flight-manifest.txt`
 
 ### Scenario 6
 

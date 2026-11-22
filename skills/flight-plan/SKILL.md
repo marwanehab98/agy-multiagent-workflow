@@ -3,7 +3,7 @@ name: flight-plan
 description: Use when you have a spec or requirements for a multi-step task, before touching code
 ---
 
-# Writing Plans
+# Flight Plan
 
 ## Overview
 
@@ -18,7 +18,7 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 
 ## Scope Check
 
-If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during draft-spec. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
+If the spec covers multiple independent subsystems, it should have been broken into sub-project specs during mission-brief. If it wasn't, suggest breaking this into separate plans — one per subsystem. Each plan should produce working, testable software on its own.
 
 ## File Structure
 
@@ -191,14 +191,14 @@ them to review the plan and choose an execution method before implementation.
 - **Multi-agent (`launch-plan`)** - Runs each task sequentially in an isolated worktree with headless CLI implementers, automated gate checks, two-stage independent reviews, final verification, and PR/merge handling. Most thorough; gives fresh contexts per task and review.
 - **Inline (this session)** - Implement each task directly in this session following `red-green`, verify with `gatecheck`, and finish with `touchdown`. Cheapest and fastest for small standalone plans.
 
-**For this plan I recommend <one of the two>, because <one sentence from the plan: how much the tasks depend on each other's interfaces, how many there are, what a shipped mistake would cost>. Optionally run `crossfire` first for a readiness check, or choose an execution approach. Does the plan capture what you want, and which approach should we use?"**
+**For this plan I recommend <one of the two>, because <one sentence from the plan: how much the tasks depend on each other's interfaces, how many there are, what a shipped mistake would cost>. Optionally run `cross-check` first for a readiness check, or choose an execution approach. Does the plan capture what you want, and which approach should we use?"**
 
 **When an execution method has already been supplied:**
 
 **"Plan complete and saved to `docs/plans/<filename>.md`. Please review the plan. Does it capture what you want?"**
 
 **If `launch-plan` chosen:**
-- Invoke the `launch-plan` skill with the saved plan path (it automatically prepares `tasks/` and `run-values.txt` if needed, or consumes pre-built ones).
+- Invoke the `launch-plan` skill with the saved plan path (it automatically prepares `tasks/` and `flight-manifest.txt` if needed, or consumes pre-built ones).
 
 **If Inline chosen:**
 - Work through the plan's tasks in order using `red-green`, verify with `gatecheck`, and wrap up with `touchdown`.

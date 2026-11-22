@@ -1,11 +1,11 @@
-Run the Range Safety `crossfire` review loop for exactly one round, findings only. The skill is a file, not a command you can call: read {{SAFETY_SKILLS}}/crossfire/SKILL.md and follow it with these inputs. Every input is provided; do not ask for any, and skip the confirmation step.
+Run the Range Safety `cross-check` review loop for exactly one round, findings only. The skill is a file, not a command you can call: read {{SAFETY_SKILLS}}/cross-check/SKILL.md and follow it with these inputs. Every input is provided; do not ask for any, and skip the confirmation step.
 - TargetFile: {{PLAN_FILE}}
 - SemanticTarget: full file
 - Reviewers: implementation_readiness, codebase_details
 - Standards: the ones the skill recommends for Implementation Plans
-- GoldfishContext (one path per line):
+- ReviewContext (one path per line):
 {{FILE:CONTEXT}}
-Run Step 2.2 (the review swarm) once and consolidate the findings, merging findings that two reviewers raised about the same issue. Do not run Step 2.3 (resolution), do not apply any fix, do not loop, and do not edit any file.
+Run Step 2.2 (the RSO review panel) once and consolidate the findings, merging findings that two reviewers raised about the same issue. Do not run Step 2.3 (resolution), do not apply any fix, do not loop, and do not edit any file.
 Write the consolidated findings to {{OUTPUT_FILE}}, each with its id, reviewer, severity, the plan section it concerns, and the evidence. Do not create any other file, and do not commit.
 If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 When finished, end your response with the count per severity and the path {{OUTPUT_FILE}}.

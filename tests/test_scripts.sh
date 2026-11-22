@@ -21,9 +21,9 @@ expect 0 $? "worktree create docs"
 [ -d "$WT_DOCS" ] && ok "docs worktree exists" || bad "docs worktree missing: $WT_DOCS"
 
 echo "--- check-tree catches an uncommitted docs file"
-mkdir -p "$WT_DOCS/docs/plans"; echo findings > "$WT_DOCS/docs/plans/gauntlet.md"
+mkdir -p "$WT_DOCS/docs/plans"; echo findings > "$WT_DOCS/docs/plans/flight-readiness.md"
 bash "$SK/check-tree.sh" "$WT_DOCS" "$BASE" >/dev/null; expect 2 $? "check-tree flags uncommitted docs file before dispatch"
-rm "$WT_DOCS/docs/plans/gauntlet.md"
+rm "$WT_DOCS/docs/plans/flight-readiness.md"
 
 echo "--- check-tree: renames and spaces"
 git -C "$WT_DOCS" mv a.txt "b file.txt"
@@ -115,15 +115,15 @@ FEATURE_BRANCH=feature
 VERIFY_1=test -f x.txt
 VERIFY_2=mkdir -p out build && touch out/cache build/artifact && echo built
 EOF
-python3 -I "$SK/gate.py" --run-values ../rv.txt --worktree ../impl --head "$H2" --log ../gate1.log >/dev/null; expect 0 $? "gate passes (falls back to VERIFY)"
+python3 -I "$SK/gate.py" --flight-manifest ../rv.txt --worktree ../impl --head "$H2" --log ../gate1.log >/dev/null; expect 0 $? "gate passes (falls back to VERIFY)"
 [ ! -e ../impl/build ] && ok "untracked build output removed" || bad "build output left"
 [ -e ../impl/out/cache ] && ok "gitignored output kept" || bad "gitignored output removed"
 bash "$SK/check-tree.sh" ../impl "$H2" >/dev/null; expect 0 $? "tree clean after gate"
 echo 'GATE_1=false' >> ../rv.txt
-python3 -I "$SK/gate.py" --run-values ../rv.txt --worktree ../impl --head "$H2" --log ../gate2.log >/dev/null; expect 1 $? "GATE_ lines take precedence and failure is reported"
+python3 -I "$SK/gate.py" --flight-manifest ../rv.txt --worktree ../impl --head "$H2" --log ../gate2.log >/dev/null; expect 1 $? "GATE_ lines take precedence and failure is reported"
 grep -q "GATE_1 exit=1" ../gate2.log && ok "failure logged" || bad "failure logged"
-python3 -I "$SK/gate.py" --run-values ../rv.txt --worktree ../impl --head "$H2" --log ../gate3.log --prefix VERIFY >/dev/null; expect 0 $? "--prefix VERIFY ignores GATE_"
-python3 -I "$SK/gate.py" --run-values ../rv.txt --worktree ../impl --head "$H1" --log ../gate4.log >/dev/null; expect 2 $? "refuses when HEAD != head"
+python3 -I "$SK/gate.py" --flight-manifest ../rv.txt --worktree ../impl --head "$H2" --log ../gate3.log --prefix VERIFY >/dev/null; expect 0 $? "--prefix VERIFY ignores GATE_"
+python3 -I "$SK/gate.py" --flight-manifest ../rv.txt --worktree ../impl --head "$H1" --log ../gate4.log >/dev/null; expect 2 $? "refuses when HEAD != head"
 
 echo "--- state"
 S=../state.json

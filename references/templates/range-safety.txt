@@ -1,6 +1,6 @@
-Run the Range Safety design review on {{DESIGN_FILE}}. The skill is a file, not a command you can call: read {{SAFETY_SKILLS}}/gauntlet/SKILL.md and follow it, with these inputs, all provided:
+Run the Range Safety design review on {{DESIGN_FILE}}. The skill is a file, not a command you can call: read {{SAFETY_SKILLS}}/flight-readiness/SKILL.md and follow it, with these inputs, all provided:
 - TargetFile: {{DESIGN_FILE}}
-- GoldfishContext: an empty list (linked files inside this repository are added by the skill itself)
+- ReviewContext: an empty list (linked files inside this repository are added by the skill itself)
 - Step: uninterrupted (the Consolidated report flow; do not show the preset gate)
 Write every finding to {{OUTPUT_FILE}}, each with its stage, its severity mapped to this run's scale (Blocker = Critical, Major = Important, Nit = Minor), the section it concerns, and the evidence.
 Do not edit any other file in this repository except the skill's own report files. Do not resolve findings, invoke other skills, or apply fixes. Do not commit.

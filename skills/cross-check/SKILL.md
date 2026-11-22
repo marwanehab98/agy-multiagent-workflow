@@ -1,38 +1,38 @@
 ---
-name: crossfire
+name: cross-check
 license: Apache-2.0
 disable-model-invocation: true
 description: >-
-  Executes the Antagonistic-Review process from the Elephant-Goldfish
-  Model (EGM) via an automated multi-agent review loop to audit documents
+  Executes an automated adversarial multi-agent Range Safety Officer (RSO)
+  review loop to audit documents
   against qualitative standards and structural templates, and automatically
   apply approved fixes. Use when reviewing design docs, READMEs, feature
   specifications, implementation plans, or verifying document completeness
   and tone.
 ---
 
-# Goldfish Review: Loop (Orchestration Driver)
+# Cross-Check: Adversarial Review Loop
 
 ## Overview
 
 This skill acts as the central orchestration engine driving the multi-agent
 review loop. It coordinates two distinct agent memory models:
 
-*   **The Goldfish (Adversarial Auditors)**: Subagents spawned in isolated,
+*   **RSO Reviewers (Adversarial Auditors)**: Subagents spawned in isolated,
     fresh context windows to catch unstated assumptions without historical bias.
-*   **The Elephant (Persistent Resolver)**: The primary agent context holding
+*   **Primary Session (Persistent Resolver)**: The primary agent context holding
     institutional knowledge to evaluate findings and apply approved repairs.
 
 The driver manages argument intake, resolves paths for reviewers and standards,
 unconditionally re-parses target line ranges before every iteration, spawns
-concurrent specialized Goldfish auditors based on configuration, and coordinates
-with the Elephant context to resolve findings.
+concurrent specialized RSO auditors based on configuration, and coordinates
+with the primary session context to resolve findings.
 
 ## Delegation
 
-A Goldfish runs in a fresh context with no conversation history. Spawn each
+An RSO reviewer runs in a fresh context with no conversation history. Spawn each
 subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
-If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated Goldfish context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not a Goldfish review.
+If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated RSO context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not an isolated RSO review.
 
 ## Asset Resolution
 
@@ -50,7 +50,7 @@ The caller or user provides exactly these parameters:
 *   **`Reviewers`**: List of reviewer names (shortnames or paths).
 *   **`Standards`**: Mapping of reviewer names to standard names (shortnames or
     paths).
-*   **`GoldfishContext`**: A reading list (source files, directories, or
+*   **`ReviewContext`**: A reading list (source files, directories, or
     documentation URLs) fed to reviewers to establish their baseline. An empty
     list from the caller counts as provided; do not ask for it again. Some
     reviewers cannot open URLs, so before the first round save the raw page of
@@ -79,7 +79,7 @@ When resolving names in `Reviewers` and `Standards`:
 ### Step 1: Intake & Configuration UX
 
 Evaluate the provided inputs (`TargetFile`, `SemanticTarget`, `Reviewers`,
-`Standards`, `GoldfishContext`).
+`Standards`, `ReviewContext`).
 
 1.  **Identify Missing Inputs**: Determine which of the required parameters are
     missing.
@@ -114,12 +114,12 @@ file` mode is specified, confirm full-file line bounds).
 1.  **Launch Subagent Swarm**:
     Spawn subagents to execute the review:
     *   **Hierarchical Dispatch (Synthesizer)**: Spawn the intermediate
-        synthesizer subagent (`agents/synthesizer.md` / `egm-synthesizer`).
-        The synthesizer spawns the Goldfish review swarm in
+        synthesizer subagent (`agents/synthesizer.md` / `rso-synthesizer`).
+        The synthesizer spawns the RSO review panel in
         parallel, deduplicates findings, writes the report artifact, and
         returns a single summary message to avoid context pollution in the root
         conversation. Pass it the Failed Reviewers rule below and
-        `GoldfishContext`, and tell it to give those files to each reviewer.
+        `ReviewContext`, and tell it to give those files to each reviewer.
         Its summary must give a status, `completed` or `not run`, for each
         requested reviewer.
     *   **Direct Dispatch (Flat Swarm)**: Alternatively, spawn each requested
@@ -127,7 +127,7 @@ file` mode is specified, confirm full-file line bounds).
         Instruct each subagent to first read its persona definition in
         `agents/{name}.md`, then audit `TargetFile` at the resolved line range
         against its designated standard in `resources/document_standards/`,
-        supplying `GoldfishContext`.
+        supplying `ReviewContext`.
     *   Each reviewer produces findings with severity (🔴 Blocker, 🟡 Major, 🟢
         Nit), line numbers, discrepancy descriptions, and rationales.
 2.  **Consolidate Findings**: Collect all findings across reviewers into a single
@@ -142,11 +142,11 @@ file` mode is specified, confirm full-file line bounds).
 
 #### 2.3 Aggregated Resolution
 
-1.  Execute finding resolution directly in the primary Elephant context using
+1.  Execute finding resolution directly in the primary session context using
     `TargetFile`, the active line range, and the aggregated `FindingsList`:
     *   Categorize each finding as `CONTEST` (with technical rationale) vs.
         `PROPOSE FIX` (with exact text repair).
-    *   Save `goldfish_review_report.md` with your file-writing tool.
+    *   Save `rso_review_report.md` with your file-writing tool.
     *   Present proposed repairs to the user for confirmation (Auto-accept all
         proposed fixes, Walk through individually, or Contest/skip).
     *   Apply approved text repairs to `TargetFile` using your file-editing tool.
@@ -187,7 +187,7 @@ another round of review.
 Upon completion (converged, cap or churn accepted by the user, or manual
 halt):
 
-*   **Programmatic Callers**: If running as a subflow of `gauntlet`, exit
+*   **Programmatic Callers**: If running as a subflow of `flight-readiness`, exit
     cleanly to hand execution back to the parent workflow.
 *   **Manual Invocations**: Output a summary of completion in chat: *"The review
     loop has completed after [N] rounds ([converged | accepted at cap | halted]).

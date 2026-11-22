@@ -27,20 +27,20 @@ class Design(Base):
         return self.expect(*expect, "--result", self.result_file(f"RESULT: {line}"))
 
     def builder(self, pair="antigravity:small@high", expect=(20, "DIRECTOR_JOB")):
-        return self.need(f"NEED builder-check design.md {pair}", expect)
+        return self.need(f"NEED preflight-check design.md {pair}", expect)
 
     def docs_clean(self):
         return sh("git", "-C", str(self.docs_wt), "status", "--porcelain", "--untracked-files=all")
 
 
 class Happy(Design):
-    def test_builder_check_happy_path(self):
+    def test_preflight_check_happy_path(self):
         self.behave("write-output")
         last, _ = self.builder()
-        out = self.run_dir / "builder-check-1.md"
-        self.assertEqual(last, f"DIRECTOR_JOB builder-check-done {out}")
+        out = self.run_dir / "preflight-check-1.md"
+        self.assertEqual(last, f"DIRECTOR_JOB preflight-check-done {out}")
         self.assertTrue(out.read_text().strip())
-        self.assertTrue((self.run_dir / "results" / "builder-check-1.md").is_file())
+        self.assertTrue((self.run_dir / "results" / "preflight-check-1.md").is_file())
         call = self.calls()[0]
         self.assertEqual(call["cwd"], str(self.docs_wt))
         self.assertIn("design.md", call["prompt"])
@@ -52,8 +52,8 @@ class Happy(Design):
     def test_result_line_with_trailing_period_and_prose(self):
         self.behave("write-output")
         last, _ = self.expect(20, "DIRECTOR_JOB", "--result", self.result_file(
-            "RESULT: NEED builder-check design.md antigravity:small@high. A cheap reader is enough here."))
-        self.assertIn("builder-check-done", last)
+            "RESULT: NEED preflight-check design.md antigravity:small@high. A cheap reader is enough here."))
+        self.assertIn("preflight-check-done", last)
 
     def test_need_safety_records_that_safety_was_requested(self):
         self.behave("write-output")
@@ -64,14 +64,14 @@ class Happy(Design):
         self.expect(2, "ERROR", "--result", self.result_file("RESULT: PLAN_APPROVED x"))
         self.assertIn("UNEXPECTED_RESULT", self.adv("--result", self.result_file("RESULT: COMMITTED"))[1])
 
-    def test_builder_check_probes_its_pair_first(self):
+    def test_preflight_check_probes_its_pair_first(self):
         s = self.st()
         del s["LAUNCH_STYLE_antigravity_small_high"]
         self.state.write_text(json.dumps(s))
         self.behave("ok", "write-output")
         last, _ = self.builder()
         self.assertEqual(self.st("LAUNCH_STYLE_antigravity_small_high"), "slug")
-        self.assertIn("builder-check-done", last)
+        self.assertIn("preflight-check-done", last)
         self.assertEqual(len(self.calls()), 2)
 
     def test_builder_probe_failure_goes_to_director(self):
@@ -80,14 +80,14 @@ class Happy(Design):
         self.state.write_text(json.dumps(s))
         self.behave("fail", "fail")
         last, _ = self.builder()
-        self.assertTrue(last.startswith("DIRECTOR_JOB builder-check-done failed: "), last)
+        self.assertTrue(last.startswith("DIRECTOR_JOB preflight-check-done failed: "), last)
         failure = Path(last.split("failed: ")[1])
         self.assertIn("failed", failure.read_text())
         self.assertEqual(len(self.calls()), 2)
 
     def test_builder_pair_outside_director_harness_fails_to_director(self):
         last, _ = self.builder("other:g@high")
-        self.assertTrue(last.startswith("DIRECTOR_JOB builder-check-done failed: "), last)
+        self.assertTrue(last.startswith("DIRECTOR_JOB preflight-check-done failed: "), last)
         self.assertIn("flight director's harness", Path(last.split("failed: ")[1]).read_text())
         self.assertEqual(self.calls(), [])
 
@@ -99,7 +99,7 @@ class Happy(Design):
         ans = self.tmp / "ans.md"
         ans.write_text("Use strict validation.\n")
         last, _ = self.expect(20, "DIRECTOR_JOB", "--answer", str(ans))
-        self.assertIn("builder-check-done", last)
+        self.assertIn("preflight-check-done", last)
         self.assertEqual(self.calls()[1]["conversation"], "conv_1")
 
     def test_consult_expired_conversation_falls_back_cleanly(self):
@@ -111,7 +111,7 @@ class Happy(Design):
         ans = self.tmp / "ans.md"
         ans.write_text("Use strict validation.\n" + "x" * 400 + "\n")
         last, _ = self.expect(20, "DIRECTOR_JOB", "--answer", str(ans))
-        self.assertIn("builder-check-done", last)
+        self.assertIn("preflight-check-done", last)
         self.assertEqual(self.calls()[2]["conversation"], "")
         self.assertIn("Use strict validation.", self.calls()[2]["prompt"])
 
@@ -129,7 +129,7 @@ class DocsTree(Design):
         sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "plan")
         last, _ = self.expect(20, "DIRECTOR_JOB", "--result", self.result_file("RESULT: COMMITTED"))
         self.assertEqual(self.st("DOCS_HEAD"), sh("git", "-C", str(self.docs_wt), "rev-parse", "HEAD"))
-        self.assertIn("builder-check-done", last)
+        self.assertIn("preflight-check-done", last)
         self.assertTrue((self.docs_wt / "plan.md").exists())
 
     def test_worker_edit_is_discarded_output_kept(self):
@@ -138,23 +138,23 @@ class DocsTree(Design):
         self.assertEqual(self.docs_clean(), "")
         self.assertEqual(sh("git", "-C", str(self.docs_wt), "rev-parse", "HEAD"), self.docs_head)
         self.assertEqual((self.docs_wt / "a.txt").read_text(), "a\n")
-        self.assertTrue((self.run_dir / "builder-check-1.md").read_text().strip())
+        self.assertTrue((self.run_dir / "preflight-check-1.md").read_text().strip())
 
 
 class Failures(Design):
     def test_failed_twice_sends_failed_input(self):
         self.behave("fail", "fail")
         last, _ = self.builder()
-        saved = self.run_dir / "results" / "builder-check-2.md"
-        self.assertEqual(last, f"DIRECTOR_JOB builder-check-done failed: {saved}")
+        saved = self.run_dir / "results" / "preflight-check-2.md"
+        self.assertEqual(last, f"DIRECTOR_JOB preflight-check-done failed: {saved}")
         self.assertIn("could not make the test pass", saved.read_text())
         self.assertEqual(len(self.calls()), 2)
 
     def test_empty_output_counts_as_failed_then_retry_succeeds(self):
         self.behave("write-empty", "write-output")
         last, _ = self.builder()
-        self.assertEqual(last, f"DIRECTOR_JOB builder-check-done {self.run_dir / 'builder-check-2.md'}")
-        self.assertEqual(self.st("RETRY_builder-check"), "0")
+        self.assertEqual(last, f"DIRECTOR_JOB preflight-check-done {self.run_dir / 'preflight-check-2.md'}")
+        self.assertEqual(self.st("RETRY_preflight-check"), "0")
         self.assertEqual(len(self.calls()), 2)
 
     def test_usage_limit_counts_as_failed(self):
@@ -178,7 +178,7 @@ class RangeSafety(Design):
         self.assertEqual(out.read_text(), (self.docs_wt / FINDINGS).read_text())
         self.assertIn("Important: x.md:1 unclear.", out.read_text())
         self.assertEqual(self.st("SAFETY_SKILLS"), "/skills")
-        self.assertIn("/skills/gauntlet/SKILL.md", call["prompt"])
+        self.assertIn("/skills/flight-readiness/SKILL.md", call["prompt"])
         self.assertEqual(self.docs_clean(), f"?? {FINDINGS}")
 
     def commit_findings(self):
@@ -213,14 +213,14 @@ class RangeSafety(Design):
         self.state.write_text(json.dumps({
             **self.st(),
             "DESIGN_PHASE": "dispatching",
-            "DESIGN_NEED": f"builder-check design.md antigravity:small@high",
+            "DESIGN_NEED": f"preflight-check design.md antigravity:small@high",
             "DOCS_HEAD": self.docs_head,
         }))
         (self.docs_wt / "stray_design.txt").write_text("partial\n")
         self.behave("write-output")
         last, _ = self.expect(20, "DIRECTOR_JOB")
         self.assertFalse((self.docs_wt / "stray_design.txt").exists())
-        self.assertIn("builder-check-done", last)
+        self.assertIn("preflight-check-done", last)
 
     def test_consult_silent_new_conversation_cleans_and_falls_back(self):
         stray = self.docs_wt / "stray_unresumed.txt"
@@ -240,7 +240,7 @@ class RangeSafety(Design):
 
     def test_safety_falls_back_to_bundled_skills_when_missing_from_catalog(self):
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"].pop("gauntlet", None)
+        cat["harnesses"]["antigravity"]["skills"].pop("flight-readiness", None)
         cat_path = self.tmp / "no-safety-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -248,18 +248,18 @@ class RangeSafety(Design):
         last, _ = self.safety_need()
         self.assertEqual(last, f"DIRECTOR_JOB safety-done {self.run_dir / 'safety-1.md'}")
         self.assertEqual(self.st("SAFETY_SKILLS"), str(SKILL / "skills"))
-        self.assertIn(str(SKILL / "skills" / "gauntlet" / "SKILL.md"), self.calls()[0]["prompt"])
+        self.assertIn(str(SKILL / "skills" / "flight-readiness" / "SKILL.md"), self.calls()[0]["prompt"])
 
     def test_safety_falls_back_to_flat_harness_sibling_skills_when_missing_from_catalog(self):
         flat_root = self.tmp / "flat-skills"
         pkg = flat_root / "mission-control"
         shutil.copytree(SKILL / "scripts", pkg / "scripts")
         shutil.copytree(SKILL / "references", pkg / "references")
-        (flat_root / "gauntlet").mkdir(parents=True)
-        (flat_root / "gauntlet" / "SKILL.md").write_text("---\nname: gauntlet\n---\n")
+        (flat_root / "flight-readiness").mkdir(parents=True)
+        (flat_root / "flight-readiness" / "SKILL.md").write_text("---\nname: flight-readiness\n---\n")
 
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"].pop("gauntlet", None)
+        cat["harnesses"]["antigravity"]["skills"].pop("flight-readiness", None)
         cat_path = self.tmp / "no-safety-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -269,7 +269,7 @@ class RangeSafety(Design):
         last, _ = self.safety_need()
         self.assertEqual(last, f"DIRECTOR_JOB safety-done {self.run_dir / 'safety-1.md'}")
         self.assertEqual(self.st("SAFETY_SKILLS"), str(flat_root))
-        self.assertIn(str(flat_root / "gauntlet" / "SKILL.md"), self.calls()[0]["prompt"])
+        self.assertIn(str(flat_root / "flight-readiness" / "SKILL.md"), self.calls()[0]["prompt"])
 
 
 class Lens(Design):
@@ -281,15 +281,15 @@ class Lens(Design):
         last, _ = self.lens_need()
         first = self.run_dir / "lens-1.md"
         self.assertEqual(last, f"DIRECTOR_JOB lens-done {first}")
-        self.assertIn("crucible", self.calls()[0]["prompt"])
+        self.assertIn("wind-tunnel", self.calls()[0]["prompt"])
         last, _ = self.lens_need()
         self.assertEqual(last, f"DIRECTOR_JOB lens-done {first}")
         self.assertEqual(len(self.calls()), 1)
 
-    def test_lens_resolves_crucible_independently_of_gauntlet_override(self):
+    def test_lens_resolves_wind_tunnel_independently_of_flight_readiness_override(self):
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"]["gauntlet"] = "/override/skills/gauntlet"
-        cat["harnesses"]["antigravity"]["skills"].pop("crucible", None)
+        cat["harnesses"]["antigravity"]["skills"]["flight-readiness"] = "/override/skills/flight-readiness"
+        cat["harnesses"]["antigravity"]["skills"].pop("wind-tunnel", None)
         cat_path = self.tmp / "override-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -300,7 +300,7 @@ class Lens(Design):
         sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "findings")
         last, _ = self.lens_need()
         self.assertEqual(last, f"DIRECTOR_JOB lens-done {self.run_dir / 'lens-1.md'}")
-        self.assertIn(str(SKILL / "skills" / "crucible" / "SKILL.md"), self.calls()[1]["prompt"])
+        self.assertIn(str(SKILL / "skills" / "wind-tunnel" / "SKILL.md"), self.calls()[1]["prompt"])
 
 
 class PlanReview(Design):
@@ -319,11 +319,11 @@ class PlanReview(Design):
                                f"finish triage with {self.run_dir / 'plan-review-2.md'}")
         self.assertEqual(len(self.calls()), 2)
 
-    def test_plan_review_resolves_crossfire_from_its_own_dir(self):
+    def test_plan_review_resolves_cross_check_from_its_own_dir(self):
         (self.tmp / "plan.md").write_text("plan\n")
         cat = json.loads(Path(self.st("CATALOG")).read_text())
-        cat["harnesses"]["antigravity"]["skills"]["gauntlet"] = "/override/skills/gauntlet"
-        cat["harnesses"]["antigravity"]["skills"]["crossfire"] = "/other/skills/crossfire"
+        cat["harnesses"]["antigravity"]["skills"]["flight-readiness"] = "/override/skills/flight-readiness"
+        cat["harnesses"]["antigravity"]["skills"]["cross-check"] = "/other/skills/cross-check"
         cat_path = self.tmp / "split-cat.json"
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
@@ -333,7 +333,7 @@ class PlanReview(Design):
         sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "findings")
         last, _ = self.review_need()
         self.assertEqual(last, f"DIRECTOR_JOB plan-review-done {self.run_dir / 'plan-review-1.md'}")
-        self.assertIn("/other/skills/crossfire/SKILL.md", self.calls()[1]["prompt"])
+        self.assertIn("/other/skills/cross-check/SKILL.md", self.calls()[1]["prompt"])
 
 
 if __name__ == "__main__":

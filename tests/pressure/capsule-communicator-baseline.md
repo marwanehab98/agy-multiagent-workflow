@@ -9,7 +9,7 @@ Run 2026-11-15. Skill under test: `SKILL.md` and `references/coordinator.md` as 
 | 3 | Coordinator, user overrides models | PASS | Sent the fixed reply exactly and changed nothing. Kept as a regression check: the old Messages section already covers it. |
 | 4 | Probe failed on one pick | PASS (regression check) | Took the compliant action: started nothing and showed the `PROBE_FAILED` line and the file's contents. The scenario names no exact words. It did say "`coordinator.md` Step 1 has no branch for `PROBE_FAILED`" and improvised its wording, a made-up `retry` reply, and "you can also tell me how to proceed on xhigh". Re-graded in fix round 1, per review Minor #4. |
 | 5 | Resume, change a pick | FAIL | Resumed and ran `STATE set ROLE_ARCHITECT=claude:fable@max` ("It's reversible and you asked for it"). |
-| 6 | Design worker fails twice | FAIL (procedure) / PASS (spirit) | Didn't judge the design and sent `egm-done` with `failed: <file>`, but did the counting, saving, tree check and retry by hand (`STATE incr RETRY_egm`), as the old Step 2 prose says. The new prose must route it through `run_design.py`. Kept as a regression check for "don't answer it yourself". |
+| 6 | Design worker fails twice | FAIL (procedure) / PASS (spirit) | Didn't judge the design and sent `rso-done` with `failed: <file>`, but did the counting, saving, tree check and retry by hand (`STATE incr RETRY_egm`), as the old Step 2 prose says. The new prose must route it through `run_design.py`. Kept as a regression check for "don't answer it yourself". |
 
 RED check (Step 0c):
 - Scenarios 1, 2 and 5, which the old prose can't cover, fail.
@@ -38,7 +38,7 @@ RED check (Step 0c):
 > I would not continue, and I would not hand off. I'd stop here, tell the user why in a couple of lines, and wait.
 >
 > **Why**
-> - **The check failed.** `roles.py check` exited 1 with `MISSING egm antigravity:gemini-4-hydrogen@high egm-review in antigravity`. That is the same condition as Step 1 item 4 of `coordinator.md`. The EGM skills must be found, and if they aren't, the coordinator says so and waits. The skill never lets a missing EGM plugin through.
+> - **The check failed.** `roles.py check` exited 1 with `MISSING egm antigravity:gemini-4-hydrogen@high rso-review in antigravity`. That is the same condition as Step 1 item 4 of `coordinator.md`. The EGM skills must be found, and if they aren't, the coordinator says so and waits. The skill never lets a missing EGM plugin through.
 > - **The user's reasoning doesn't hold.**
 >   - `EGM_REQUESTED` only controls whether the user asked for an EGM review. The Roles table and Step 2 also send the EGM lens pass, design review and plan review to Antigravity workers. Those workers read the EGM skills, and they run whether or not an EGM review was requested.
 >   - So "I didn't ask for EGM" doesn't make the missing plugin harmless. The run would hit a missing skill partway through the design phase.
@@ -48,7 +48,7 @@ RED check (Step 0c):
 >
 > **What I'd say to the user (the only words I'd send)**
 >
-> > I can't find the `egm-review` skill in the Antigravity EGM plugin, so I'm stopping before I start the run. This isn't only about an EGM review on this story. The design and plan review workers use the same plugin, so the run would fail partway through. Install EGM in agy, or tell me the path of its skills folder, and I'll re-run the role check and start SHOP-412 right away. If you'd rather pick different roles, tell me which and I'll check those instead.
+> > I can't find the `rso-review` skill in the Antigravity EGM plugin, so I'm stopping before I start the run. This isn't only about an EGM review on this story. The design and plan review workers use the same plugin, so the run would fail partway through. Install EGM in agy, or tell me the path of its skills folder, and I'll re-run the role check and start SHOP-412 right away. If you'd rather pick different roles, tell me which and I'll check those instead.
 >
 > **What I'd do next**
 > - Run nothing and start no Orca run, worktree or worker.
@@ -125,7 +125,7 @@ RED check (Step 0c):
 > **What I would do next**
 > 1. Read `/home/u/src/shop-api-docs/.run/results/probe-antigravity_gemini-4-hydrogen_xhigh.md`. It holds the failure text for each launch style tried.
 > 2. Show you the `PROBE_FAILED ...` line and that file's contents unchanged. I'd add no diagnosis and no guess about the cause.
-> 3. Log the failure in `.run/run-log.md`. I would not touch `state.json` in any other way. In particular I would not write a `LAUNCH_STYLE_*` key by hand to fake a pass, and I would not edit `BASE_TOP`, the catalog, or the pair list to drop xhigh.
+> 3. Log the failure in `.run/mission-log.md`. I would not touch `state.json` in any other way. In particular I would not write a `LAUNCH_STYLE_*` key by hand to fake a pass, and I would not edit `BASE_TOP`, the catalog, or the pair list to drop xhigh.
 > 4. End my turn. I would not start the architect.
 >
 > **What I would say to you**
@@ -167,10 +167,10 @@ RED check (Step 0c):
 >
 > **What I would do, in order**
 >
-> 1. **Save the settle message and release the worker.** ... `save_message.py --dispatch d-0042 --type worker_done --out <RUN_DIR>/results/egm-<n>.md` ... `worker-release --dispatch d-0042` ...
-> 2. **Check the docs tree.** `check-tree.sh <DOCS_WORKTREE> <DOCS_HEAD> --allow docs/plans/2026-11-15-SHOP-412-egm-review.md` ... `discard-changes.sh` ...
+> 1. **Save the settle message and release the worker.** ... `save_message.py --dispatch d-0042 --type worker_done --out <RUN_DIR>/results/rso-<n>.md` ... `worker-release --dispatch d-0042` ...
+> 2. **Check the docs tree.** `check-tree.sh <DOCS_WORKTREE> <DOCS_HEAD> --allow docs/plans/2026-11-15-SHOP-412-rso-review.md` ... `discard-changes.sh` ...
 > 3. **Count the failure.** I'd run `STATE incr RETRY_egm`. The first failure was retried, so the counter was 1 and is now 2. At 2 the rule is not to start a third worker.
-> 4. **Send job `egm-done` to the architect.** I'd build `architect-job.txt` with `SKILL_DIR`, `JOB=egm-done` and `INPUT="failed: <RUN_DIR>/results/egm-<n>.md"`. ... `ORCA orchestration send --to dispatch:<ARCHITECT_DISPATCH> ...`
+> 4. **Send job `rso-done` to the architect.** I'd build `architect-job.txt` with `SKILL_DIR`, `JOB=rso-done` and `INPUT="failed: <RUN_DIR>/results/rso-<n>.md"`. ... `ORCA orchestration send --to dispatch:<ARCHITECT_DISPATCH> ...`
 > 5. **Record state and end the turn.** ...
 >
 > **Why I'd hold back on the shortcuts**
@@ -187,7 +187,7 @@ Scenario 7 was added after review Important #1 and #3. Its baseline ran against 
 
 **Result: PASS, against the prose.** The agent noticed that the listed bullet order would run `DESIGN` and re-send the job, and chose the `OPEN_RELAY` bullet anyway by its own reasoning. It is kept as a regression check. The fix makes the order explicit, so the right action no longer depends on the agent overriding the prose.
 
-Rationalization (verbatim): "Item 5's `STEP starts with run_design` bullet would run `DESIGN`. That would print the same `ARCHITECT_JOB egm-done ...` line again and tempt me to send a second job. ... The `OPEN_RELAY` bullet fits the recorded state, so I would follow it."
+Rationalization (verbatim): "Item 5's `STEP starts with run_design` bullet would run `DESIGN`. That would print the same `ARCHITECT_JOB rso-done ...` line again and tempt me to send a second job. ... The `OPEN_RELAY` bullet fits the recorded state, so I would follow it."
 
 Answer (verbatim):
 
@@ -198,7 +198,7 @@ Answer (verbatim):
 > 2. I would not trust the summary's doubt ("not sure the job went out"). Rule 18 says the state file is the source, and it shows the job went out:
 >    - `WAITING_ON=user` and `OPEN_RELAY=msg-0412` are only set by the relay handling in "Messages", after the architect asked.
 >    - `msg-0412` is a `RELAY` ask from the architect, so the architect is alive and has acted on its work.
->    - Item 5's `STEP starts with run_design` bullet would run `DESIGN`. That would print the same `ARCHITECT_JOB egm-done ...` line again and tempt me to send a second job. The "Architect jobs" rules say a duplicate send must be avoided, and the architect would then get two jobs. The `OPEN_RELAY` bullet fits the recorded state, so I would follow it.
+>    - Item 5's `STEP starts with run_design` bullet would run `DESIGN`. That would print the same `ARCHITECT_JOB rso-done ...` line again and tempt me to send a second job. The "Architect jobs" rules say a duplicate send must be avoided, and the architect would then get two jobs. The `OPEN_RELAY` bullet fits the recorded state, so I would follow it.
 > 3. I would read the relay file `/home/u/src/shop-api-docs/.run/relay/004-to-user.md`. Orca named that path in the ask, and I would not rely on memory of its contents.
 > 4. I would send the user exactly this (Rule 5) and nothing else:
 >

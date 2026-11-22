@@ -7,8 +7,8 @@ Usage (picks and catalog, read from the run's state file: CATALOG, ROLE_DIRECTOR
 
 `tasks` checks each <id>.meta. `pair` checks one escalation attempt: with `no` the pair must be rung N of
 ladder(ROLE_CREW, CREW_TOP, ROLE_DIRECTOR, <CREW from F>); with `yes` any pair in the catalog passes.
-`harness-pair` checks a pair is in the flight director's harness with a detected model and effort (builder check,
-CLERICAL_PAIR, reviewers).
+`harness-pair` checks a pair is in the flight director's harness with a detected model and effort (preflight check,
+GROUND_CREW_PAIR, reviewers).
 Exit 0: all valid (prints OK lines).  Exit 1: problems (prints one PROBLEM line each).  Exit 64: bad usage.
 
 Rules enforced by the --state modes (design 2.1):

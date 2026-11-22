@@ -56,7 +56,7 @@ class Base(unittest.TestCase):
         self.task("01", "AC-1")
         self.task("02", "AC-2")
         (self.run_dir / "queue.txt").write_text("01\n")
-        rv = self.docs / "run-values.txt"
+        rv = self.docs / "flight-manifest.txt"
         rv.write_text("FEATURE_BRANCH=feature\nVERIFY_1=test ! -e BROKEN\n")
         agy = t / "fake-agy"
         agy.write_text(f'#!/bin/sh\nexec {sys.executable} -I {FAKE} "$@"\n')
@@ -69,7 +69,7 @@ class Base(unittest.TestCase):
         self.state.write_text(json.dumps({
             "AGY": str(agy), "RUN_DIR": str(self.run_dir), "DOCS_DIR": str(self.docs),
             "IMPL_WORKTREE": str(self.impl), "MAIN_CHECKOUT": str(self.main), "FEATURE_BRANCH": "feature",
-            "LAST_MERGED": self.base, "RUN_VALUES": str(rv),
+            "LAST_MERGED": self.base, "FLIGHT_MANIFEST": str(rv),
             "ROLE_DIRECTOR": "antigravity:big@high", "ROLE_SAFETY": "antigravity:g@high",
             "ROLE_CREW": "antigravity:g@high", "CREW_TOP": "xhigh", "CATALOG": str(CATALOG),
             "DOCS_WORKTREE": str(self.docs_wt), "CONVENTION_PATHS": "CONTRIBUTING.md"}))
