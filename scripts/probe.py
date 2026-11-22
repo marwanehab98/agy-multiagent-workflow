@@ -30,7 +30,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import FIX_META, STOP, ERROR, AgyRunner, Done, Run, build, git, next_free, save_body, tool  # noqa: E402
+from common import (FIX_META, STOP, ERROR, AgyRunner, Done, Run, build, check_repo_trees,  # noqa: E402
+                    discard_repo_trees, git, next_free, save_body, tool)
 from harnesses import launch_args  # noqa: E402
 from pairs import Pair, parse_pair, pair_key  # noqa: E402
 
@@ -93,6 +94,8 @@ class Prober:
         """Check the docs worktree after a probe attempt and restore if changed (keep: log only)."""
         head = self.r.need("PROBE_HEAD")
         rc, out = tool("check-tree.sh", self.wt, head)
+        if rc == 0 and self.r.is_multi_repo:
+            rc, out = check_repo_trees(self.r, "docs")
         if rc != 0 and self.keep:
             note = f"probe {pair}: docs worktree differs from {head} ({out}); left as is"
             self.r.log(note)
@@ -100,6 +103,8 @@ class Prober:
                 f.write(f"## {note}\n")
         elif rc != 0:
             rc2, out2 = tool("discard-changes.sh", self.wt, head)
+            if self.r.is_multi_repo:
+                discard_repo_trees(self.r, "docs")
             self.r.log(f"probe {pair}: docs worktree changed ({out}); discarded: {out2} (exit {rc2})")
 
 

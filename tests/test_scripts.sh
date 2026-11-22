@@ -40,6 +40,19 @@ echo "$out" | grep -q "START $R local-behind" && ok "local-behind uses origin" |
 git commit -q --allow-empty -m local
 bash "$SK/start-point.sh" . main >/dev/null; expect 3 $? "diverged refused"
 git reset -q --hard "$R"; BASE=$R
+git checkout -q -b feat/addendum "$BASE"
+git commit -q --allow-empty -m feat1
+F1=$(git rev-parse HEAD)
+out=$(bash "$SK/start-point.sh" . feat/addendum); echo "$out" | grep -q "START $F1 local-only" && ok "local-only feature branch" || bad "local-only feature branch: $out"
+git push -q origin feat/addendum
+out=$(bash "$SK/start-point.sh" . feat/addendum); echo "$out" | grep -q "START $F1 up-to-date" && ok "pushed feature branch up-to-date" || bad "pushed feature branch up-to-date: $out"
+git commit -q --allow-empty -m feat2
+F2=$(git rev-parse HEAD)
+out=$(bash "$SK/start-point.sh" . feat/addendum); echo "$out" | grep -q "START $F2 local-ahead" && ok "feature branch local-ahead" || bad "feature branch local-ahead: $out"
+git remote set-url origin ../missing.git
+out=$(bash "$SK/start-point.sh" . feat/addendum); echo "$out" | grep -q "START $F2 fetch-failed" && ok "unreachable origin is fetch-failed" || bad "unreachable origin: $out"
+git remote set-url origin ../origin.git
+git switch -q main
 
 echo "--- merge-task (update-ref, no checkout)"
 git branch feature "$BASE"

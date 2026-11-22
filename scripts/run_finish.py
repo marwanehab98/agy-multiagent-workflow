@@ -30,7 +30,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, AgyRunner, Done, Run, build, bundled_skills_dir,  # noqa: E402
-                    first_words, next_free, pick_verdict, save_body, tool, verdict_line)
+                    check_repo_trees, discard_repo_trees, first_words, next_free, pick_verdict, repo_key, save_body,
+                    tool, verdict_line)
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 from pairs import parse_pair  # noqa: E402
 
@@ -80,19 +81,27 @@ class Finish:
         self.set_phase("consult", WAITING_ON="director")
         raise Done(CONSULT, f"CONSULT {ask}")
 
+    def _check_impl_trees(self, head=None):
+        if self.r.is_multi_repo:
+            return check_repo_trees(self.r, "impl")
+        return tool("check-tree.sh", self.r.impl, head or self.r.need("LAST_MERGED"))
+
     # -- item 1: starting state
     def do_start(self):
         r = self.r
         r.set(PHASE="finish")
         for key in [k for k in r.s if k.startswith("IMPL_CONVERSATION_ID_")]:
             r.set(**{key: None})
-        rc, out = tool("check-tree.sh", r.impl, r.need("LAST_MERGED"))
+        rc, out = self._check_impl_trees()
         if rc != 0:
             raise Done(ERROR, f"ERROR TREE_NOT_CLEAN {out}")
         self.set_phase("review")
 
-    def _discard_or_error(self, head):
-        rc, out = tool("discard-changes.sh", self.r.impl, head)
+    def _discard_or_error(self, head=None):
+        if self.r.is_multi_repo:
+            rc, out = discard_repo_trees(self.r, "impl")
+        else:
+            rc, out = tool("discard-changes.sh", self.r.impl, head or self.r.need("LAST_MERGED"))
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
 
@@ -100,11 +109,19 @@ class Finish:
     def do_review(self):
         r = self.r
         n = r.incr("FINAL_N")
-        head = r.need("LAST_MERGED")
         out = r.run_dir / "verdicts" / f"final-{n}.md"
+        if r.is_multi_repo:
+            repos = r.touched_repos() or r.repos
+            review_range = ("; ".join(f"{repo}: {r.repo_initial_base(repo)}..{r.repo_last_merged(repo)}" for repo in repos)
+                            + " (run git -C <repo> diff <base>..<head> in each repo directory)")
+            conventions = "; ".join(f"{repo}: {r.repo_convention_paths(repo)}" for repo in repos)
+            head = "multi"
+        else:
+            head = r.need("LAST_MERGED")
+            review_range = f"{r.need('INITIAL_BASE_SHA')}..{head}"
+            conventions = r.need("CONVENTION_PATHS")
         spec = build("final-review.txt", next_free(r.run_dir / "specs", "final-review-{n}.txt"),
-                     {"BASE_SHA": r.need("INITIAL_BASE_SHA"), "WORKER_HEAD": head,
-                      "CONVENTION_PATHS": r.need("CONVENTION_PATHS"), "OUTPUT_FILE": out,
+                     {"REVIEW_RANGE": review_range, "CONVENTION_PATHS": conventions, "OUTPUT_FILE": out,
                       "AC_IDS": ac_ids(r.need("DESIGN_FILE"), r.need("DECISIONS_LOG"))},
                      {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG")})
         pair = r.need("ROLE_DIRECTOR")
@@ -115,7 +132,7 @@ class Finish:
 
     def settle_review(self, result):
         r = self.r
-        head = r.need("FIN_HEAD")
+        head = None if r.is_multi_repo else r.need("FIN_HEAD")
         if result[0] == "usage":
             self._discard_or_error(head)
             self.prompt("usage-limit",
@@ -125,7 +142,7 @@ class Finish:
             self._discard_or_error(head)
             return self.void("stopped without a verdict")
         if result[0] == "ask":
-            rc, _ = tool("check-tree.sh", r.impl, head)
+            rc, _ = self._check_impl_trees(head)
             if rc != 0:
                 self._discard_or_error(head)
                 return self.void("changed the worktree")
@@ -137,7 +154,7 @@ class Finish:
         out = Path(r.need("FIN_OUT"))
         settle = save_body(result[2], r.run_dir / "results" / f"final-settle-{n}.md")
         verdict = pick_verdict(out, settle)
-        rc, _ = tool("check-tree.sh", r.impl, head)
+        rc, _ = self._check_impl_trees(head)
         if rc != 0:
             self._discard_or_error(head)
             verdict.rename(next_free(r.run_dir / "verdicts", "final-void-{n}.md"))
@@ -168,9 +185,30 @@ class Finish:
         r = self.r
         k = r.incr("VERIFY_K")
         log = r.run_dir / f"verify-{k}.log"
-        rc, out = tool("gate.py", "--run-values", r.need("RUN_VALUES"), "--worktree", r.impl,
-                       "--head", r.need("LAST_MERGED"), "--log", str(log), "--prefix", "VERIFY")
-        r.log(f"verify {k} exit={rc} {log}")
+        if r.is_multi_repo:
+            repos = r.touched_repos() or r.repos
+            any_failed = False
+            sections = []
+            for repo in repos:
+                rk = repo_key(repo)
+                sub_log = r.run_dir / f"verify-{k}-{rk}.log"
+                rc, out = tool("gate.py", "--run-values", r.need("RUN_VALUES"), "--worktree", r.repo_impl(repo),
+                               "--head", r.repo_last_merged(repo), "--log", str(sub_log), "--prefix", "VERIFY",
+                               "--repo", rk)
+                r.log(f"verify {k} [{repo}] exit={rc} {sub_log}")
+                if rc not in (0, 1):
+                    raise Done(ERROR, f"ERROR GATE [{repo}] {out}")
+                if rc == 1:
+                    any_failed = True
+                body = sub_log.read_text(encoding="utf-8") if sub_log.is_file() else out
+                sections.append(f"=== repo: {repo} (exit={rc}) ===\n{body}\n")
+            log.write_text("\n".join(sections), encoding="utf-8")
+            rc = 1 if any_failed else 0
+            out = ""
+        else:
+            rc, out = tool("gate.py", "--run-values", r.need("RUN_VALUES"), "--worktree", r.impl,
+                           "--head", r.need("LAST_MERGED"), "--log", str(log), "--prefix", "VERIFY")
+            r.log(f"verify {k} exit={rc} {log}")
         r.set(FIN_VERIFY_LOG=log)
         if rc == 0:
             if r.get("DRIFT_CHECK") == "yes" and not r.get("DRIFT_DONE"):
@@ -211,8 +249,8 @@ class Finish:
 
     def settle_drift(self, result):
         r = self.r
-        head = r.need("LAST_MERGED")
-        rc, _ = tool("check-tree.sh", r.impl, head)
+        head = None if r.is_multi_repo else r.need("LAST_MERGED")
+        rc, _ = self._check_impl_trees(head)
         if rc != 0:
             self._discard_or_error(head)
             r.log("drift check changed the worktree; changes discarded")
@@ -257,7 +295,7 @@ class Finish:
         self.set_phase("drifting" if kind == "drift" else "reviewing", WAITING_ON=None)
         result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
-            self._discard_or_error(r.need("LAST_MERGED") if kind == "drift" else r.need("FIN_HEAD"))
+            self._discard_or_error(None if r.is_multi_repo else (r.need("LAST_MERGED") if kind == "drift" else r.need("FIN_HEAD")))
             spec_text = Path(spec).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)
@@ -391,11 +429,11 @@ class Finish:
             if phase.startswith("prompt:"):
                 raise Done(PROMPT, f"PROMPT {self.r.need('FIN_PROMPT_FILE')} {self.r.need('FIN_PROMPT_ACCEPT')}")
             if phase == "reviewing":
-                self._discard_or_error(self.r.need("LAST_MERGED"))
+                self._discard_or_error()
                 self.do_review()
                 continue
             if phase == "drifting":
-                self._discard_or_error(self.r.need("LAST_MERGED"))
+                self._discard_or_error()
                 self.do_drift()
                 continue
             handler = {"start": self.do_start, "review": self.do_review, "verify": self.do_verify,

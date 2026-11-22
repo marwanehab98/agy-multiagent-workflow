@@ -56,7 +56,7 @@ The session that loads this skill **is the Capsule Communicator**:
 
 ### Continue a run
 
-1. Find the run's state file: it is `.run/state.json` in the worktree on `refs/heads/<TOPIC>-docs` (`git worktree list --porcelain`). If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several such worktrees have a state file, list their topics as a numbered list and ask which one.
+1. Find the run's state file: in a single git repo, it is `.run/state.json` in the worktree on `refs/heads/<TOPIC>-docs` (`git worktree list --porcelain`); in a multi-repo parent directory, run `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --workspace "$(pwd)"`. If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several runs have a state file, list their topics as a numbered list and ask which one.
 2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
 3. Read `<SKILL_DIR>/references/capsule-communicator.md` in full and run "Resume a run" with that state file in this same session.
 
@@ -123,11 +123,11 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 15. **The design Flight Director session stays open until plan approval; after that, each Flight Director job is a fresh worker run.**
     - In the design phase, `run_director.py send` resumes `DIRECTOR_CONVERSATION_ID` until Step 3 item 1 clears it. If `send` exits `13` (`LOST`), start a fallback Flight Director with `FIRST_JOB=resume`.
     - After plan approval, `run_director.py start` runs a fresh Flight Director per job, on the pair from Capsule Communicator "Flight Director job models" (still keeping `DIRECTOR_CONVERSATION_ID` across any `RELAY`/`NOTIFY` turns within that single job). Only one Flight Director works at a time.
-16. **Worktrees live under `<MAIN_CHECKOUT>/.worktrees`** and are managed only with `scripts/worktree.sh`.
-17. **Run documents live only in the docs worktree.**
-    - The Flight Director's documents are in `<DOCS_DIR>` (`<DOCS_WORKTREE>/docs/plans`), committed on the never-merged `<TOPIC>-docs` branch.
+16. **Worktrees live under `<MAIN_CHECKOUT>/.worktrees`** (single-repo, managed only with `scripts/worktree.sh`) or **`<WORKSPACE_DIR>/.mission-control`** (multi-repo, managed only with `scripts/workspace.py`).
+17. **Run documents live only in the docs worktree / workspace.**
+    - The Flight Director's documents are in `<DOCS_DIR>` (`<DOCS_WORKTREE>/docs/plans`), committed on the never-merged `<TOPIC>-docs` branch (in multi-repo mode, in the standalone `.mission-control/<TOPIC>-docs` git repo, never in any product repo).
     - The Capsule Communicator's working files (state, catalog, built specs, verdicts, gate logs, relays, the run log) are in `<RUN_DIR>` (`<DOCS_WORKTREE>/.run`), which is excluded from git.
-    - None of these files is written in the main checkout or `<IMPL_WORKTREE>`. Workers there get what they need pasted into their specs.
+    - None of these files is written in any main checkout or `<IMPL_WORKTREE>`. Workers there get what they need pasted into their specs.
 18. **Every value and counter lives in `<RUN_DIR>/state.json`,** written and read with `scripts/state.py`. A value the Capsule Communicator only remembers, or that a context summary mentions, is not a source: read it from the state file. Before ending any turn that waits on the user, record `STEP` and `WAITING_ON=user`, so a compacted or restarted Capsule Communicator can pick up (Capsule Communicator "Resume a run"). After a context compaction, the Capsule Communicator re-reads its instructions in full before doing anything else.
 19. **Checks run before reviews.** After every task, `scripts/gate.py` runs the run's check commands in `<IMPL_WORKTREE>` and puts the tree back. A failure goes straight to a fix round with the log, and no reviewer starts on code that fails its checks.
 20. **The loops are scripts.** `run_design.py` runs Step 2's design workers synchronously, `run_task.py` the task loop (Step 4), `run_finish.py` the final review and verification (Step 8), and `probe.py` the test launches. The Capsule Communicator only runs them and branches on their last line, passing on what they print unchanged. It never starts their workers, counts, retries, reads their workers' output, checks or resets a tree, or merges by hand.

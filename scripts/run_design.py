@@ -42,8 +42,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build, bundled_skills_dir, first_words,  # noqa: E402
-                    git, next_free, save_body, tool)
+from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build, bundled_skills_dir,  # noqa: E402
+                    check_repo_trees, discard_repo_trees, first_words, git, next_free, save_body, tool)
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
 
@@ -185,12 +185,18 @@ class Design:
         rc, out = tool("discard-changes.sh", self.docs_wt, head)
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
+        if self.r.is_multi_repo:
+            rc2, out2 = discard_repo_trees(self.r, "docs")
+            if rc2 != 0:
+                raise Done(ERROR, f"ERROR RESET {out2}")
 
     def _restore_tree(self, kind, allow_safety_out=True):
         _, args = self.need()
         allow = ["--allow", args[1]] if kind == "safety" and allow_safety_out else []
         head = self.r.need("DOCS_HEAD")
         rc, why = tool("check-tree.sh", self.docs_wt, head, *allow)
+        if rc == 0 and self.r.is_multi_repo:
+            rc, why = check_repo_trees(self.r, "docs")
         if rc != 0:
             self._discard_or_error(head)
             self.r.log(f"design {kind} worker changed the docs worktree ({why}); discarded")

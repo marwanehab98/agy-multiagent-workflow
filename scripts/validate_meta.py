@@ -60,6 +60,8 @@ class Picks:
             self.crew_top = state["CREW_TOP"]
         except KeyError as e:
             raise ValueError(f"state file lacks {e.args[0]}")
+        raw_repos = (state.get("REPOS") or "").strip()
+        self.repos = [] if not raw_repos or raw_repos == "none" else raw_repos.split()
 
 
 def own_harness_problem(picks, label, text):
@@ -76,6 +78,11 @@ def own_harness_problem(picks, label, text):
 
 def check_task(tid, meta, picks):
     p = [f"{tid}: missing {k}" for k in REQUIRED if k not in meta]
+    if picks.repos:
+        if "REPO" not in meta or not meta["REPO"]:
+            p.append(f"{tid}: missing REPO (multi-repo run; must be one of {' '.join(picks.repos)})")
+        elif meta["REPO"] not in picks.repos:
+            p.append(f"{tid}: REPO {meta['REPO']!r} not in run REPOS ({' '.join(picks.repos)})")
     if "LADDER" in meta:
         p.append(f"{tid}: LADDER is no longer used; delete it")
     if p and any("missing" in x for x in p):

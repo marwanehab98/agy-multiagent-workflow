@@ -87,6 +87,11 @@ class Done(Exception):
         self.code, self.line = code, line
 
 
+def repo_key(name):
+    """Normalize a repo directory name into a safe state/run-values key suffix."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", name)
+
+
 # ---------------------------------------------------------------- state and helpers
 
 class Run:
@@ -119,7 +124,7 @@ class Run:
         self.set(**{key: n})
         return n
 
-    # paths
+    # paths & multi-repo helpers
     @property
     def run_dir(self):
         return Path(self.need("RUN_DIR"))
@@ -132,6 +137,55 @@ class Run:
     def impl(self):
         return self.need("IMPL_WORKTREE")
 
+    @property
+    def repos(self):
+        raw = (self.get("REPOS") or "").strip()
+        return [] if not raw or raw == "none" else raw.split()
+
+    @property
+    def is_multi_repo(self):
+        return bool(self.repos)
+
+    def repo_checkout(self, repo=None):
+        if repo:
+            return self.need(f"REPO_PATH_{repo_key(repo)}")
+        return self.need("MAIN_CHECKOUT")
+
+    def repo_impl(self, repo=None):
+        if repo:
+            return self.need(f"IMPL_WT_{repo_key(repo)}")
+        return self.need("IMPL_WORKTREE")
+
+    def repo_docs(self, repo):
+        return self.need(f"DOCS_WT_{repo_key(repo)}")
+
+    def repo_feature_branch(self, repo=None):
+        if repo:
+            return self.get(f"FEATURE_BRANCH_{repo_key(repo)}") or self.need("FEATURE_BRANCH")
+        return self.need("FEATURE_BRANCH")
+
+    def repo_last_merged_key(self, repo=None):
+        return f"LAST_MERGED_{repo_key(repo)}" if repo else "LAST_MERGED"
+
+    def repo_last_merged(self, repo=None):
+        return self.need(self.repo_last_merged_key(repo))
+
+    def repo_initial_base(self, repo=None):
+        if repo:
+            return self.need(f"INITIAL_BASE_SHA_{repo_key(repo)}")
+        return self.need("INITIAL_BASE_SHA")
+
+    def repo_convention_paths(self, repo=None):
+        if repo:
+            return self.get(f"CONVENTION_PATHS_{repo_key(repo)}") or self.get("CONVENTION_PATHS", "none")
+        return self.need("CONVENTION_PATHS")
+
+    def touched_repos(self):
+        """Repos that have at least one merged commit since INITIAL_BASE_SHA_<k>."""
+        if not self.is_multi_repo:
+            return []
+        return [repo for repo in self.repos if self.repo_last_merged(repo) != self.repo_initial_base(repo)]
+
     def task_file(self, t, suffix):
         return self.docs / "tasks" / f"{t}{suffix}"
 
@@ -143,6 +197,30 @@ class Run:
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with (self.run_dir / "run-log.md").open("a", encoding="utf-8") as f:
             f.write(f"{stamp} {event}\n")
+
+
+def check_repo_trees(r, which):
+    """In multi-repo mode, check every mounted repo worktree ('docs' or 'impl'). Returns (rc, out)."""
+    for repo in r.repos:
+        k = repo_key(repo)
+        wt = r.need(f"DOCS_WT_{k}") if which == "docs" else r.need(f"IMPL_WT_{k}")
+        sha = r.need(f"START_SHA_{k}") if which == "docs" else r.need(f"LAST_MERGED_{k}")
+        rc, out = tool("check-tree.sh", wt, sha)
+        if rc != 0:
+            return rc, f"[{repo}] {out}"
+    return 0, ""
+
+
+def discard_repo_trees(r, which):
+    """In multi-repo mode, restore every mounted repo worktree ('docs' or 'impl'). Returns (rc, out)."""
+    for repo in r.repos:
+        k = repo_key(repo)
+        wt = r.need(f"DOCS_WT_{k}") if which == "docs" else r.need(f"IMPL_WT_{k}")
+        sha = r.need(f"START_SHA_{k}") if which == "docs" else r.need(f"LAST_MERGED_{k}")
+        rc, out = tool("discard-changes.sh", wt, sha)
+        if rc != 0:
+            return rc, f"[{repo}] {out}"
+    return 0, ""
 
 
 def run(cmd, cwd=None):

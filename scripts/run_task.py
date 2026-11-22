@@ -47,7 +47,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR, AgyRunner, Done, Run,  # noqa: E402
-                    build, first_words, git, next_free, pick_verdict, run, save_body, tool, verdict_line)
+                    build, first_words, git, next_free, pick_verdict, repo_key, run, save_body, tool, verdict_line)
 from pairs import ladder, parse_pair  # noqa: E402
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 
@@ -90,9 +90,21 @@ class Loop:
     def meta(self, t):
         return read_meta(self.r.task_file(t, ".meta"))
 
+    def task_repo(self, t):
+        if not self.r.is_multi_repo:
+            return None
+        repo = self.meta(t).get("REPO")
+        if not repo:
+            raise Done(ERROR, f"ERROR MISSING_REPO task={t}")
+        return repo
+
+    def task_impl(self, t):
+        return self.r.repo_impl(self.task_repo(t))
+
     # -- crew
     def start_impl(self, t, spec, kind, title, reuse):
         pair = self.r.need(f"PAIR_{t}")
+        wt = self.task_impl(t)
         self.r.set(**{f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
         in_flight = "committing" if kind == "commit" else ("fixing" if kind == "fix" else "impl")
         self.set_phase(t, in_flight)
@@ -101,15 +113,15 @@ class Loop:
         if reuse:
             conv = self.r.get(f"IMPL_CONVERSATION_ID_{t}")
             if conv:
-                result = self.runner.try_resume(spec, pair, self.r.impl, conv)
+                result = self.runner.try_resume(spec, pair, wt, conv)
                 if result is not None:
                     reused = True
                 else:
                     self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
                     if kind == "fix":
-                        self._discard_or_error(self.r.need(f"WORKER_HEAD_{t}"))
+                        self._discard_or_error(self.r.need(f"WORKER_HEAD_{t}"), t)
         if result is None:
-            result = self.runner.run(spec, pair=pair, worktree=self.r.impl)
+            result = self.runner.run(spec, pair=pair, worktree=wt)
         if result[3]:
             self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": result[3]})
         self.r.log(f"{t} {kind} {'reused' if reused else 'dispatched'} {pair}")
@@ -117,15 +129,18 @@ class Loop:
 
     def do_start(self, t):
         r = self.r
-        rc, out = tool("branch-at.sh", r.need("MAIN_CHECKOUT"), r.need("FEATURE_BRANCH"), r.need("LAST_MERGED"))
+        repo = self.task_repo(t)
+        wt = r.repo_impl(repo)
+        last_merged = r.repo_last_merged(repo)
+        rc, out = tool("branch-at.sh", r.repo_checkout(repo), r.repo_feature_branch(repo), last_merged)
         if rc == 1:
             self.prompt_not_ff(t, out, back_to="start")
         if rc != 0:
             raise Done(ERROR, f"ERROR BRANCH_AT {out}")
-        head = git(r.impl, "rev-parse", "HEAD")
-        rc, out = tool("check-tree.sh", r.impl, head)
-        if rc != 0 or run(["git", "-C", r.impl, "merge-base", "--is-ancestor", r.need("LAST_MERGED"), head]).returncode:
-            raise Done(ERROR, f"ERROR IMPL_WORKTREE_NOT_READY head={head} last_merged={r.need('LAST_MERGED')} {out}")
+        head = git(wt, "rev-parse", "HEAD")
+        rc, out = tool("check-tree.sh", wt, head)
+        if rc != 0 or run(["git", "-C", wt, "merge-base", "--is-ancestor", last_merged, head]).returncode:
+            raise Done(ERROR, f"ERROR IMPL_WORKTREE_NOT_READY head={head} last_merged={last_merged} {out}")
         meta = self.meta(t)
         spec = build("implement.txt", r.run_dir / "specs" / f"{t}-implement.txt",
                      {"TASK_TITLE": meta["TITLE"]},
@@ -173,15 +188,17 @@ class Loop:
 
     def do_check(self, t):
         r = self.r
-        head = git(r.impl, "rev-parse", "HEAD")
+        repo = self.task_repo(t)
+        wt = r.repo_impl(repo)
+        head = git(wt, "rev-parse", "HEAD")
         r.set(**{f"WORKER_HEAD_{t}": head})
-        rc, out = tool("check-tree.sh", r.impl, head)
+        rc, out = tool("check-tree.sh", wt, head)
         if rc == 2 and int(r.get(f"COMMIT_ROUNDS_{t}", "0")) >= 1:
-            rc, out = tool("discard-changes.sh", r.impl, head)
+            rc, out = tool("discard-changes.sh", wt, head)
             r.log(f"{t} removed what the commit worker left uncommitted: {' '.join(out.split())}")
             if rc != 0:
                 raise Done(ERROR, f"ERROR RESET {out}")
-            rc, out = tool("check-tree.sh", r.impl, head)
+            rc, out = tool("check-tree.sh", wt, head)
         if rc == 2:
             r.incr(f"COMMIT_ROUNDS_{t}")
             meta = self.meta(t)
@@ -196,8 +213,10 @@ class Loop:
             r.set(**{f"FAIL_MSG_{t}": note})
             return self.escalate(t)
         log = next_free(r.run_dir / "gates", f"{t}-{{n}}.log")
-        rc, out = tool("gate.py", "--run-values", r.need("RUN_VALUES"), "--worktree", r.impl,
-                       "--head", head, "--log", str(log))
+        gate_args = ["--run-values", r.need("RUN_VALUES"), "--worktree", wt, "--head", head, "--log", str(log)]
+        if repo:
+            gate_args += ["--repo", repo_key(repo)]
+        rc, out = tool("gate.py", *gate_args)
         r.log(f"{t} gate exit={rc} {log}")
         if rc == 1:
             r.set(**{f"GATE_FAILED_{t}": "yes"})
@@ -226,6 +245,8 @@ class Loop:
     # -- reviewers
     def start_review(self, t, stage):
         r = self.r
+        repo = self.task_repo(t)
+        wt = r.repo_impl(repo)
         meta = self.meta(t)
         review = next_free(r.run_dir / "verdicts", f"{t}-s{stage}-{{n}}.md")
         r.set(**{f"REVIEW_OUT_{t}": review})
@@ -236,44 +257,46 @@ class Loop:
             spec = build("spec-review.txt", out, common,
                          {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         else:
-            spec = build("quality-review.txt", out, {**common, "CONVENTION_PATHS": r.need("CONVENTION_PATHS")},
+            spec = build("quality-review.txt", out, {**common, "CONVENTION_PATHS": r.repo_convention_paths(repo)},
                          {"SUMMARY": r.task_file(t, "-summary.md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         pair = meta[f"REVIEW_{stage}"]
         r.set(**{f"REVIEW_SPEC_{t}": spec, f"REVIEW_PAIR_{t}": pair})
         self.set_phase(t, f"reviewing:{stage}")
         r.log(f"{t} stage{stage} reviewer dispatched {pair}")
-        result = self.runner.run(spec, pair=pair, worktree=r.impl)
+        result = self.runner.run(spec, pair=pair, worktree=wt)
         self.after_review(t, stage, result)
 
-    def _discard_or_error(self, head):
-        rc, out = tool("discard-changes.sh", self.r.impl, head)
+    def _discard_or_error(self, head, t=None):
+        wt = self.task_impl(t) if t is not None else self.r.impl
+        rc, out = tool("discard-changes.sh", wt, head)
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
 
     def after_review(self, t, stage, result):
         r = self.r
+        wt = self.task_impl(t)
         head = r.need(f"WORKER_HEAD_{t}")
         if result[0] == "usage":
-            self._discard_or_error(head)
+            self._discard_or_error(head, t)
             self.prompt_usage(t, f"review{stage}", result[1])
         if result[0] == "stopped":
-            self._discard_or_error(head)
+            self._discard_or_error(head, t)
             return self.void_review(t, stage, "stopped without a verdict")
         if result[0] == "ask":
-            rc, _ = tool("check-tree.sh", r.impl, head)
+            rc, _ = tool("check-tree.sh", wt, head)
             if rc != 0:
-                self._discard_or_error(head)
+                self._discard_or_error(head, t)
                 return self.void_review(t, stage, "changed the worktree")
             self.ask_consult(t, f"review{stage}", r.need(f"REVIEW_PAIR_{t}"),
                              r.need(f"REVIEW_SPEC_{t}"), result[1], result[2], stage=str(stage))
         if result[1] != "succeeded":
-            self._discard_or_error(head)
+            self._discard_or_error(head, t)
             return self.void_review(t, stage, "failed without a verdict")
         settle = save_body(result[2], next_free(r.run_dir / "results", f"{t}-s{stage}-settle-{{n}}.md"))
         verdict = pick_verdict(Path(r.need(f"REVIEW_OUT_{t}")), settle)
-        rc, _ = tool("check-tree.sh", r.impl, head)
+        rc, _ = tool("check-tree.sh", wt, head)
         if rc != 0:
-            self._discard_or_error(head)
+            self._discard_or_error(head, t)
             verdict.rename(next_free(r.run_dir / "verdicts", f"{t}-void-s{stage}-{{n}}.md"))
             return self.void_review(t, stage, "changed the worktree")
         last = verdict_line(verdict)
@@ -325,17 +348,18 @@ class Loop:
         else:
             in_flight = "committing" if kind == "commit" else ("fixing" if kind == "fix" else "impl")
             self.set_phase(t, in_flight, WAITING_ON=None)
-        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, r.impl, conv)
+        wt = self.task_impl(t)
+        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, wt, conv)
         if result is None:
             if kind.startswith("review") or kind == "fix":
-                self._discard_or_error(r.need(f"WORKER_HEAD_{t}"))
+                self._discard_or_error(r.need(f"WORKER_HEAD_{t}"), t)
             elif kind == "impl":
-                self._discard_or_error(r.get(f"IMPL_START_SHA_{t}") or r.need(f"BASE_SHA_{t}"))
+                self._discard_or_error(r.get(f"IMPL_START_SHA_{t}") or r.need(f"BASE_SHA_{t}"), t)
             if not kind.startswith("review"):
                 r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
             spec_text = Path(spec).read_text(encoding="utf-8")
             result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
-                                     pair=pair, worktree=r.impl)
+                                     pair=pair, worktree=wt)
         if kind.startswith("review"):
             self.after_review(t, review_stage, result)
         else:
@@ -346,8 +370,9 @@ class Loop:
     # -- merge
     def do_merge(self, t):
         r = self.r
-        rc, out = tool("merge-task.sh", r.need("MAIN_CHECKOUT"), r.need("FEATURE_BRANCH"),
-                       r.need("LAST_MERGED"), r.need(f"WORKER_HEAD_{t}"))
+        repo = self.task_repo(t)
+        rc, out = tool("merge-task.sh", r.repo_checkout(repo), r.repo_feature_branch(repo),
+                       r.repo_last_merged(repo), r.need(f"WORKER_HEAD_{t}"))
         if rc == 2:
             self.prompt(t, "checked-out", f"{out}\nFix this, then tell me to continue.", ["continue"], back_to="merge")
         if rc == 3:
@@ -358,14 +383,15 @@ class Loop:
         q = self.queue()
         if q and q[0] == t:
             self.write_queue(q[1:])
-        r.set(LAST_MERGED=head, WAITING_ON=None, **{f"IMPL_CONVERSATION_ID_{t}": None})
+        r.set(**{r.repo_last_merged_key(repo): head, "WAITING_ON": None, f"IMPL_CONVERSATION_ID_{t}": None})
         self.set_phase(t, "merged")
-        r.log(f"{t} merged {head}")
+        r.log(f"{t} merged {head}" + (f" ({repo})" if repo else ""))
         self.events.append(f"MERGED {t} {head}")
 
     # -- escalation
     def escalate(self, t):
         r = self.r
+        wt = self.task_impl(t)
         r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
         a = r.incr(f"ATTEMPT_{t}")
         meta = self.meta(t)
@@ -373,7 +399,7 @@ class Loop:
         nxt = f"next rung {rungs[a - 1]}" if a <= len(rungs) else "ladder used up"
         replan = "not allowed" if meta.get("REPLANNED_FROM") else "allowed"
         hist = r.run_dir / "verdicts" / f"{t}-history.md"
-        parts = [f"task={t} base={r.need(f'BASE_SHA_{t}')} head={git(r.impl, 'rev-parse', 'HEAD')}\n"]
+        parts = [f"task={t} base={r.need(f'BASE_SHA_{t}')} head={git(wt, 'rev-parse', 'HEAD')}\n"]
         if r.get(f"FAIL_MSG_{t}"):
             parts.append(Path(r.get(f"FAIL_MSG_{t}")).read_text(encoding="utf-8"))
         for f in sorted((r.run_dir / "verdicts").glob(f"{t}-s*.md")) + sorted((r.run_dir / "gates").glob(f"{t}-*.log")):
@@ -406,14 +432,14 @@ class Loop:
 
     def in_range(self, t, sha):
         """True when sha is a descendant of the task's base and an ancestor of the worktree head."""
-        impl = self.r.impl
+        impl = self.task_impl(t)
         base = self.r.need(f"BASE_SHA_{t}")
         return (run(["git", "-C", impl, "merge-base", "--is-ancestor", base, sha]).returncode == 0
                 and run(["git", "-C", impl, "merge-base", "--is-ancestor", sha, "HEAD"]).returncode == 0)
 
     def range_msg(self, t, sha):
         return (f"reset sha {sha} is not between the task's base {self.r.need(f'BASE_SHA_{t}')} "
-                f"and head {git(self.r.impl, 'rev-parse', 'HEAD')}")
+                f"and head {git(self.task_impl(t), 'rev-parse', 'HEAD')}")
 
     def director_result(self, t, path):
         r = self.r
@@ -460,7 +486,7 @@ class Loop:
         meta = self.meta(t)
         if not self.in_range(t, sha):
             return self.reject(t, self.range_msg(t, sha))
-        rc, out = tool("discard-changes.sh", r.impl, sha)
+        rc, out = tool("discard-changes.sh", self.task_impl(t), sha)
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
         spec = build("escalate.txt", r.run_dir / "specs" / f"{t}-attempt{a}.txt",
@@ -520,7 +546,7 @@ class Loop:
                 out_file.write_text(launch_problems(r, ids, d.line), encoding="utf-8")
                 self.fix_meta(t, out_file)
             raise
-        rc, out = tool("discard-changes.sh", r.impl, sha)
+        rc, out = tool("discard-changes.sh", self.task_impl(t), sha)
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
         q = self.queue()
@@ -541,7 +567,7 @@ class Loop:
 
     def prompt_not_ff(self, t, out, back_to):
         moved = "\n".join(l.strip() for l in out.splitlines() if "moved by:" in l)
-        branch = self.r.need("FEATURE_BRANCH")
+        branch = self.r.repo_feature_branch(self.task_repo(t))
         self.prompt(t, "not-ff",
                     f"The feature branch `{branch}` moved outside this run:\n{moved}\n"
                     "(a) Move or revert those commits, then tell me \"retry\".\n"
@@ -569,11 +595,12 @@ class Loop:
         if word == "stop":
             raise Done(STOP, f"STOP user stopped the run at task {t}")
         if name == "not-ff" and word == "rebuild":
-            new = git(r.need("MAIN_CHECKOUT"), "rev-parse", f"refs/heads/{r.need('FEATURE_BRANCH')}")
-            rc, out = tool("discard-changes.sh", r.impl, new)
+            repo = self.task_repo(t)
+            new = git(r.repo_checkout(repo), "rev-parse", f"refs/heads/{r.repo_feature_branch(repo)}")
+            rc, out = tool("discard-changes.sh", r.repo_impl(repo), new)
             if rc != 0:
                 raise Done(ERROR, f"ERROR RESET {out}")
-            r.set(LAST_MERGED=new, **{f"IMPL_CONVERSATION_ID_{t}": None})
+            r.set(**{r.repo_last_merged_key(repo): new, f"IMPL_CONVERSATION_ID_{t}": None})
             return self.set_phase(t, "start")
         if name == "rejected":
             r.set(**{f"REJECTS_{t}": 0})
@@ -588,8 +615,9 @@ class Loop:
             if kind.startswith("review"):
                 return self.start_review(t, int(kind[-1]))
             if kind != "commit":
-                cur_head = git(r.impl, "rev-parse", "HEAD")
-                rc, out = tool("discard-changes.sh", r.impl, cur_head)
+                wt = self.task_impl(t)
+                cur_head = git(wt, "rev-parse", "HEAD")
+                rc, out = tool("discard-changes.sh", wt, cur_head)
                 if rc != 0:
                     raise Done(ERROR, f"ERROR RESET {out}")
                 r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
@@ -634,8 +662,9 @@ class Loop:
             if phase == "start":
                 self.do_start(t)
             elif phase in ("impl", "fixing"):
-                cur_head = git(self.r.impl, "rev-parse", "HEAD")
-                rc, out = tool("discard-changes.sh", self.r.impl, cur_head)
+                wt = self.task_impl(t)
+                cur_head = git(wt, "rev-parse", "HEAD")
+                rc, out = tool("discard-changes.sh", wt, cur_head)
                 if rc != 0:
                     raise Done(ERROR, f"ERROR RESET {out}")
                 self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
@@ -646,7 +675,7 @@ class Loop:
                                 reuse=True)
             elif phase.startswith("reviewing:"):
                 stage = int(phase.split(":", 1)[1])
-                rc, out = tool("discard-changes.sh", self.r.impl, self.r.need(f"WORKER_HEAD_{t}"))
+                rc, out = tool("discard-changes.sh", self.task_impl(t), self.r.need(f"WORKER_HEAD_{t}"))
                 if rc != 0:
                     raise Done(ERROR, f"ERROR RESET {out}")
                 self.start_review(t, stage)

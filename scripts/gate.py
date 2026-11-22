@@ -40,19 +40,28 @@ def _timeout():
     return None if val <= 0 else val
 
 
-def commands(run_values, prefix):
+def _line_re(repo=None):
+    if repo:
+        return re.compile(rf"(GATE|VERIFY)_{re.escape(repo)}_(\d+)=(.*)")
+    return LINE
+
+
+def commands(run_values, prefix, repo=None):
+    pat = _line_re(repo)
     found = {"GATE": [], "VERIFY": []}
     for line in Path(run_values).read_text(encoding="utf-8").splitlines():
-        m = LINE.fullmatch(line.strip())
+        m = pat.fullmatch(line.strip())
         if m and m.group(3).strip():
-            found[m.group(1)].append((int(m.group(2)), f"{m.group(1)}_{m.group(2)}", m.group(3).strip()))
+            name = f"{m.group(1)}_{repo}_{m.group(2)}" if repo else f"{m.group(1)}_{m.group(2)}"
+            found[m.group(1)].append((int(m.group(2)), name, m.group(3).strip()))
     chosen = found["GATE"] if prefix == "GATE" and found["GATE"] else found["VERIFY"]
     return sorted(chosen)
 
 
-def commands_all(run_values, prefix):
+def commands_all(run_values, prefix, repo=None):
     """Every check with this prefix, with no fallback (for validating --skip names)."""
-    return [c for c in commands(run_values, prefix) if c[1].startswith(prefix + "_")]
+    tag = f"{prefix}_{repo}_" if repo else f"{prefix}_"
+    return [c for c in commands(run_values, prefix, repo=repo) if c[1].startswith(tag)]
 
 
 def git(wt, *args):
@@ -95,14 +104,17 @@ def main():
     p.add_argument("--log", required=True)
     p.add_argument("--prefix", choices=["GATE", "VERIFY"], default="GATE")
     p.add_argument("--skip", default="")
+    p.add_argument("--repo", default="")
     a = p.parse_args()
+    repo = a.repo.strip() or None
 
-    cmds = commands(a.run_values, a.prefix)
+    cmds = commands(a.run_values, a.prefix, repo=repo)
     if not cmds:
-        print(f"NO_COMMANDS no {a.prefix}_n or VERIFY_n lines in {a.run_values}")
+        tag = f"{a.prefix}_{repo}_n or VERIFY_{repo}_n" if repo else f"{a.prefix}_n or VERIFY_n"
+        print(f"NO_COMMANDS no {tag} lines in {a.run_values}")
         return 64
     skip = a.skip.split()
-    every = [name for prefix in ("GATE", "VERIFY") for _, name, _ in commands_all(a.run_values, prefix)]
+    every = [name for prefix in ("GATE", "VERIFY") for _, name, _ in commands_all(a.run_values, prefix, repo=repo)]
     unknown = [s for s in skip if s not in every]
     if unknown:
         print(f"UNKNOWN_SKIP {' '.join(unknown)} (checks: {' '.join(every)})")
