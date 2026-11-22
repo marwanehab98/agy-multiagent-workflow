@@ -1,0 +1,179 @@
+name: Upstream Watch
+
+on:
+  schedule:
+    - cron: '0 9 * * 1' # Weekly on Mondays at 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-upstreams:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check vendored upstream paths for updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          TOKEN = os.environ["GH_TOKEN"]
+          REPO = os.environ["REPO"]
+          ISSUE_TITLE = "Upstream updates available"
+
+          UPSTREAMS = [
+              {
+                  "repo": "obra/superpowers",
+                  "prefixes": (
+                      "skills/brainstorming/",
+                      "skills/writing-plans/",
+                      "skills/test-driven-development/",
+                      "skills/verification-before-completion/",
+                      "skills/finishing-a-development-branch/",
+                  ),
+              },
+              {
+                  "repo": "google/elephant-goldfish-model",
+                  "prefixes": (
+                      "skills/egm-brainstorm/",
+                      "skills/egm-review/",
+                      "skills/egm-review-loop/",
+                      "skills/egm-drift-report/",
+                      "agents/",
+                      "resources/",
+                  ),
+              },
+          ]
+
+          def api(method, path, body=None):
+              url = f"https://api.github.com{path}"
+              data = json.dumps(body).encode("utf-8") if body is not None else None
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {TOKEN}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "mission-control-upstream-watch",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read().decode("utf-8"))
+
+          def parse_pinned_shas(notices_text):
+              pins = {}
+              for u in UPSTREAMS:
+                  repo = u["repo"]
+                  pat = re.compile(
+                      rf"https://github\.com/{re.escape(repo)}\s*\nUpstream commit:\s*`([0-9a-f]{{7,40}})`"
+                  )
+                  m = pat.search(notices_text)
+                  if not m:
+                      raise SystemExit(f"Could not find pinned commit for {repo} in THIRD_PARTY_NOTICES.md")
+                  pins[repo] = m.group(1)
+              return pins
+
+          notices = Path("THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+          pins = parse_pinned_shas(notices)
+
+          sections = []
+          head_shas = {}
+
+          for u in UPSTREAMS:
+              repo = u["repo"]
+              base = pins[repo]
+              prefixes = u["prefixes"]
+
+              comp = api("GET", f"/repos/{repo}/compare/{base}...HEAD")
+              head = comp["commits"][-1]["sha"] if comp.get("commits") else base
+              head_shas[repo] = head
+
+              changed_files = [
+                  f["filename"]
+                  for f in comp.get("files", [])
+                  if f["filename"].startswith(prefixes)
+              ]
+              if not changed_files:
+                  print(f"{repo}: no changes to watched paths since {base[:7]} (HEAD {head[:7]})")
+                  continue
+
+              # Collect commits touching at least one watched prefix (deduped, newest first)
+              relevant_commits = {}
+              for prefix in prefixes:
+                  q = urllib.parse.urlencode({"path": prefix.rstrip("/"), "per_page": 30})
+                  for c in api("GET", f"/repos/{repo}/commits?{q}"):
+                      sha = c["sha"]
+                      if sha == base:
+                          break
+                      if sha not in relevant_commits:
+                          msg = c["commit"]["message"].splitlines()[0]
+                          date = c["commit"]["committer"]["date"][:10]
+                          relevant_commits[sha] = (date, msg, c["html_url"])
+
+              # Keep only commits that appear in the base...HEAD compare window
+              compare_shas = {c["sha"] for c in comp.get("commits", [])}
+              filtered = [
+                  (sha, info)
+                  for sha, info in relevant_commits.items()
+                  if sha in compare_shas
+              ]
+              filtered.sort(key=lambda item: item[1][0], reverse=True)
+
+              lines = [
+                  f"### [{repo}](https://github.com/{repo})",
+                  f"- **Pinned:** `{base[:7]}` → **HEAD:** `{head[:7]}` ([full diff](https://github.com/{repo}/compare/{base}...{head}))",
+                  f"- **Changed vendored files ({len(changed_files)}):** "
+                  + ", ".join(f"`{f}`" for f in changed_files[:20])
+                  + (f" (+{len(changed_files) - 20} more)" if len(changed_files) > 20 else ""),
+              ]
+              if filtered:
+                  lines.append("- **Relevant commits:**")
+                  for sha, (date, msg, url) in filtered[:15]:
+                      lines.append(f"  - [`{sha[:7]}`]({url}) ({date}) {msg}")
+              sections.append("\n".join(lines))
+
+          if not sections:
+              print("All watched upstream paths are up to date.")
+              raise SystemExit(0)
+
+          marker = "<!-- upstream-shas: " + ",".join(f"{r}={head_shas[r]}" for r in sorted(head_shas)) + " -->"
+          body = (
+              "New upstream commits were detected in paths vendored by `mission-control`.\n\n"
+              "Review the diffs below and cherry-pick anything beneficial. When done, update the pinned "
+              "`Upstream commit` SHA in `THIRD_PARTY_NOTICES.md` and close this issue.\n\n"
+              + "\n\n".join(sections)
+              + f"\n\n{marker}\n"
+          )
+
+          open_issues = api("GET", f"/repos/{REPO}/issues?state=open&per_page=50")
+          existing = next((i for i in open_issues if i.get("title") == ISSUE_TITLE and "pull_request" not in i), None)
+
+          if existing:
+              if marker in (existing.get("body") or ""):
+                  print(f"Issue #{existing['number']} already tracks these upstream SHAs; skipping.")
+              else:
+                  api("PATCH", f"/repos/{REPO}/issues/{existing['number']}", {"body": body})
+                  api(
+                      "POST",
+                      f"/repos/{REPO}/issues/{existing['number']}/comments",
+                      {"body": "Updated with newer upstream commits touching vendored paths (see issue description)."},
+                  )
+                  print(f"Updated issue #{existing['number']}.")
+          else:
+              created = api("POST", f"/repos/{REPO}/issues", {"title": ISSUE_TITLE, "body": body})
+              print(f"Opened issue #{created['number']}: {created['html_url']}")
+          PY
