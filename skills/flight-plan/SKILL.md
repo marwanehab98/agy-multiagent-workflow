@@ -13,7 +13,7 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 
 **Context:** If working in an isolated worktree, create or reuse one (e.g., via `git worktree add` or `scripts/worktree.sh`) before execution.
 
-**Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>-plan.md`
+**Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>-flight-plan.md`
 - (User preferences for plan location override this default)
 
 ## Scope Check

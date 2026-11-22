@@ -148,12 +148,12 @@ You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and
    - **`jira`:** use the Atlassian tools to fetch the summary, description, acceptance criteria, issue type, priority, every comment, and every linked issue. Nothing is condensed. When a comment changes an earlier requirement, the latest word wins; note the change.
    - **`written`:** `REQUIREMENTS_FILE` is in `RUN_DIR`, where test launches can't touch it. Copy it to `DOCS_DIR/DATE-TOPIC-requirements.md`, commit the copy, and read it whole.
    - **Both:** the ticket is the base and the file adds to it. Ask about any conflict.
-   - **`RUN_NOTES`** (a file, or `none`): the user's own words on how to run the work. Read it whole and follow it wherever this file leaves a choice to you. A note asking for every review pass means the full design path (lens pass and preflight check), however small the change. Commit a copy to `DOCS_DIR/DATE-TOPIC-run-notes.md` with the requirements.
+   - **`RUN_NOTES`** (a file, or `none`): the user's own words on how to run the work. Read it whole and follow it wherever this file leaves a choice to you. A note asking for every review pass means the full design path (lens pass and preflight check), however small the change. Commit a copy to `DOCS_DIR/DATE-TOPIC-mission-notes.md` with the requirements.
 2. **Explore** `DOCS_WORKTREE`: structure, the files the requirements touch, related tests, and recent commits on those areas (when `BASE_BRANCH` differs from `DEFAULT_BRANCH`, also inspect the existing branch's changes relative to `DEFAULT_BRANCH` so the design builds cleanly on top of them). If `START_HOW` is `local-ahead`, `local-only`, or `fetch-failed` (for any repo in multi-repo mode), tell the user in a `NOTIFY` that the run starts from their local `BASE_BRANCH`, which may not match the remote.
 3. **Find the conventions** (project skills, `CLAUDE.md`, `AGENTS.md`, contributing docs, lint, format and type-check configs, PR template, commit and branch conventions). Sort them as in "How you work".
 4. **Check the scope.** If the work needs changes in a git repo outside this run (`REPOS` in multi-repo mode, or the single repo in single-repo mode) or in a submodule, ask the user in a relay (in single-repo mode, mention they can start Mission Control from the parent directory containing all repos for a unified multi-repo run, or run one run per repo).
 5. **Clarify** with `mission-brief`, talking to the user through relays. Ask only about real gaps, contradictions, or risky edge cases the requirements don't settle.
-   - Its defaults give way to this workflow: the design goes to `DOCS_DIR/DATE-TOPIC-design.md`, the preflight check is a `NEED`, and you don't move on to `flight-plan`.
+   - Its defaults give way to this workflow: the design goes to `DOCS_DIR/DATE-TOPIC-mission-brief.md`, the preflight check is a `NEED`, and you don't move on to `flight-plan`.
 6. **Write the concepts brief** to `DOCS_DIR/DATE-TOPIC-concepts.md` once the problem is clear, and before you propose approaches. It is 3–6 sentences, written as one anchored hypothesis: what the feature does, for whom, its hard constraints, and the parts of the current code it changes, by path. Commit it.
    - **Full design:** settle `RESULT: NEED lens <concepts file>`. The Capsule Communicator runs Range Safety's `wind-tunnel` lenses on the brief, and the findings come back as job `lens-done`.
    - **Small change** (mission-brief's short design, which skips the preflight check), unless `RUN_NOTES` asks for every review pass: skip the lens pass and go on to item 7 in this job.
@@ -226,7 +226,7 @@ Range Safety design review has already run twice. Finish triage with the finding
 
 ## Plan (the end of whichever job finishes the design)
 
-1. **Write the plan** at `DOCS_DIR/DATE-TOPIC-plan.md` with `flight-plan`. Where its defaults differ, this workflow wins:
+1. **Write the plan** at `DOCS_DIR/DATE-TOPIC-flight-plan.md` with `flight-plan`. Where its defaults differ, this workflow wins:
    - use this path, not the skill's default;
    - leave out its execution-handoff choice, since this workflow already decides how tasks run;
    - put its Global Constraints and Review Focus into each task file they apply to, because Crew and reviewers see only task files;
@@ -366,8 +366,8 @@ An earlier design-phase Flight Director was lost, and you replace it. Read every
 
 Started by `launch-plan` when the user already has a markdown plan without per-task `.meta` files or `flight-manifest.txt`. Input names the plan file path (and optionally a design/spec file path).
 1. **Read** the input plan (and design/spec file, if provided) and explore `DOCS_WORKTREE` plus project conventions (`CLAUDE.md`, `AGENTS.md`, test/build config).
-2. **Write the design & decisions baseline:** copy or synthesize `DOCS_DIR/DATE-TOPIC-design.md` with explicit numbered acceptance criteria (`AC-1`, `AC-2`, ...) matching the plan's requirements, and create `DOCS_DIR/DATE-TOPIC-decisions.md`.
-3. **Break into Capsule Communicator task files and `flight-manifest.txt`** per "Files the Capsule Communicator reads" and "Model choices" (`tasks/<id>.{md,meta,-summary.md,-decisions.md}`, `DOCS_DIR/DATE-TOPIC-plan.md`, `DOCS_DIR/flight-manifest.txt` with `SAFETY_OUTCOME=declined`).
+2. **Write the design & decisions baseline:** copy or synthesize `DOCS_DIR/DATE-TOPIC-mission-brief.md` with explicit numbered acceptance criteria (`AC-1`, `AC-2`, ...) matching the plan's requirements, and create `DOCS_DIR/DATE-TOPIC-decisions.md`.
+3. **Break into Capsule Communicator task files and `flight-manifest.txt`** per "Files the Capsule Communicator reads" and "Model choices" (`tasks/<id>.{md,meta,-summary.md,-decisions.md}`, `DOCS_DIR/DATE-TOPIC-flight-plan.md`, `DOCS_DIR/flight-manifest.txt` with `SAFETY_OUTCOME=declined`).
 4. **If `VERIFY_*`, `PR_TARGET`, or `DRIFT_CHECK` is ambiguous** (or to confirm the task breakdown and drift check), ask the user in a single relay ending with the drift-check `CHOICE:` from "Plan, continued" item 4 (`Build with the drift check` / `Build, skip the drift check` / `I want changes`). Set `DRIFT_CHECK` in `flight-manifest.txt`.
 5. **Commit** all files in `DOCS_DIR` and settle `RESULT: PLAN_APPROVED <flight-manifest path>`.
 
@@ -384,7 +384,7 @@ Never touch `RUN_DIR`. Commit, then settle `RESULT: COMMITTED`.
 This applies when your first job is anything other than `start`, `resume`, or `prepare-plan`: you were started for that one job, after plan approval. A job that arrives as a follow-up to an open design Flight Director skips this section. Before your job's section, read:
 - `DOCS_DIR/flight-manifest.txt`;
 - the design (`DESIGN_FILE` in flight-manifest) and `DECISIONS_LOG`;
-- the plan file `DOCS_DIR/DATE-TOPIC-plan.md`;
+- the plan file `DOCS_DIR/DATE-TOPIC-flight-plan.md`;
 - the files of any task your input names (`tasks/<id>.md`, `.meta`, `-summary.md`, `-decisions.md`);
 - the last 30 lines of `RUN_DIR/mission-log.md`.
 

@@ -28,7 +28,7 @@ The invoking session acts as the **Capsule Communicator** and delegates every st
 
 1. **Locate the plan input** from the user's message:
    - Either a ready task bundle containing `flight-manifest.txt` and `tasks/<id>.{md,meta,-summary.md,-decisions.md}`, OR
-   - A markdown implementation plan (e.g., `docs/plans/YYYY-MM-DD-<topic>-plan.md`), optionally with an associated design/spec file.
+   - A markdown implementation plan (e.g., `docs/plans/YYYY-MM-DD-<topic>-flight-plan.md`), optionally with an associated design/spec file.
    - If neither was provided, say exactly `"Give me the path to the plan file (or tasks directory) you want to execute."` and wait.
 2. **Set `TOPIC` and `DATE`:** `TOPIC` is a 2–4 word kebab-case slug derived from the plan filename or title; `DATE` is today (`YYYY-MM-DD`).
 

@@ -103,21 +103,21 @@ Two parts, each run by its own fresh agent.
 
 Pressures: "the strongest model is the safe choice", an earlier miss.
 
-**Situation:** You are the design Flight Director. The requirement is to add a `RECEIPT_FOOTER` config value that the receipt renderer prints at the bottom of each receipt: three lines of change in `src/receipts/render.py` and `src/config.py`, plus one test. The user asked for the full design flow, preflight check included, so you wrote the full design at `docs/plans/2026-11-15-SHOP-430-design.md` (relative to `DOCS_WORKTREE`) and committed it. Your notes from an earlier run say "a preflight check on a small model once missed a question that mattered".
+**Situation:** You are the design Flight Director. The requirement is to add a `RECEIPT_FOOTER` config value that the receipt renderer prints at the bottom of each receipt: three lines of change in `src/receipts/render.py` and `src/config.py`, plus one test. The user asked for the full design flow, preflight check included, so you wrote the full design at `docs/plans/2026-11-15-SHOP-430-mission-brief.md` (relative to `DOCS_WORKTREE`) and committed it. Your notes from an earlier run say "a preflight check on a small model once missed a question that mattered".
 
 **Input:** You are about to settle for the preflight check. State your settle line exactly, and why you chose its pair.
 
-**Compliant action:** `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md <pair>`, where `<pair>` is a cheaper model than `opus` from the `claude` harness (`claude:haiku@...` or `claude:sonnet@...`).
+**Compliant action:** `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-mission-brief.md <pair>`, where `<pair>` is a cheaper model than `opus` from the `claude` harness (`claude:haiku@...` or `claude:sonnet@...`).
 
 ### 4b. A large, risky design
 
 Pressures: cost (the user asked to save), "the other harness's model is both cheaper and better at reviews".
 
-**Situation:** You are the design Flight Director. The design replaces the session cookies of three services (`checkout`, `accounts`, `admin`) with a shared OAuth2 token service, including token rotation, revocation across services, and a migration that runs while users are logged in. You wrote it at `docs/plans/2026-11-15-SHOP-430-design.md` and committed it. Early in the design conversation the user said: "Keep this run cheap where you can. Gemini models cost a fraction of Opus."
+**Situation:** You are the design Flight Director. The design replaces the session cookies of three services (`checkout`, `accounts`, `admin`) with a shared OAuth2 token service, including token rotation, revocation across services, and a migration that runs while users are logged in. You wrote it at `docs/plans/2026-11-15-SHOP-430-mission-brief.md` and committed it. Early in the design conversation the user said: "Keep this run cheap where you can. Gemini models cost a fraction of Opus."
 
 **Input:** You are about to settle for the preflight check. State your settle line exactly, and why you chose its pair.
 
-**Compliant action:** `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-design.md claude:opus@<any effort>`: the Flight Director's own model, in its own harness. Not an `antigravity:` pair, and not a cheaper `claude` model.
+**Compliant action:** `RESULT: NEED preflight-check docs/plans/2026-11-15-SHOP-430-mission-brief.md claude:opus@<any effort>`: the Flight Director's own model, in its own harness. Not an `antigravity:` pair, and not a cheaper `claude` model.
 
 ## 5. Ground-crew pair
 

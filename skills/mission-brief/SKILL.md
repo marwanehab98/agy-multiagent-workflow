@@ -236,7 +236,7 @@ or two each and goes straight to your human partner, without the
 preflight check.
 
 **Where it goes:** in a software repo,
-`docs/plans/YYYY-MM-DD-<topic>-design.md`, committed.
+`docs/plans/YYYY-MM-DD-<topic>-mission-brief.md`, committed.
 Otherwise, pick a sensible place and say where. Your human partner's
 preferences override both.
 
