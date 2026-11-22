@@ -7,6 +7,6 @@ Design decisions that apply (these override anything else where they differ):
 {{FILE:DECISIONS}}
 
 Project conventions to check against: {{CONVENTION_PATHS}}
-Evaluate correctness, edge cases, type safety, architectural fit, conformance to the project conventions, and TDD test quality (favor lean, behavior-focused tests; do not demand separate tests for private helpers already covered through public paths or redundant permutations).
+Evaluate correctness, edge cases, type safety, architectural fit, conformance to the project conventions, and TDD test quality (be strict on behavioral coverage — flag unprotected branches, boundaries, error paths, or mutations that wouldn't fail a test — while keeping test structure lean: prefer behavior-focused and table-driven tests, and do not demand separate tests for private helpers already exercised through public paths or redundant same-branch permutations).
 If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 Write your review to {{OUTPUT_FILE}}: only a severity-graded list of Critical, Important, and Minor issues, each with file and line. Its last line must be exactly "VERDICT: FIX" if there is any Critical or Important issue, otherwise "VERDICT: PASS". End your response with that exact same VERDICT line.

@@ -110,11 +110,11 @@ Vague name, tests mock not code
 - Clear name
 - Real code (no mocks unless unavoidable)
 
-**Keep tests lean:**
-- Test **public behaviors and contracts**, not private helpers already exercised through public paths.
-- Use **table-driven / parameterized tests** for multiple inputs or boundary cases instead of duplicating test functions with repeated setup.
-- Cover realistic failure modes and meaningful boundaries — skip trivial getters, type-system guarantees, framework wiring, and exhaustive redundant permutations.
-- See `writing-good-tests.md` in this skill folder for anti-patterns (no change-detectors, no mirror assertions).
+**Thorough in coverage, lean in structure:**
+- **Never skip real behavior or edge cases.** Every public contract, branch, boundary, and error path must be covered — if a realistic mutation to production code (wrong branch, missing side effect, off-by-one, empty/nil/malformed input) would leave tests green, coverage is missing (see the Mutation Check in `writing-good-tests.md`).
+- **Test through public contracts, not private structure.** Don't duplicate tests for private helpers already exercised through public paths; only test a helper directly (or extract it into its own internal contract) when its logic is too complex to exercise thoroughly through the public API.
+- **Express multiple cases with table-driven / parameterized tests** instead of duplicating test functions with repeated setup.
+- **Skip only non-behavioral noise:** trivial getters/forwarding with no logic, language/type-system guarantees, framework wiring, and redundant inputs that exercise the exact same branch. See `writing-good-tests.md` for anti-patterns (no change-detectors, no mirror assertions).
 
 ### Verify RED - Watch It Fail
 
@@ -307,7 +307,7 @@ Before marking work complete:
 - [ ] All tests pass
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
-- [ ] Key edge cases and realistic failure modes covered (prefer table-driven tests; no redundant permutations)
+- [ ] Edge cases, boundaries, and error paths covered — passes the Mutation Check in `writing-good-tests.md` (use table-driven tests; no redundant same-branch permutations)
 
 Can't check all boxes? You skipped TDD. Start over.
 
