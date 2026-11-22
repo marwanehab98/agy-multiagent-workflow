@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#0f1b33"/>
@@ -21,49 +21,49 @@
     </radialGradient>
 
     <clipPath id="scopeClip">
-      <circle cx="32" cy="32" r="20"/>
+      <circle cx="32" cy="32" r="24.5"/>
     </clipPath>
   </defs>
 
-  <!-- App Icon Container -->
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)" stroke="#1e3a5f" stroke-width="1.5"/>
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#glow)"/>
+  <!-- Full-Bleed App Icon Container -->
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14" fill="url(#bg)" stroke="#1e3a5f" stroke-width="1.5"/>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="14" fill="url(#glow)"/>
 
   <!-- Outer Scope Housing & Cardinal Ticks -->
-  <circle cx="32" cy="32" r="22.5" fill="#131e32" stroke="#334155" stroke-width="1.5"/>
-  <g stroke="#475569" stroke-width="1.5" stroke-linecap="round">
-    <line x1="32" y1="7.5" x2="32" y2="9.5"/>
-    <line x1="32" y1="54.5" x2="32" y2="56.5"/>
-    <line x1="7.5" y1="32" x2="9.5" y2="32"/>
-    <line x1="54.5" y1="32" x2="56.5" y2="32"/>
+  <circle cx="32" cy="32" r="27" fill="#131e32" stroke="#334155" stroke-width="1.6"/>
+  <g stroke="#475569" stroke-width="1.6" stroke-linecap="round">
+    <line x1="32" y1="2.8" x2="32" y2="5"/>
+    <line x1="32" y1="59" x2="32" y2="61.2"/>
+    <line x1="2.8" y1="32" x2="5" y2="32"/>
+    <line x1="59" y1="32" x2="61.2" y2="32"/>
   </g>
 
   <!-- Radar Screen -->
-  <circle cx="32" cy="32" r="20" fill="url(#scopeBg)"/>
+  <circle cx="32" cy="32" r="24.5" fill="url(#scopeBg)"/>
 
   <g clip-path="url(#scopeClip)">
     <!-- Concentric Range Rings -->
-    <circle cx="32" cy="32" r="19.5" fill="none" stroke="#1e3a5f" stroke-width="1"/>
-    <circle cx="32" cy="32" r="13.5" fill="none" stroke="#1e3a5f" stroke-width="1"/>
-    <circle cx="32" cy="32" r="7" fill="none" stroke="#1e3a5f" stroke-width="1"/>
+    <circle cx="32" cy="32" r="24" fill="none" stroke="#1e3a5f" stroke-width="1.1"/>
+    <circle cx="32" cy="32" r="16.5" fill="none" stroke="#1e3a5f" stroke-width="1.1"/>
+    <circle cx="32" cy="32" r="8.5" fill="none" stroke="#1e3a5f" stroke-width="1.1"/>
 
     <!-- Crosshairs -->
-    <line x1="12" y1="32" x2="52" y2="32" stroke="#1e3a5f" stroke-width="1"/>
-    <line x1="32" y1="12" x2="32" y2="52" stroke="#1e3a5f" stroke-width="1"/>
+    <line x1="7.5" y1="32" x2="56.5" y2="32" stroke="#1e3a5f" stroke-width="1.1"/>
+    <line x1="32" y1="7.5" x2="32" y2="56.5" stroke="#1e3a5f" stroke-width="1.1"/>
 
     <!-- Radar Sweep Wedge & Leading Beam -->
-    <path d="M 32 32 L 32 12 A 20 20 0 0 1 49.32 22 Z" fill="url(#radarSweep)"/>
-    <line x1="32" y1="32" x2="49.32" y2="22" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round"/>
+    <path d="M 32 32 L 32 7.5 A 24.5 24.5 0 0 1 53.22 19.75 Z" fill="url(#radarSweep)"/>
+    <line x1="32" y1="32" x2="53.22" y2="19.75" stroke="#38bdf8" stroke-width="2.1" stroke-linecap="round"/>
 
     <!-- Tracked Blips -->
-    <circle cx="41.5" cy="24.5" r="4.2" fill="#10b981" opacity="0.24"/>
-    <circle cx="41.5" cy="24.5" r="2.1" fill="#10b981"/>
-    <circle cx="41.5" cy="24.5" r="0.8" fill="#e2e8f0"/>
+    <circle cx="43.64" cy="22.81" r="5" fill="#10b981" opacity="0.24"/>
+    <circle cx="43.64" cy="22.81" r="2.6" fill="#10b981"/>
+    <circle cx="43.64" cy="22.81" r="1" fill="#e2e8f0"/>
 
-    <circle cx="24" cy="38.5" r="3.4" fill="#f59e0b" opacity="0.22"/>
-    <circle cx="24" cy="38.5" r="1.7" fill="#f59e0b"/>
+    <circle cx="22.2" cy="39.96" r="4.2" fill="#f59e0b" opacity="0.22"/>
+    <circle cx="22.2" cy="39.96" r="2.1" fill="#f59e0b"/>
 
     <!-- Center Pivot -->
-    <circle cx="32" cy="32" r="1.8" fill="#38bdf8"/>
+    <circle cx="32" cy="32" r="2.2" fill="#38bdf8"/>
   </g>
 </svg>
