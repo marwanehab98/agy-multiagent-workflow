@@ -30,16 +30,16 @@ def pair_key(p):
     return re.sub(r"[^A-Za-z0-9]", "_", str(p))
 
 
-def ladder(base, top_effort, architect, first):
-    """Rungs after the first attempt: base at its top effort, then the architect pair.
+def ladder(crew, top_effort, director, first):
+    """Rungs after the first attempt: crew at its top effort, then the flight director pair.
 
-    A rung is dropped when it equals `first`, an earlier rung, or (non-last rung) the architect.
+    A rung is dropped when it equals `first`, an earlier rung, or (non-last rung) the flight director.
     """
-    candidates = [Pair(base.harness, base.model, top_effort), architect]
+    candidates = [Pair(crew.harness, crew.model, top_effort), director]
     rungs = []
     for i, rung in enumerate(candidates):
         last = i == len(candidates) - 1
-        if rung == first or rung in rungs or (not last and rung == architect):
+        if rung == first or rung in rungs or (not last and rung == director):
             continue
         rungs.append(rung)
     return rungs

@@ -60,9 +60,9 @@ def pick_verdict(review, settle):
 
 
 def result_words(text):
-    """The words of an architect's RESULT line, without what it may add around the line itself.
+    """The words of a flight director's RESULT line, without what it may add around the line itself.
 
-    Architects sometimes wrap the line in backticks or bold, end it with a period, or carry on with
+    Flight directors sometimes wrap the line in backticks or bold, end it with a period, or carry on with
     prose on the same line ("RESULT: RUN_VALUES_FIXED. The baseline failed because ..."; live test
     2026-11-15). Take the first non-empty line from "RESULT:", cut it at the first sentence break
     (". ", "; ", " - ", a backtick), and drop trailing punctuation from each argument.
@@ -136,7 +136,7 @@ class Run:
         return self.docs / "tasks" / f"{t}{suffix}"
 
     def require_new_format(self):
-        if "ROLE_ARCHITECT" not in self.s:
+        if "ROLE_DIRECTOR" not in self.s:
             raise Done(ERROR, f"ERROR OLD_FORMAT_RUN remove {self.get('RUN_DIR', self.path.parent)} and start a new run")
 
     def log(self, event):

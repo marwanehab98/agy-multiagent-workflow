@@ -1,25 +1,25 @@
-"""Run the coordinator's Step 8 items 1-3 (starting-state check, final review, final-fix rounds,
+"""Run the capsule communicator's Step 8 items 1-3 (starting-state check, final review, final-fix rounds,
 verification, drift check) synchronously via headless CLI workers.
 
 Usage:
   python3 -I run_finish.py --state <RUN_DIR>/state.json advance
-  python3 -I run_finish.py --state <file> advance --architect-result <file with the RESULT line>
+  python3 -I run_finish.py --state <file> advance --director-result <file with the RESULT line>
   python3 -I run_finish.py --state <file> advance --reply <the user's one-word reply>
-  python3 -I run_finish.py --state <file> advance --answer <architect answer file after CONSULT>
+  python3 -I run_finish.py --state <file> advance --answer <flight director answer file after CONSULT>
   python3 -I run_finish.py --state <file> advance --docs-moved
 
 The last line of stdout is the status.
 Exit 0   VERIFIED <log>                    the VERIFY commands passed (or the user accepted a failing
                                            run); go to Step 8 item 4 with <log> as the verify log
-Exit 20  ARCHITECT_JOB <job> <input>       send that architect job with INPUT=<input>. Jobs:
+Exit 20  DIRECTOR_JOB <job> <input>        send that flight director job with INPUT=<input>. Jobs:
                                            final-review <verdict file>, verification-failed <log>,
                                            fix-meta <validate output>, drift-done <findings|failed: file>
 Exit 21  RUN_QUEUE <F id>                  queue.txt now holds only that id: run run_task.py (Step 4);
                                            on QUEUE_EMPTY call advance again for a new final review
-Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run architect job `consult` with
+Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight director job `consult` with
                                            INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
-Exit 40  STOP <reason>                     dispatch nothing more; coordinator Step 8 item 7
+Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 8 item 7
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 """
@@ -62,8 +62,8 @@ class Finish:
         self.r.set(FIN_PHASE=phase, STEP=f"run_finish {phase}", **kv)
 
     def job(self, name, text):
-        line = f"ARCHITECT_JOB {name} {text}"
-        self.set_phase("job", FIN_JOB=name, FIN_LINE=line, WAITING_ON="architect")
+        line = f"DIRECTOR_JOB {name} {text}"
+        self.set_phase("job", FIN_JOB=name, FIN_LINE=line, WAITING_ON="director")
         raise Done(ESCALATE, line)
 
     def prompt(self, name, text, accepted):
@@ -77,7 +77,7 @@ class Finish:
         ask = next_free(r.run_dir / "asks", f"finish-{kind}-{{n}}.md")
         save_body(body, ask, header=f"finish phase ({kind})")
         r.set(FIN_ASK_CONV=conv_id, FIN_ASK_KIND=kind, FIN_ASK_PAIR=pair, FIN_ASK_SPEC=spec, FIN_ASK_FILE=ask)
-        self.set_phase("consult", WAITING_ON="architect")
+        self.set_phase("consult", WAITING_ON="director")
         raise Done(CONSULT, f"CONSULT {ask}")
 
     # -- item 1: starting state
@@ -107,7 +107,7 @@ class Finish:
                       "CONVENTION_PATHS": r.need("CONVENTION_PATHS"), "OUTPUT_FILE": out,
                       "AC_IDS": ac_ids(r.need("DESIGN_FILE"), r.need("DECISIONS_LOG"))},
                      {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG")})
-        pair = r.need("ROLE_ARCHITECT")
+        pair = r.need("ROLE_DIRECTOR")
         self.set_phase("reviewing", FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair)
         r.log(f"final review {n} dispatched {pair}")
         result = self.runner.run(spec, pair=pair, worktree=r.impl)
@@ -183,7 +183,7 @@ class Finish:
     # -- the optional drift check (DRIFT_CHECK=yes): once, after verification first passes
     def drift_skills(self):
         r = self.r
-        harness = parse_pair(r.need("ROLE_EGM")).harness
+        harness = parse_pair(r.need("ROLE_SAFETY")).harness
         rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
                        "--skill", "spec-drift")
         if rc == 0:
@@ -195,15 +195,15 @@ class Finish:
         skills = self.drift_skills()
         if not skills:
             note = r.run_dir / "results" / "drift-failed.md"
-            note.write_text(f"The EGM pick's harness has no spec-drift skill ({r.need('ROLE_EGM')}).\n",
+            note.write_text(f"The Range Safety pick's harness has no spec-drift skill ({r.need('ROLE_SAFETY')}).\n",
                             encoding="utf-8")
             r.set(DRIFT_DONE="yes")
             self.job("drift-done", f"failed: {note}")
         out = next_free(r.run_dir, "drift-{n}.md")
         spec = build("drift.txt", next_free(r.run_dir / "specs", "drift-{n}.txt"),
-                     {"EGM_SKILLS": skills, "DESIGN_FILE": r.need("DESIGN_FILE"),
+                     {"SAFETY_SKILLS": skills, "DESIGN_FILE": r.need("DESIGN_FILE"),
                       "DECISIONS_LOG": r.need("DECISIONS_LOG"), "OUTPUT_FILE": out})
-        pair = r.need("ROLE_EGM")
+        pair = r.need("ROLE_SAFETY")
         self.set_phase("drifting", FIN_OUT=out, FIN_SPEC=spec, FIN_PAIR=pair)
         r.log(f"drift check dispatched {pair}")
         result = self.runner.run(spec, pair=pair, worktree=r.impl)
@@ -255,11 +255,11 @@ class Finish:
         ans = p.read_text(encoding="utf-8")
         r.set(FIN_ASK_CONV=None, FIN_ASK_KIND=None, FIN_ASK_PAIR=None, FIN_ASK_SPEC=None, FIN_ASK_FILE=None)
         self.set_phase("drifting" if kind == "drift" else "reviewing", WAITING_ON=None)
-        result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
+        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
             self._discard_or_error(r.need("LAST_MERGED") if kind == "drift" else r.need("FIN_HEAD"))
             spec_text = Path(spec).read_text(encoding="utf-8")
-            result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
+            result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)
         if kind == "drift":
             self.settle_drift(result)
@@ -270,18 +270,18 @@ class Finish:
         self.set_phase("verified", FIN_VERIFY_LOG=log, WAITING_ON=None)
         raise Done(VERIFIED, f"VERIFIED {log}")
 
-    # -- the architect's answers
+    # -- the flight director's answers
     def take_result(self, path):
         r = self.r
         words = first_words(path)
         phase, job = self.phase(), r.get("FIN_JOB")
         if phase != "job" or words[:1] != ["RESULT:"] or len(words) < 2:
-            raise Done(ERROR, f"ERROR UNEXPECTED_ARCHITECT_RESULT phase={phase}: {' '.join(words)[:300]}")
+            raise Done(ERROR, f"ERROR UNEXPECTED_DIRECTOR_RESULT phase={phase}: {' '.join(words)[:300]}")
         kind = words[1]
         r.set(WAITING_ON=None)
         if kind == "STOP":
-            r.log(f"final {job}: architect chose STOP")
-            raise Done(STOP, "STOP architect stopped the run during the final review")
+            r.log(f"final {job}: flight director chose STOP")
+            raise Done(STOP, "STOP flight director stopped the run during the final review")
         if job in ("final-review", "verification-failed"):
             if kind == "FINAL_FIX" and len(words) == 3:
                 return self.validate_fix(words[2])
@@ -290,7 +290,7 @@ class Finish:
                     return self.set_phase("verify")
                 log = r.need("FIN_VERIFY_LOG")
                 self.prompt("accept-failing",
-                            f"Verification still fails, and the architect found nothing to fix: {log}. "
+                            f"Verification still fails, and the flight director found nothing to fix: {log}. "
                             "Reply \"continue\" to open the PR anyway, or \"stop\" to stop the run.",
                             ["continue", "stop"])
         if job == "drift-done" and kind == "FINAL_FIX" and len(words) == 3:
@@ -299,7 +299,7 @@ class Finish:
             return self.verified(r.need("FIN_VERIFY_LOG"))
         if job == "fix-meta" and kind == "META_FIXED" and len(words) == 2:
             return self.validate_fix(r.need("FIN_FIX"))
-        raise Done(ERROR, f"ERROR UNEXPECTED_ARCHITECT_RESULT job={job}: {' '.join(words)[:300]}")
+        raise Done(ERROR, f"ERROR UNEXPECTED_DIRECTOR_RESULT job={job}: {' '.join(words)[:300]}")
 
     def validate_fix(self, fid):
         r = self.r
@@ -318,7 +318,7 @@ class Finish:
         self.job("fix-meta", out_file)
 
     def do_probe(self):
-        """Test-launch the final-fix task's reviewer pairs; a failed launch goes to the architect as fix-meta."""
+        """Test-launch the final-fix task's reviewer pairs; a failed launch goes to the flight director as fix-meta."""
         r = self.r
         fid = r.need("FIN_FIX")
         try:
@@ -371,11 +371,11 @@ class Finish:
         self.set_phase("review")
 
     # -- driver
-    def advance(self, architect_result=None, reply_word=None, answer_path=None, moved=False):
+    def advance(self, director_result=None, reply_word=None, answer_path=None, moved=False):
         if moved:
             docs_moved(self.r)
-        if architect_result:
-            self.take_result(architect_result)
+        if director_result:
+            self.take_result(director_result)
         elif reply_word:
             self.reply(reply_word)
         elif answer_path:
@@ -411,7 +411,7 @@ def main():
     p.add_argument("--state", required=True)
     sub = p.add_subparsers(dest="op", required=True)
     adv = sub.add_parser("advance")
-    adv.add_argument("--architect-result")
+    adv.add_argument("--director-result")
     adv.add_argument("--reply")
     adv.add_argument("--answer")
     adv.add_argument("--docs-moved", action="store_true")
@@ -420,7 +420,7 @@ def main():
     except SystemExit as e:
         return 64 if e.code else 0
     try:
-        Finish(a.state).advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None,
+        Finish(a.state).advance(a.director_result, a.reply.strip().strip('"').lower() if a.reply else None,
                                 a.answer, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:

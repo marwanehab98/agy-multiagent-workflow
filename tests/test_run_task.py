@@ -95,7 +95,7 @@ class GateAndFixes(Base):
         note = self.tmp / "note.md"
         note.write_text("steps 1-2 done\n")
         self.behave("commit", "pass", "pass")
-        _, lines = self.expect(0, "QUEUE_EMPTY", "--architect-result",
+        _, lines = self.expect(0, "QUEUE_EMPTY", "--director-result",
                                self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g@xhigh"))
         self.assertTrue(lines[0].startswith("MERGED 01 "))
         impl_calls = [c for c in self.calls() if c["model"] == "g-xhigh"]
@@ -110,7 +110,7 @@ class GateAndFixes(Base):
         note = self.tmp / "note.md"
         note.write_text("steps 1-2 done\n")
         self.behave("commit", "pass", "pass")
-        self.expect(0, "QUEUE_EMPTY", "--architect-result", self.result_file(
+        self.expect(0, "QUEUE_EMPTY", "--director-result", self.result_file(
             f"`RESULT: ESCALATE {self.base} {note} antigravity:g@xhigh.` The next rung should manage; see the note.\nMore."))
         self.assertEqual(self.st("PAIR_01"), "antigravity:g@xhigh")
 
@@ -413,7 +413,7 @@ class TreeAndWorkers(Base):
             "pass",
             "pass",
         )
-        self.expect(22, "CONSULT", "--architect-result",
+        self.expect(22, "CONSULT", "--director-result",
                     self.result_file(f"RESULT: ESCALATE {step_b} {note} antigravity:g@xhigh"))
         self.assertEqual(self.st("BASE_SHA_01"), self.base)
         self.assertEqual(self.st("IMPL_START_SHA_01"), step_b)
@@ -465,18 +465,18 @@ class Prompts(Base):
         self.behave("fail")
         self.expect(20, "ESCALATE")
         bad = self.result_file(f"RESULT: ESCALATE {self.base} /dev/null antigravity:big@high")
-        self.expect(20, "ESCALATE", "--architect-result", bad)
-        last, _ = self.expect(30, "PROMPT", "--architect-result", bad)
+        self.expect(20, "ESCALATE", "--director-result", bad)
+        last, _ = self.expect(30, "PROMPT", "--director-result", bad)
         self.assertIn("rejected twice", Path(last.split()[1]).read_text())
         self.expect(20, "ESCALATE", "--reply", "retry")
-        self.expect(40, "STOP", "--architect-result", self.result_file("RESULT: STOP"))
+        self.expect(40, "STOP", "--director-result", self.result_file("RESULT: STOP"))
 
     def test_reset_sha_before_base_is_rejected(self):
         self.behave("commit", "fix", "commit", "fix", "commit", "fix")
         self.expect(20, "ESCALATE")
         note = self.tmp / "note.md"
         note.write_text("n\n")
-        self.expect(20, "ESCALATE", "--architect-result",
+        self.expect(20, "ESCALATE", "--director-result",
                     self.result_file(f"RESULT: ESCALATE {self.older} {note} antigravity:g@xhigh"))
         hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
         self.assertIn("not between the task's base", hist)
@@ -486,7 +486,7 @@ class Prompts(Base):
         self.behave("commit", "fix", "commit", "fix", "commit", "fix")
         self.expect(20, "ESCALATE")
         queue = (self.run_dir / "queue.txt").read_text()
-        self.expect(20, "ESCALATE", "--architect-result", self.result_file(f"RESULT: REPLAN {self.older} 01b"))
+        self.expect(20, "ESCALATE", "--director-result", self.result_file(f"RESULT: REPLAN {self.older} 01b"))
         hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
         self.assertIn("not between the task's base", hist)
         self.assertEqual(self.impl_head(), self.st("WORKER_HEAD_01"))
@@ -505,7 +505,7 @@ class Prompts(Base):
         g("checkout", "-q", "--detach", head)
         note = self.tmp / "note.md"
         note.write_text("n\n")
-        self.expect(20, "ESCALATE", "--architect-result",
+        self.expect(20, "ESCALATE", "--director-result",
                     self.result_file(f"RESULT: ESCALATE {side} {note} antigravity:g@xhigh"))
         self.assertIn("not between the task's base", (self.run_dir / "verdicts" / "01-history.md").read_text())
         self.assertEqual(self.impl_head(), head)
@@ -531,7 +531,7 @@ class Prompts(Base):
         note = self.tmp / "note.md"
         note.write_text("n\n")
         self.behave("commit", "pass", "pass")
-        self.expect(0, "QUEUE_EMPTY", "--architect-result",
+        self.expect(0, "QUEUE_EMPTY", "--director-result",
                     self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g@xhigh"))
         for k in ("STAGE_FIX_ROUNDS_01_S1", "STAGE_FIX_ROUNDS_01_S2", "GATE_FIX_ROUNDS_01", "TOTAL_FIX_ROUNDS_01"):
             self.assertEqual(self.st(k), "0", k)
@@ -680,7 +680,7 @@ class Prompts(Base):
         note.write_text("n\n")
         # Attempt 2: commit, then first noverdict should get a retry (pass) rather than immediate fix
         self.behave("commit", "noverdict", "pass", "pass")
-        self.expect(0, "QUEUE_EMPTY", "--architect-result",
+        self.expect(0, "QUEUE_EMPTY", "--director-result",
                     self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g@xhigh"))
         self.assertEqual(self.st("TOTAL_FIX_ROUNDS_01"), "0")
         self.assertEqual(self.st("NO_VERDICT_01_S1"), "0")
@@ -694,17 +694,17 @@ class PicksAndLadder(Base):
         note.write_text("n\n")
         last, _ = self.expect(20, "ESCALATE")
         self.assertIn("next rung antigravity:g@xhigh", last)
-        last, _ = self.expect(20, "ESCALATE", "--architect-result",
+        last, _ = self.expect(20, "ESCALATE", "--director-result",
                                self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g@xhigh"))
         self.assertIn("attempt 2, next rung antigravity:big@high", last)
-        last, _ = self.expect(20, "ESCALATE", "--architect-result",
+        last, _ = self.expect(20, "ESCALATE", "--director-result",
                                self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:big@high"))
         self.assertIn("attempt 3, ladder used up, replan allowed", last)
         return note
 
     def test_old_format_state_refused(self):
         s = self.st()
-        del s["ROLE_ARCHITECT"]
+        del s["ROLE_DIRECTOR"]
         self.state.write_text(json.dumps(s))
         rc, last, _ = self.adv()
         self.assertEqual((rc, last.split()[:2]), (2, ["ERROR", "OLD_FORMAT_RUN"]))
@@ -722,7 +722,7 @@ class PicksAndLadder(Base):
     def test_past_ladder_pair_is_probed_first(self):
         note = self.use_up_ladder()
         self.behave("ok", "commit", "pass", "pass")
-        self.expect(0, "QUEUE_EMPTY", "--architect-result",
+        self.expect(0, "QUEUE_EMPTY", "--director-result",
                     self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:small@low"))
         self.assertEqual(self.st("PAIR_01"), "antigravity:small@low")
         self.assertEqual(self.st("LAUNCH_STYLE_antigravity_small_low"), "slug")
@@ -730,7 +730,7 @@ class PicksAndLadder(Base):
     def test_failed_probe_rejects_the_answer(self):
         note = self.use_up_ladder()
         self.behave("fail", "fail")
-        last, _ = self.expect(20, "ESCALATE", "--architect-result",
+        last, _ = self.expect(20, "ESCALATE", "--director-result",
                                self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:small@low"))
         hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
         self.assertIn("launch test for antigravity:small@low failed; see", hist)
@@ -765,7 +765,7 @@ class Replan(Base):
         self.replan_to("01a")
         # probe 01a reviewer, then 01a (commit, pass, pass), then 02 (commit, pass, pass)
         self.behave("ok", "commit", "pass", "pass", "commit", "pass", "pass")
-        _, lines = self.expect(0, "QUEUE_EMPTY", "--architect-result",
+        _, lines = self.expect(0, "QUEUE_EMPTY", "--director-result",
                                self.result_file(f"RESULT: REPLAN {self.base} 01a"))
         self.assertEqual(self.st("LAUNCH_STYLE_antigravity_small_low"), "slug")
         self.assertTrue(any(l.startswith("MERGED 01a ") for l in lines))
@@ -774,7 +774,7 @@ class Replan(Base):
     def test_replan_probe_failure_goes_to_fix_meta(self):
         self.replan_to("01a")
         self.behave("fail", "fail")
-        last, _ = self.expect(21, "FIX_META", "--architect-result",
+        last, _ = self.expect(21, "FIX_META", "--director-result",
                                self.result_file(f"RESULT: REPLAN {self.base} 01a"))
         text = Path(last.split()[1]).read_text()
         self.assertIn("PROBLEM 01a: REVIEW_1 antigravity:small@low failed its test launch; see ", text)
@@ -784,7 +784,7 @@ class Replan(Base):
         self.assertEqual((self.run_dir / "queue.txt").read_text().split(), ["01", "02"])
         self.task("01a", "AC-1", "REPLANNED_FROM=01")
         self.behave("commit", "pass", "pass", "commit", "pass", "pass")
-        self.expect(0, "QUEUE_EMPTY", "--architect-result", self.result_file("RESULT: META_FIXED"))
+        self.expect(0, "QUEUE_EMPTY", "--director-result", self.result_file("RESULT: META_FIXED"))
         self.assertEqual(self.st("META_FAILS"), "0")
 
     def test_replan_runs_fix_meta_then_replaces_task(self):
@@ -792,20 +792,20 @@ class Replan(Base):
         self.behave("fail")
         self.expect(20, "ESCALATE")
         self.task("01a", "AC-1")  # missing REPLANNED_FROM
-        last, _ = self.expect(21, "FIX_META", "--architect-result",
+        last, _ = self.expect(21, "FIX_META", "--director-result",
                               self.result_file(f"RESULT: REPLAN {self.base} 01a"))
         self.assertIn("needs REPLANNED_FROM=01", Path(last.split()[1]).read_text())
         self.expect(21, "FIX_META")
         self.task("01a", "AC-1", "REPLANNED_FROM=01")
         self.behave("commit", "pass", "pass", "commit", "pass", "pass")
-        self.expect(0, "QUEUE_EMPTY", "--architect-result", self.result_file("RESULT: META_FIXED"))
+        self.expect(0, "QUEUE_EMPTY", "--director-result", self.result_file("RESULT: META_FIXED"))
 
     def test_replan_of_a_replanned_task_is_rejected(self):
         self.task("01", "AC-1", "REPLANNED_FROM=00")
         self.behave("fail")
         last, _ = self.expect(20, "ESCALATE")
         self.assertIn("replan not allowed", last)
-        self.expect(20, "ESCALATE", "--architect-result", self.result_file(f"RESULT: REPLAN {self.base} 01b"))
+        self.expect(20, "ESCALATE", "--director-result", self.result_file(f"RESULT: REPLAN {self.base} 01b"))
         self.assertIn("Replan is not allowed", (self.run_dir / "verdicts" / "01-history.md").read_text())
 
 

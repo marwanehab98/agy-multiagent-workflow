@@ -1,4 +1,4 @@
-"""Fill a worker-spec template so the coordinator never writes spec text by hand.
+"""Fill a worker-spec template so the capsule communicator never writes spec text by hand.
 
 Usage:
   python3 -I build_spec.py --template <file> --out <file> [--set NAME=value]... [--file NAME=path]...

@@ -40,7 +40,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((self.target / "agents" / "zoom_out.md").is_file())
         self.assertTrue((self.target / "resources" / "document_standards" / "feature-spec-standard.md").is_file())
         self.assertTrue((self.target / "scripts" / "run_task.py").is_file())
-        self.assertTrue((self.target / "references" / "coordinator.md").is_file())
+        self.assertTrue((self.target / "references" / "capsule-communicator.md").is_file())
         self.assertFalse((self.target / "tests").exists())
         self.assertFalse((self.target / "install.sh").exists())
         self.assertFalse((self.target / ".git").exists())
@@ -179,7 +179,7 @@ class InstallTests(unittest.TestCase):
         dest = skills_root / "mission"
         self.assertTrue((dest / "SKILL.md").is_file())
         self.assertTrue((dest / "scripts" / "run_task.py").is_file())
-        self.assertTrue((dest / "references" / "coordinator.md").is_file())
+        self.assertTrue((dest / "references" / "capsule-communicator.md").is_file())
         self.assertTrue((dest / "agents" / "zoom_out.md").is_file())
         for name in (
             "launch-plan", "draft-spec", "flight-plan", "red-green",
@@ -225,7 +225,7 @@ class InstallTests(unittest.TestCase):
         dest = skills_root / "mission"
         self.assertTrue((dest / "SKILL.md").is_file())
         self.assertTrue((dest / "scripts" / "run_task.py").is_file())
-        self.assertTrue((dest / "references" / "coordinator.md").is_file())
+        self.assertTrue((dest / "references" / "capsule-communicator.md").is_file())
         self.assertTrue((dest / "agents" / "zoom_out.md").is_file())
         self.assertTrue((dest / ".managed-skills").is_file())
         for name in (

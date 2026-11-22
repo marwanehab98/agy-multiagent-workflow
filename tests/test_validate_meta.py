@@ -8,7 +8,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "validate_meta.py"
 CATALOG = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 DEFAULT = dict(TITLE="t", TIER="standard", SPEC_TYPE="checklist", ACS="AC-1",
-               IMPLEMENTER="antigravity:g@high", REVIEW_1="antigravity:small@high", REVIEW_2="antigravity:small@high")
+               CREW="antigravity:g@high", REVIEW_1="antigravity:small@high", REVIEW_2="antigravity:small@high")
 
 
 class ValidateMetaTests(unittest.TestCase):
@@ -20,8 +20,8 @@ class ValidateMetaTests(unittest.TestCase):
         self.state()
 
     def state(self, **over):
-        s = {"CATALOG": str(CATALOG), "ROLE_ARCHITECT": "antigravity:big@high", "ROLE_BASE": "antigravity:g@high",
-             "BASE_TOP": "xhigh", **over}
+        s = {"CATALOG": str(CATALOG), "ROLE_DIRECTOR": "antigravity:big@high", "ROLE_CREW": "antigravity:g@high",
+             "CREW_TOP": "xhigh", **over}
         self.state_path.write_text(json.dumps(s))
 
     def meta(self, tid, acs=None, extra="", **over):
@@ -76,19 +76,19 @@ class ValidateMetaTests(unittest.TestCase):
 
     def test_reviewer_from_other_harness_rejected(self):
         self.meta("01", REVIEW_1="other:g@high")
-        self.assertProblem("architect's harness")
+        self.assertProblem("flight director's harness")
 
     def test_bad_pair_shape(self):
         self.meta("01", REVIEW_1="nonsense")
         self.assertProblem("REVIEW_1", "bad pair")
 
-    def test_complex_review2_matches_architect_model_any_effort(self):
+    def test_complex_review2_matches_director_model_any_effort(self):
         self.meta("01", TIER="complex", REVIEW_2="antigravity:big@low")
         self.assertOK()
         self.meta("01", TIER="complex", REVIEW_2="antigravity:small@max")
         self.assertProblem("REVIEW_2")
 
-    def test_complex_judgment_needs_review1_on_architect_model(self):
+    def test_complex_judgment_needs_review1_on_director_model(self):
         self.meta("01", TIER="complex", SPEC_TYPE="judgment", REVIEW_1="antigravity:small@max", REVIEW_2="antigravity:big@high")
         self.assertProblem("REVIEW_1")
         self.meta("01", TIER="complex", SPEC_TYPE="judgment", REVIEW_1="antigravity:big@medium", REVIEW_2="antigravity:big@high")
@@ -98,19 +98,19 @@ class ValidateMetaTests(unittest.TestCase):
         self.meta("01", REVIEW_1="antigravity:big@max", REVIEW_2="antigravity:small@low")
         self.assertOK()
 
-    def test_first_implementer_options(self):
-        self.meta("01", IMPLEMENTER="antigravity:g@xhigh")
+    def test_first_crew_options(self):
+        self.meta("01", CREW="antigravity:g@xhigh")
         self.assertOK()
-        self.meta("01", IMPLEMENTER="antigravity:g@low")
-        self.assertProblem("IMPLEMENTER")
-        self.meta("01", IMPLEMENTER="antigravity:big@high")
+        self.meta("01", CREW="antigravity:g@low")
+        self.assertProblem("CREW")
+        self.meta("01", CREW="antigravity:big@high")
         self.assertProblem("never implements first")
 
     def test_shared_model_blocks_top_start(self):
-        self.state(ROLE_ARCHITECT="antigravity:g@xhigh")
-        self.meta("01", IMPLEMENTER="antigravity:g@xhigh")
+        self.state(ROLE_DIRECTOR="antigravity:g@xhigh")
+        self.meta("01", CREW="antigravity:g@xhigh")
         self.assertProblem("never implements first")
-        self.meta("01", IMPLEMENTER="antigravity:g@high", REVIEW_1="antigravity:g@low", REVIEW_2="antigravity:g@low")
+        self.meta("01", CREW="antigravity:g@high", REVIEW_1="antigravity:g@low", REVIEW_2="antigravity:g@low")
         self.assertOK()
 
     def test_ladder_key_rejected(self):
@@ -136,14 +136,14 @@ class ValidateMetaTests(unittest.TestCase):
         self.assertPair("antigravity:small@ultra", attempt=3, past="yes", ok=False)
         self.assertPair("zz:g@high", attempt=3, past="yes", ok=False)
 
-    def test_escalation_rung_depends_on_first_implementer(self):
-        self.meta("01", IMPLEMENTER="antigravity:g@xhigh")
+    def test_escalation_rung_depends_on_first_crew(self):
+        self.meta("01", CREW="antigravity:g@xhigh")
         rc, out = self.run_cli("pair", "--state", str(self.state_path), "--task-meta", str(self.tasks / "01.meta"),
                                "--pair", "antigravity:big@high", "--attempt", "1", "--past-ladder", "no")
         self.assertEqual(rc, 0, out)
 
-    def test_first_rung_is_base_top_unless_architect_shares_it(self):
-        self.state(ROLE_ARCHITECT="antigravity:g@xhigh", ROLE_BASE="antigravity:g@high")
+    def test_first_rung_is_crew_top_unless_director_shares_it(self):
+        self.state(ROLE_DIRECTOR="antigravity:g@xhigh", ROLE_CREW="antigravity:g@high")
         self.assertPair("antigravity:g@xhigh", attempt=1, ok=True)
         self.assertPair("antigravity:g@high", attempt=1, ok=False)
 
@@ -154,7 +154,7 @@ class ValidateMetaTests(unittest.TestCase):
         self.assertEqual(hp("antigravity:small@ultra")[0], 1)
         rc, out = hp("other:g@high")
         self.assertEqual(rc, 1)
-        self.assertIn("architect's harness", out)
+        self.assertIn("flight director's harness", out)
 
     def design(self):
         f = self.d / "design.md"

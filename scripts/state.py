@@ -1,6 +1,6 @@
-"""The coordinator's run state, kept in one JSON file so it survives context compaction
-and a coordinator restart. Every recorded value and every counter lives here, never
-only in the coordinator's context.
+"""The capsule communicator's run state, kept in one JSON file so it survives context compaction
+and a capsule communicator restart. Every recorded value and every counter lives here, never
+only in the capsule communicator's context.
 
 Usage:
   python3 -I state.py --file <RUN_DIR>/state.json set KEY=value [KEY=value]...

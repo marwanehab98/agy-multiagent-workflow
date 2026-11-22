@@ -1,32 +1,32 @@
-"""Run the per-task loop (coordinator Steps 4-7) synchronously via headless CLI workers.
+"""Run the per-task loop (capsule communicator Steps 4-7) synchronously via headless CLI workers.
 
 Each call runs every deterministic action it can (start workers, save their results,
 check the tree, run the gate, run both reviews, count rounds, merge) and exits at the first point
-that needs the architect or the user. All its state lives in the coordinator's state.json, so a
-call after a crash or a context compaction carries on.
+that needs the flight director or the user. All its state lives in the capsule communicator's state.json,
+so a call after a crash or a context compaction carries on.
 
 Usage:
   python3 -I run_task.py --state <RUN_DIR>/state.json advance
-  python3 -I run_task.py --state <file> advance --architect-result <file with the RESULT line>
+  python3 -I run_task.py --state <file> advance --director-result <file with the RESULT line>
   python3 -I run_task.py --state <file> advance --reply <the user's one-word reply>
-  python3 -I run_task.py --state <file> advance --answer <architect answer file after CONSULT>
+  python3 -I run_task.py --state <file> advance --answer <flight director answer file after CONSULT>
   python3 -I run_task.py --state <file> advance --docs-moved
 
 The last line of stdout is the status; earlier lines are events (MERGED ...).
 Exit 0   QUEUE_EMPTY                       every queued task is merged
-Exit 20  ESCALATE <input>                  send architect job escalate with INPUT=<input>
-Exit 21  FIX_META <validate output file>   send architect job fix-meta with INPUT=<file>
-Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run architect job `consult` with
+Exit 20  ESCALATE <input>                  send flight director job escalate with INPUT=<input>
+Exit 21  FIX_META <validate output file>   send flight director job fix-meta with INPUT=<file>
+Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight director job `consult` with
                                            INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
-Exit 40  STOP <reason>                     dispatch nothing more; coordinator Step 8 item 7
+Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 8 item 7
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
 Rules the loop enforces:
-- Uncommitted files after an implementer settles get one commit worker per implement or fix round
+- Uncommitted files after a crew worker settles get one commit worker per implement or fix round
   (COMMIT_ROUNDS_<id>); whatever it leaves uncommitted is removed with discard-changes.sh and logged.
-- One task at a time. A fresh implementer per task, kept across fix/commit rounds via session resumption
+- One task at a time. A fresh crew worker per task, kept across fix/commit rounds via session resumption
   (falling back to a fresh worker run if resume fails).
 - The gate (gate.py) runs before every review; a failing gate goes straight to a fix round with the log.
 - Stage 1 review, then Stage 2. After a gate fix passes, the review resumes at REVIEW_STAGE_<id>.
@@ -90,7 +90,7 @@ class Loop:
     def meta(self, t):
         return read_meta(self.r.task_file(t, ".meta"))
 
-    # -- implementers
+    # -- crew
     def start_impl(self, t, spec, kind, title, reuse):
         pair = self.r.need(f"PAIR_{t}")
         self.r.set(**{f"LAST_IMPL_SPEC_{t}": spec, f"LAST_IMPL_KIND_{t}": kind})
@@ -131,7 +131,7 @@ class Loop:
                      {"TASK_TITLE": meta["TITLE"]},
                      {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
         r.set(CURRENT_TASK=t, **{f"BASE_SHA_{t}": head, f"IMPL_START_SHA_{t}": head, f"IMPLEMENT_SPEC_{t}": spec,
-                                 f"PAIR_{t}": meta["IMPLEMENTER"], f"ATTEMPT_{t}": 0,
+                                 f"PAIR_{t}": meta["CREW"], f"ATTEMPT_{t}": 0,
                                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
                                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
                                  f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None,
@@ -147,7 +147,7 @@ class Loop:
         r.set(**{f"TASK_ASK_CONV_{t}": conv_id, f"TASK_ASK_KIND_{t}": kind,
                  f"TASK_ASK_PAIR_{t}": pair, f"TASK_ASK_SPEC_{t}": spec,
                  f"TASK_ASK_FILE_{t}": ask, f"TASK_ASK_STAGE_{t}": stage})
-        self.set_phase(t, "consult", WAITING_ON="architect")
+        self.set_phase(t, "consult", WAITING_ON="director")
         raise Done(CONSULT, f"CONSULT {ask}")
 
     def after_impl(self, t, kind, result):
@@ -325,7 +325,7 @@ class Loop:
         else:
             in_flight = "committing" if kind == "commit" else ("fixing" if kind == "fix" else "impl")
             self.set_phase(t, in_flight, WAITING_ON=None)
-        result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, r.impl, conv)
+        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, r.impl, conv)
         if result is None:
             if kind.startswith("review") or kind == "fix":
                 self._discard_or_error(r.need(f"WORKER_HEAD_{t}"))
@@ -334,7 +334,7 @@ class Loop:
             if not kind.startswith("review"):
                 r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
             spec_text = Path(spec).read_text(encoding="utf-8")
-            result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
+            result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
                                      pair=pair, worktree=r.impl)
         if kind.startswith("review"):
             self.after_review(t, review_stage, result)
@@ -380,27 +380,27 @@ class Loop:
             parts.append(f"\n=== {f.name}\n" + f.read_text(encoding="utf-8"))
         hist.write_text("".join(parts), encoding="utf-8")
         line = f"task {t}, tier {meta['TIER']}, attempt {a}, {nxt}, replan {replan}, history {hist}"
-        self.set_phase(t, "escalating", **{f"ESC_INPUT_{t}": line, "WAITING_ON": "architect"})
+        self.set_phase(t, "escalating", **{f"ESC_INPUT_{t}": line, "WAITING_ON": "director"})
         r.log(f"{t} escalation attempt {a}: {nxt}")
         raise Done(ESCALATE, f"ESCALATE {line}")
 
     def rungs(self, t):
-        """The escalation ladder for task t, computed from the role picks and the task's first implementer."""
+        """The escalation ladder for task t, computed from the role picks and the task's first crew pick."""
         r = self.r
-        return ladder(parse_pair(r.need("ROLE_BASE")), r.need("BASE_TOP"), parse_pair(r.need("ROLE_ARCHITECT")),
-                      parse_pair(self.meta(t)["IMPLEMENTER"]))
+        return ladder(parse_pair(r.need("ROLE_CREW")), r.need("CREW_TOP"), parse_pair(r.need("ROLE_DIRECTOR")),
+                      parse_pair(self.meta(t)["CREW"]))
 
     def reject(self, t, why):
         r = self.r
         r.set(**{f"ESC_PENDING_{t}": None})
-        self.set_phase(t, "escalating", WAITING_ON="architect")
+        self.set_phase(t, "escalating", WAITING_ON="director")
         hist = r.run_dir / "verdicts" / f"{t}-history.md"
         with hist.open("a", encoding="utf-8") as f:
-            f.write(f"\n=== Rejected architect answer\n{why}\n")
+            f.write(f"\n=== Rejected flight director answer\n{why}\n")
         if r.incr(f"REJECTS_{t}") >= 2:
             self.prompt(t, "rejected",
-                        f"The architect's escalation answers for task {t} were rejected twice:\n{why}\n"
-                        "Reply \"retry\" to ask the architect again, or \"stop\" to stop the run.",
+                        f"The flight director's escalation answers for task {t} were rejected twice:\n{why}\n"
+                        "Reply \"retry\" to ask the flight director again, or \"stop\" to stop the run.",
                         ["retry", "stop"], back_to="escalating")
         raise Done(ESCALATE, f"ESCALATE {r.need(f'ESC_INPUT_{t}')}")
 
@@ -415,17 +415,17 @@ class Loop:
         return (f"reset sha {sha} is not between the task's base {self.r.need(f'BASE_SHA_{t}')} "
                 f"and head {git(self.r.impl, 'rev-parse', 'HEAD')}")
 
-    def architect_result(self, t, path):
+    def director_result(self, t, path):
         r = self.r
         words = first_words(path)
         phase = self.phase(t)
         if words[:2] == ["RESULT:", "STOP"] and phase in ("escalating", "fixmeta"):
-            r.log(f"{t} architect chose STOP")
-            raise Done(STOP, f"STOP architect stopped the run at task {t}")
+            r.log(f"{t} flight director chose STOP")
+            raise Done(STOP, f"STOP flight director stopped the run at task {t}")
         if phase == "fixmeta" and words[:2] == ["RESULT:", "META_FIXED"]:
             return self.apply_replan(t, r.need(f"PENDING_REPLAN_{t}"))
         if phase != "escalating" or len(words) < 3 or words[0] != "RESULT:":
-            raise Done(ERROR, f"ERROR UNEXPECTED_ARCHITECT_RESULT phase={phase}: {' '.join(words)[:300]}")
+            raise Done(ERROR, f"ERROR UNEXPECTED_DIRECTOR_RESULT phase={phase}: {' '.join(words)[:300]}")
         kind = words[1]
         meta = self.meta(t)
         a = int(r.need(f"ATTEMPT_{t}"))
@@ -454,7 +454,7 @@ class Loop:
         return self.reject(t, f"unrecognised answer: {' '.join(words)[:300]}")
 
     def start_attempt(self, t, sha, note, pair):
-        """Reset to the architect's sha and start the escalation attempt on `pair`."""
+        """Reset to the flight director's sha and start the escalation attempt on `pair`."""
         r = self.r
         a = int(r.need(f"ATTEMPT_{t}"))
         meta = self.meta(t)
@@ -478,7 +478,7 @@ class Loop:
         return self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
 
     def do_probe(self, t):
-        """Test-launch the pair the architect chose past the ladder, then start the attempt."""
+        """Test-launch the pair the flight director chose past the ladder, then start the attempt."""
         r = self.r
         sha, note, pair = r.need(f"ESC_PENDING_{t}").split()
         try:
@@ -505,11 +505,11 @@ class Loop:
         r = self.r
         if r.incr("META_FAILS") >= 3:
             raise Done(ERROR, f"ERROR META_INVALID_3_TIMES {out_file}")
-        self.set_phase(t, "fixmeta", WAITING_ON="architect", **{f"FIXMETA_FILE_{t}": out_file})
+        self.set_phase(t, "fixmeta", WAITING_ON="director", **{f"FIXMETA_FILE_{t}": out_file})
         raise Done(FIX_META, f"FIX_META {out_file}")
 
     def do_replan_probe(self, t):
-        """Test-launch the new tasks' reviewer pairs; a failed launch goes to the architect as fix-meta."""
+        """Test-launch the new tasks' reviewer pairs; a failed launch goes to the flight director as fix-meta."""
         r = self.r
         sha, *ids = r.need(f"PENDING_REPLAN_{t}").split()
         try:
@@ -577,7 +577,7 @@ class Loop:
             return self.set_phase(t, "start")
         if name == "rejected":
             r.set(**{f"REJECTS_{t}": 0})
-            self.set_phase(t, "escalating", WAITING_ON="architect")
+            self.set_phase(t, "escalating", WAITING_ON="director")
             raise Done(ESCALATE, f"ESCALATE {r.need(f'ESC_INPUT_{t}')}")
         if name == "void":
             stage = int(back[-1])
@@ -609,14 +609,14 @@ class Loop:
             self.r.set(CURRENT_TASK=q[0], **({f"LOOP_{q[0]}": "start"} if fresh else {}))
         return q[0]
 
-    def advance(self, architect_result=None, reply_word=None, answer_path=None, moved=False):
+    def advance(self, director_result=None, reply_word=None, answer_path=None, moved=False):
         if moved:
             docs_moved(self.r)
         t = self.current()
-        if architect_result:
+        if director_result:
             if not t:
                 raise Done(ERROR, "ERROR NO_CURRENT_TASK")
-            self.architect_result(t, architect_result)
+            self.director_result(t, director_result)
         elif reply_word:
             if not t:
                 raise Done(ERROR, "ERROR NO_CURRENT_TASK")
@@ -677,7 +677,7 @@ def main():
     p.add_argument("--state", required=True)
     sub = p.add_subparsers(dest="op", required=True)
     adv = sub.add_parser("advance")
-    adv.add_argument("--architect-result")
+    adv.add_argument("--director-result")
     adv.add_argument("--reply")
     adv.add_argument("--answer")
     adv.add_argument("--docs-moved", action="store_true")
@@ -688,7 +688,7 @@ def main():
     loop = None
     try:
         loop = Loop(a.state)
-        loop.advance(a.architect_result, a.reply.strip().strip('"').lower() if a.reply else None,
+        loop.advance(a.director_result, a.reply.strip().strip('"').lower() if a.reply else None,
                      a.answer, a.docs_moved)
         code, line = ERROR, "ERROR NO_STATUS"
     except Done as d:

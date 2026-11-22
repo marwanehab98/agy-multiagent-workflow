@@ -16,7 +16,7 @@ META = """TITLE={title}
 TIER=standard
 SPEC_TYPE=checklist
 ACS={acs}
-IMPLEMENTER=antigravity:g@high
+CREW=antigravity:g@high
 REVIEW_1=antigravity:small@high
 REVIEW_2=antigravity:small@high
 {extra}"""
@@ -70,8 +70,8 @@ class Base(unittest.TestCase):
             "AGY": str(agy), "RUN_DIR": str(self.run_dir), "DOCS_DIR": str(self.docs),
             "IMPL_WORKTREE": str(self.impl), "MAIN_CHECKOUT": str(self.main), "FEATURE_BRANCH": "feature",
             "LAST_MERGED": self.base, "RUN_VALUES": str(rv),
-            "ROLE_ARCHITECT": "antigravity:big@high", "ROLE_EGM": "antigravity:g@high",
-            "ROLE_BASE": "antigravity:g@high", "BASE_TOP": "xhigh", "CATALOG": str(CATALOG),
+            "ROLE_DIRECTOR": "antigravity:big@high", "ROLE_SAFETY": "antigravity:g@high",
+            "ROLE_CREW": "antigravity:g@high", "CREW_TOP": "xhigh", "CATALOG": str(CATALOG),
             "DOCS_WORKTREE": str(self.docs_wt), "CONVENTION_PATHS": "CONTRIBUTING.md"}))
 
     def task(self, tid, acs, extra=""):

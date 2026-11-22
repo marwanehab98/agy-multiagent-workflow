@@ -18,8 +18,8 @@ class ProbeTest(Base):
         self.docswt = self.tmp / "docswt"
         sh("git", "-C", str(self.main), "worktree", "add", "-q", "-b", "docsbr", str(self.docswt), "feature")
         s = self.st()
-        s.update({"ROLE_ARCHITECT": "antigravity:big@high", "ROLE_EGM": "antigravity:g@high",
-                  "ROLE_BASE": "antigravity:g@high", "BASE_TOP": "xhigh",
+        s.update({"ROLE_DIRECTOR": "antigravity:big@high", "ROLE_SAFETY": "antigravity:g@high",
+                  "ROLE_CREW": "antigravity:g@high", "CREW_TOP": "xhigh",
                   "CATALOG": str(SKILL / "tests" / "fixtures" / "catalog.json"),
                   "DOCS_WORKTREE": str(self.docswt)})
         self.state.write_text(json.dumps(s))
@@ -130,17 +130,17 @@ class ProbeTest(Base):
         last = self.expect_probe(40, "PROBE_FAILED", "--set", "resume")
         self.assertTrue(last.startswith("PROBE_FAILED antigravity:g@"))
 
-    def test_resume_never_discards_the_architects_work(self):
-        (self.docswt / "notes.md").write_text("uncommitted architect notes\n")
+    def test_resume_never_discards_the_directors_work(self):
+        (self.docswt / "notes.md").write_text("uncommitted flight director notes\n")
         self.behave("ok", "ok", "ok", "ok")
         self.expect_probe(0, "PROBED", "--set", "resume")
-        self.assertEqual((self.docswt / "notes.md").read_text(), "uncommitted architect notes\n")
+        self.assertEqual((self.docswt / "notes.md").read_text(), "uncommitted flight director notes\n")
         self.assertIn("left as is", (self.run_dir / "run-log.md").read_text())
         self.assertIn("left as is", (self.run_dir / "results" / "probe-antigravity_big_high.md").read_text())
 
     def test_old_format_state_is_refused(self):
         s = self.st()
-        del s["ROLE_ARCHITECT"]
+        del s["ROLE_DIRECTOR"]
         self.state.write_text(json.dumps(s))
         self.expect_probe(2, "ERROR", "--set", "step1")
 

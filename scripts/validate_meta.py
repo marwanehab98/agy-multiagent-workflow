@@ -1,21 +1,21 @@
-"""Check the architect's per-task model choices against the run's allowlist and floors.
+"""Check the flight director's per-task model choices against the run's allowlist and floors.
 
-Usage (picks and catalog, read from the run's state file: CATALOG, ROLE_ARCHITECT, ROLE_BASE, BASE_TOP):
+Usage (picks and catalog, read from the run's state file: CATALOG, ROLE_DIRECTOR, ROLE_CREW, CREW_TOP):
   python3 -I validate_meta.py tasks --state <S> --tasks-dir <DOCS_DIR>/tasks --ids "01 02 03" [--design <DESIGN_FILE>] [--replanned-from <id>]
   python3 -I validate_meta.py pair --state <S> --task-meta <F> --pair <P> --attempt <N> --past-ladder <yes|no>
   python3 -I validate_meta.py harness-pair --state <S> --pair <P>
 
 `tasks` checks each <id>.meta. `pair` checks one escalation attempt: with `no` the pair must be rung N of
-ladder(ROLE_BASE, BASE_TOP, ROLE_ARCHITECT, <IMPLEMENTER from F>); with `yes` any pair in the catalog passes.
-`harness-pair` checks a pair is in the architect's harness with a detected model and effort (builder check,
+ladder(ROLE_CREW, CREW_TOP, ROLE_DIRECTOR, <CREW from F>); with `yes` any pair in the catalog passes.
+`harness-pair` checks a pair is in the flight director's harness with a detected model and effort (builder check,
 CLERICAL_PAIR, reviewers).
 Exit 0: all valid (prints OK lines).  Exit 1: problems (prints one PROBLEM line each).  Exit 64: bad usage.
 
 Rules enforced by the --state modes (design 2.1):
-- Required keys: TITLE, TIER, SPEC_TYPE, ACS, IMPLEMENTER, REVIEW_1, REVIEW_2. A LADDER key is a problem.
-- IMPLEMENTER is ROLE_BASE or its model at BASE_TOP, and never the exact ROLE_ARCHITECT pair.
-- Reviewers are in the architect's harness, with a detected model and effort.
-- complex: REVIEW_2 has the architect's harness and model (any effort); complex judgment: REVIEW_1 too.
+- Required keys: TITLE, TIER, SPEC_TYPE, ACS, CREW, REVIEW_1, REVIEW_2. A LADDER key is a problem.
+- CREW is ROLE_CREW or its model at CREW_TOP, and never the exact ROLE_DIRECTOR pair.
+- Reviewers are in the flight director's harness, with a detected model and effort.
+- complex: REVIEW_2 has the flight director's harness and model (any effort); complex judgment: REVIEW_1 too.
 - ACS lists the acceptance criteria the task delivers (e.g. "AC-1 AC-3"), or "none".
 - With --design, every AC-<n> in the design must be in some checked task's ACS, and every
   ACS entry must exist in the design. Pass it only when checking the whole queue.
@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script 
 from pairs import Pair, ladder, parse_pair  # noqa: E402
 from roles import unknown_why  # noqa: E402
 
-REQUIRED = ["TITLE", "TIER", "SPEC_TYPE", "ACS", "IMPLEMENTER", "REVIEW_1", "REVIEW_2"]
+REQUIRED = ["TITLE", "TIER", "SPEC_TYPE", "ACS", "CREW", "REVIEW_1", "REVIEW_2"]
 AC = re.compile(r"\bAC-\d+\b")
 
 
@@ -55,21 +55,21 @@ class Picks:
         state = json.loads(Path(state_path).read_text(encoding="utf-8"))
         try:
             self.catalog = json.loads(Path(state["CATALOG"]).read_text(encoding="utf-8"))
-            self.architect = parse_pair(state["ROLE_ARCHITECT"])
-            self.base = parse_pair(state["ROLE_BASE"])
-            self.base_top = state["BASE_TOP"]
+            self.director = parse_pair(state["ROLE_DIRECTOR"])
+            self.crew = parse_pair(state["ROLE_CREW"])
+            self.crew_top = state["CREW_TOP"]
         except KeyError as e:
             raise ValueError(f"state file lacks {e.args[0]}")
 
 
 def own_harness_problem(picks, label, text):
-    """None when `text` is a pair in the architect's harness with a detected model and effort."""
+    """None when `text` is a pair in the flight director's harness with a detected model and effort."""
     try:
         pair = parse_pair(text)
     except ValueError as e:
         return f"{label} {text!r}: {e}"
-    if pair.harness != picks.architect.harness:
-        return f"{label} {text!r} must be in the architect's harness ({picks.architect.harness})"
+    if pair.harness != picks.director.harness:
+        return f"{label} {text!r} must be in the flight director's harness ({picks.director.harness})"
     why = unknown_why(picks.catalog, pair)
     return f"{label} {text!r}: {why}" if why else None
 
@@ -85,36 +85,36 @@ def check_task(tid, meta, picks):
         p.append(f"{tid}: TIER must be standard or complex, got {tier!r}")
     if spec not in ("checklist", "judgment"):
         p.append(f"{tid}: SPEC_TYPE must be checklist or judgment, got {spec!r}")
-    arch, base = picks.architect, picks.base
-    impl = meta["IMPLEMENTER"]
-    top = Pair(base.harness, base.model, picks.base_top)
+    director, crew = picks.director, picks.crew
+    crew_val = meta["CREW"]
+    top = Pair(crew.harness, crew.model, picks.crew_top)
     try:
-        ipair = parse_pair(impl)
+        cpair = parse_pair(crew_val)
     except ValueError as e:
-        p.append(f"{tid}: IMPLEMENTER {impl!r}: {e}")
+        p.append(f"{tid}: CREW {crew_val!r}: {e}")
     else:
-        if ipair == arch:
-            p.append(f"{tid}: IMPLEMENTER {impl!r} is the architect pair, which never implements first")
-        elif ipair not in (base, top):
-            p.append(f"{tid}: IMPLEMENTER {impl!r} not allowed; use {base} or {top}")
+        if cpair == director:
+            p.append(f"{tid}: CREW {crew_val!r} is the flight director pair, which never implements first")
+        elif cpair not in (crew, top):
+            p.append(f"{tid}: CREW {crew_val!r} not allowed; use {crew} or {top}")
     for k in ("REVIEW_1", "REVIEW_2"):
         msg = own_harness_problem(picks, k, meta[k])
         if msg:
             p.append(f"{tid}: {msg}")
-    arch_model = f"{arch.harness}:{arch.model}"
+    director_model = f"{director.harness}:{director.model}"
 
-    def needs_architect_model(k):
+    def needs_director_model(k):
         try:
             rp = parse_pair(meta[k])
         except ValueError:
             return  # already reported
-        if (rp.harness, rp.model) != (arch.harness, arch.model):
-            p.append(f"{tid}: {k} {meta[k]!r} must use the architect's model {arch_model} (any effort)")
+        if (rp.harness, rp.model) != (director.harness, director.model):
+            p.append(f"{tid}: {k} {meta[k]!r} must use the flight director's model {director_model} (any effort)")
 
     if tier == "complex":
-        needs_architect_model("REVIEW_2")
+        needs_director_model("REVIEW_2")
         if spec == "judgment":
-            needs_architect_model("REVIEW_1")
+            needs_director_model("REVIEW_1")
     acs = meta["ACS"].split()
     if acs != ["none"] and (not acs or any(not AC.fullmatch(x) for x in acs)):
         p.append(f"{tid}: ACS must be AC-<n> ids separated by spaces, or none; got {meta['ACS']!r}")
@@ -193,7 +193,7 @@ def main():
     else:
         try:
             pair = parse_pair(a.pair)
-            first = parse_pair(read_meta(Path(a.task_meta))["IMPLEMENTER"])
+            first = parse_pair(read_meta(Path(a.task_meta))["CREW"])
         except (ValueError, KeyError, OSError) as e:
             problems.append(f"pair {a.pair!r}: {e}")
         else:
@@ -202,7 +202,7 @@ def main():
                 if why:
                     problems.append(f"pair {a.pair!r}: {why}")
             else:
-                rungs = ladder(picks.base, picks.base_top, picks.architect, first)
+                rungs = ladder(picks.crew, picks.crew_top, picks.director, first)
                 if a.attempt < 1 or a.attempt > len(rungs):
                     problems.append(f"attempt {a.attempt} is past the ladder ({' '.join(map(str, rungs))}); "
                                     "only a user-approved pair may follow (--past-ladder yes)")

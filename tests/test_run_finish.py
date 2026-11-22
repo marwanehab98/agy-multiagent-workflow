@@ -30,7 +30,7 @@ class Finish(Base):
         self.state.write_text(json.dumps({**self.st(), "LAST_MERGED": self.impl_head()}))
 
     def result(self, text, code, prefix):
-        return self.expect(code, prefix, "--architect-result", self.result_file(text))
+        return self.expect(code, prefix, "--director-result", self.result_file(text))
 
     def prompt_text(self, last):
         return Path(last.split()[1]).read_text()
@@ -61,8 +61,8 @@ class Review(Finish):
 
     def test_fix_verdict_goes_to_architect(self):
         self.behave("fix")
-        last, _ = self.expect(20, "ARCHITECT_JOB")
-        self.assertEqual(last, f"ARCHITECT_JOB final-review {self.run_dir / 'verdicts' / 'final-1.md'}")
+        last, _ = self.expect(20, "DIRECTOR_JOB")
+        self.assertEqual(last, f"DIRECTOR_JOB final-review {self.run_dir / 'verdicts' / 'final-1.md'}")
         self.assertEqual(self.adv()[1], last)
 
     def test_pass_verdict_in_settle_message_only(self):
@@ -72,9 +72,9 @@ class Review(Finish):
 
     def test_no_verdict_twice_counts_as_fix(self):
         self.behave("noverdict", "noverdict")
-        last, _ = self.expect(20, "ARCHITECT_JOB")
+        last, _ = self.expect(20, "DIRECTOR_JOB")
         self.assertEqual(len(self.calls()), 2)
-        self.assertTrue(last.startswith("ARCHITECT_JOB final-review "), last)
+        self.assertTrue(last.startswith("DIRECTOR_JOB final-review "), last)
 
     def test_no_verdict_once_then_pass(self):
         self.behave("noverdict", "pass")
@@ -172,7 +172,7 @@ class Fixes(Finish):
 
     def test_final_fix_runs_queue_then_reviews_again(self):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         last, _ = self.final_fix("F1")
         self.assertEqual(last, "RUN_QUEUE F1")
         self.assertEqual((self.run_dir / "queue.txt").read_text().split(), ["F1"])
@@ -194,7 +194,7 @@ class Fixes(Finish):
     def test_third_final_fix_prompts_continue_or_stop(self):
         self.state.write_text(json.dumps({**self.st(), "FINAL_FIX_ROUNDS": "2"}))
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.task("F3", "none")
         last, _ = self.result("RESULT: FINAL_FIX F3", 30, "PROMPT")
         self.assertTrue(last.endswith(" continue stop"), last)
@@ -209,18 +209,18 @@ class Fixes(Finish):
     def test_third_final_fix_stop(self):
         self.state.write_text(json.dumps({**self.st(), "FINAL_FIX_ROUNDS": "2"}))
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.task("F3", "none")
         self.result("RESULT: FINAL_FIX F3", 30, "PROMPT")
         self.expect(40, "STOP", "--reply", "stop")
 
     def test_invalid_fix_meta_goes_to_fix_meta_job_then_revalidates(self):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.task("F1", "none")
         (self.docs / "tasks" / "F1.meta").write_text("TITLE=broken\n")
-        last, _ = self.result("RESULT: FINAL_FIX F1", 20, "ARCHITECT_JOB")
-        self.assertTrue(last.startswith("ARCHITECT_JOB fix-meta "), last)
+        last, _ = self.result("RESULT: FINAL_FIX F1", 20, "DIRECTOR_JOB")
+        self.assertTrue(last.startswith("DIRECTOR_JOB fix-meta "), last)
         self.assertIn("F1", Path(last.split()[2]).read_text())
         self.assertEqual(self.st("FINAL_FIX_ROUNDS"), None)
         self.assertEqual(self.adv()[1], last)
@@ -231,17 +231,17 @@ class Fixes(Finish):
 
     def test_meta_invalid_three_times_is_an_error(self):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.task("F1", "none")
         (self.docs / "tasks" / "F1.meta").write_text("TITLE=broken\n")
-        self.result("RESULT: FINAL_FIX F1", 20, "ARCHITECT_JOB")
-        self.result("RESULT: META_FIXED", 20, "ARCHITECT_JOB")
+        self.result("RESULT: FINAL_FIX F1", 20, "DIRECTOR_JOB")
+        self.result("RESULT: META_FIXED", 20, "DIRECTOR_JOB")
         last, _ = self.result("RESULT: META_FIXED", 2, "ERROR")
         self.assertIn("META_INVALID_3_TIMES", last)
 
     def unproved_fix(self, f="F1", reviews="antigravity:small@low"):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.task(f, "none")
         meta = self.docs / "tasks" / f"{f}.meta"
         meta.write_text(meta.read_text().replace("antigravity:small@high", reviews))
@@ -258,8 +258,8 @@ class Fixes(Finish):
     def test_final_fix_probe_failure_goes_to_fix_meta(self):
         self.unproved_fix()
         self.behave("fail", "fail")
-        last, _ = self.result("RESULT: FINAL_FIX F1", 20, "ARCHITECT_JOB")
-        self.assertTrue(last.startswith("ARCHITECT_JOB fix-meta "), last)
+        last, _ = self.result("RESULT: FINAL_FIX F1", 20, "DIRECTOR_JOB")
+        self.assertTrue(last.startswith("DIRECTOR_JOB fix-meta "), last)
         text = Path(last.split()[2]).read_text()
         self.assertIn("PROBLEM F1: REVIEW_1 antigravity:small@low failed its test launch; see ", text)
         self.assertEqual(self.st("META_FAILS"), "1")
@@ -270,18 +270,18 @@ class Fixes(Finish):
 
     def test_architect_stop(self):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.result("RESULT: STOP", 40, "STOP")
 
     def test_unexpected_result_is_an_error(self):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         last, _ = self.result("RESULT: PLAN_APPROVED", 2, "ERROR")
-        self.assertIn("UNEXPECTED_ARCHITECT_RESULT", last)
+        self.assertIn("UNEXPECTED_DIRECTOR_RESULT", last)
 
     def test_result_line_punctuation_and_prose_are_ignored(self):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.result("RESULT: STOP. The user chose to stop after the review.", 40, "STOP")
 
     def test_final_reviewer_gets_every_ac_id_from_the_design(self):
@@ -300,21 +300,21 @@ class Verify(Finish):
     def test_verify_failure_goes_to_architect(self):
         self.commit_broken()
         self.behave("pass")
-        last, _ = self.expect(20, "ARCHITECT_JOB")
+        last, _ = self.expect(20, "DIRECTOR_JOB")
         log = self.run_dir / "verify-1.log"
-        self.assertEqual(last, f"ARCHITECT_JOB verification-failed {log}")
+        self.assertEqual(last, f"DIRECTOR_JOB verification-failed {log}")
         self.assertIn("VERIFY_1", log.read_text())
 
     def test_final_clean_after_final_review_job_verifies(self):
         self.behave("fix")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         last, _ = self.result("RESULT: FINAL_CLEAN", 0, "VERIFIED")
         self.assertEqual(last, f"VERIFIED {self.run_dir / 'verify-1.log'}")
 
     def test_final_fix_after_verification_failure_reviews_again_then_verifies_again(self):
         self.commit_broken()
         self.behave("pass")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.task("F1", "none")
         self.result("RESULT: FINAL_FIX F1", 21, "RUN_QUEUE")
         sh("git", "-C", str(self.impl), "-c", "user.email=t@t", "-c", "user.name=t", "rm", "-q", "BROKEN")
@@ -327,11 +327,11 @@ class Verify(Finish):
     def test_final_clean_after_failed_verification_prompts_then_continue_opens_pr(self):
         self.commit_broken()
         self.behave("pass")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         log = self.run_dir / "verify-1.log"
         last, _ = self.result("RESULT: FINAL_CLEAN", 30, "PROMPT")
         self.assertTrue(last.endswith(" continue stop"), last)
-        self.assertEqual(self.prompt_text(last), f"Verification still fails, and the architect found nothing to fix: "
+        self.assertEqual(self.prompt_text(last), f"Verification still fails, and the flight director found nothing to fix: "
                          f"{log}. Reply \"continue\" to open the PR anyway, or \"stop\" to stop the run.\n")
         last, _ = self.expect(0, "VERIFIED", "--reply", "continue")
         self.assertEqual(last, f"VERIFIED {log}")
@@ -340,14 +340,14 @@ class Verify(Finish):
     def test_final_clean_after_failed_verification_stop(self):
         self.commit_broken()
         self.behave("pass")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         self.result("RESULT: FINAL_CLEAN", 30, "PROMPT")
         self.expect(40, "STOP", "--reply", "stop")
 
     def test_wrong_reply_repeats_prompt(self):
         self.commit_broken()
         self.behave("pass")
-        self.expect(20, "ARCHITECT_JOB")
+        self.expect(20, "DIRECTOR_JOB")
         first, _ = self.result("RESULT: FINAL_CLEAN", 30, "PROMPT")
         again, _ = self.expect(30, "PROMPT", "--reply", "maybe")
         self.assertEqual(first, again)
@@ -362,7 +362,7 @@ class Verify(Finish):
 class Legacy(Finish):
     def test_old_format_state_is_refused(self):
         s = self.st()
-        del s["ROLE_ARCHITECT"]
+        del s["ROLE_DIRECTOR"]
         self.state.write_text(json.dumps(s))
         last, _ = self.expect(2, "ERROR")
         self.assertIn("OLD_FORMAT_RUN", last)
@@ -384,12 +384,12 @@ class Drift(Finish):
 
     def to_drift_job(self):
         self.behave("pass", "write-output")
-        return self.expect(20, "ARCHITECT_JOB")
+        return self.expect(20, "DIRECTOR_JOB")
 
     def test_drift_runs_after_verification_on_the_egm_pick(self):
         last, _ = self.to_drift_job()
         out = self.run_dir / "drift-1.md"
-        self.assertEqual(last, f"ARCHITECT_JOB drift-done {out}")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done {out}")
         call = self.calls()[-1]
         self.assertEqual(call["model"], "g-high")
         self.assertEqual(call["cwd"], str(self.impl))
@@ -419,8 +419,8 @@ class Drift(Finish):
 
     def test_failed_drift_worker_retries_once_then_reports_failed(self):
         self.behave("pass", "fail", "fail")
-        last, _ = self.expect(20, "ARCHITECT_JOB")
-        self.assertTrue(last.startswith("ARCHITECT_JOB drift-done failed: "), last)
+        last, _ = self.expect(20, "DIRECTOR_JOB")
+        self.assertTrue(last.startswith("DIRECTOR_JOB drift-done failed: "), last)
 
     def test_no_drift_check_when_not_chosen(self):
         self.state.write_text(json.dumps({**self.st(), "DRIFT_CHECK": "no"}))
@@ -431,29 +431,29 @@ class Drift(Finish):
         self.behave("pass", "usage", "write-output")
         last, _ = self.expect(30, "PROMPT")
         self.assertIn("5-hour limit", self.prompt_text(last))
-        last, _ = self.expect(20, "ARCHITECT_JOB", "--reply", "retry")
-        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
+        last, _ = self.expect(20, "DIRECTOR_JOB", "--reply", "retry")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done {self.run_dir / 'drift-1.md'}")
 
     def test_drift_retry_uses_fresh_file_after_stale_partial_write(self):
         (self.run_dir / "drift-1.md").write_text("stale content from crashed attempt 1\n")
         self.behave("pass", "fail", "fail")
-        last, _ = self.expect(20, "ARCHITECT_JOB")
-        self.assertTrue(last.startswith("ARCHITECT_JOB drift-done failed: "), last)
+        last, _ = self.expect(20, "DIRECTOR_JOB")
+        self.assertTrue(last.startswith("DIRECTOR_JOB drift-done failed: "), last)
 
     def test_resume_interrupted_reviewing_and_drifting_cleans_worktree(self):
         self.state.write_text(json.dumps({**self.st(), "FIN_PHASE": "reviewing"}))
         (self.impl / "stray_fin_review.txt").write_text("oops\n")
         self.behave("pass", "write-output")
-        last, _ = self.expect(20, "ARCHITECT_JOB")
+        last, _ = self.expect(20, "DIRECTOR_JOB")
         self.assertFalse((self.impl / "stray_fin_review.txt").exists())
-        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done {self.run_dir / 'drift-1.md'}")
 
         self.state.write_text(json.dumps({**self.st(), "FIN_PHASE": "drifting"}))
         (self.impl / "stray_drift.txt").write_text("oops\n")
         self.behave("write-output")
-        last, _ = self.expect(20, "ARCHITECT_JOB")
+        last, _ = self.expect(20, "DIRECTOR_JOB")
         self.assertFalse((self.impl / "stray_drift.txt").exists())
-        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-2.md'}")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done {self.run_dir / 'drift-2.md'}")
 
     def test_drift_falls_back_to_bundled_skills_when_missing_from_catalog(self):
         cat = json.loads(Path(self.st("CATALOG")).read_text())
@@ -462,7 +462,7 @@ class Drift(Finish):
         cat_path.write_text(json.dumps(cat))
         self.state.write_text(json.dumps({**self.st(), "CATALOG": str(cat_path)}))
         last, _ = self.to_drift_job()
-        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done {self.run_dir / 'drift-1.md'}")
         self.assertIn(str(SKILL / "skills" / "spec-drift" / "SKILL.md"), self.calls()[-1]["prompt"])
 
     def test_drift_falls_back_to_flat_harness_sibling_skills_when_missing_from_catalog(self):
@@ -481,7 +481,7 @@ class Drift(Finish):
 
         self.SCRIPT = pkg / "scripts" / "run_finish.py"
         last, _ = self.to_drift_job()
-        self.assertEqual(last, f"ARCHITECT_JOB drift-done {self.run_dir / 'drift-1.md'}")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done {self.run_dir / 'drift-1.md'}")
         self.assertIn(str(flat_root / "spec-drift" / "SKILL.md"), self.calls()[-1]["prompt"])
 
 

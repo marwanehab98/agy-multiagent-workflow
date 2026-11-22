@@ -20,7 +20,7 @@ Part of mission-control. Checked against the official Antigravity CLI headless m
     - `status`: terminal status (`SUCCESS`, `ERROR`, `CANCELED`, `INTERRUPTED`, `INVALID`, `WAITING`, `RUNNING`).
     - `response`: the model's response text for that turn.
     - `error`: error message when `status != "SUCCESS"`.
-- **Working directory:** `agy -p` operates in its process `cwd` (`DOCS_WORKTREE` for design/architect workers, `IMPL_WORKTREE` for implementation/review/final-review/drift workers).
+- **Working directory:** `agy -p` operates in its process `cwd` (`DOCS_WORKTREE` for design/Flight Director workers, `IMPL_WORKTREE` for Crew/review/final-review/drift workers).
 - **Permissions:** `--dangerously-skip-permissions` approves tool calls (edits and commands) inside the isolated git worktree so unattended runs never stall on interactive permission prompts. Read-only constraints are enforced deterministically after each worker by `scripts/check-tree.sh` and `scripts/discard-changes.sh`.
 
 ## Headless invocation (`claude -p`)
@@ -55,5 +55,5 @@ Part of mission-control. Checked against the official Antigravity CLI headless m
 ## Turn-based relays and consults
 
 - Because headless invocations run one turn to completion per invocation, workers do not pause mid-turn on an external mailbox:
-  - **Architect -> Coordinator:** ends the turn with `RESULT: RELAY <path>` or `RESULT: NOTIFY <path>` as line 1 of its response; `scripts/run_architect.py` returns the relay/notify path to the coordinator, and resumes `ARCHITECT_CONVERSATION_ID` with the user's answer via `--conversation` (`agy`) or `--resume` (`claude`).
-  - **Other workers -> Coordinator:** if blocked on an ambiguity, respond with `ASK: <question>` on line 1; the loop script exits `22` (`CONSULT <ask_file>`) and resumes the worker (or falls back to a fresh worker run with the answer appended) once the architect answers.
+  - **Flight Director -> Capsule Communicator:** ends the turn with `RESULT: RELAY <path>` or `RESULT: NOTIFY <path>` as line 1 of its response; `scripts/run_director.py` returns the relay/notify path to the Capsule Communicator, and resumes `DIRECTOR_CONVERSATION_ID` with the user's answer via `--conversation` (`agy`) or `--resume` (`claude`).
+  - **Other workers -> Capsule Communicator:** if blocked on an ambiguity, respond with `ASK: <question>` on line 1; the loop script exits `22` (`CONSULT <ask_file>`) and resumes the worker (or falls back to a fresh worker run with the answer appended) once the Flight Director answers.

@@ -19,7 +19,7 @@ Every stage of the workflow is available both as an **independently invocable sk
 
 ## How It Works
 
-When you run `mission` or `launch-plan`, your active chat session acts purely as the **coordinator**—it runs deterministic state-machine scripts, dispatches headless CLI workers, relays questions and approvals verbatim, and merges verified work atomically. It does no design, coding, or judgment work itself.
+When you run `mission` or `launch-plan`, your active chat session acts purely as the **Capsule Communicator**—it runs deterministic state-machine scripts, dispatches headless CLI workers, relays questions and approvals verbatim, and merges verified work atomically. It does no design, coding, or judgment work itself.
 
 ```
 Requirements / JIRA Key
@@ -28,14 +28,14 @@ Requirements / JIRA Key
   1. Setup & Probe        Detect installed CLIs/models, confirm 3 role picks, probe CLI flags
         │
         ▼
-  2. Design & Review      Architect clarifies & drafts spec (draft-spec)
+  2. Design & Review      Flight Director clarifies & drafts spec (draft-spec)
         │                 ──► 7-lens stress test (crucible Step 2) + 5-stage audit (gauntlet)
         │                 ──► You approve the spec
         ▼
-  3. Task Plan            Architect breaks spec into ordered TDD tasks (flight-plan)
+  3. Task Plan            Flight Director breaks spec into ordered TDD tasks (flight-plan)
         │                 ──► Adversarial plan audit (crossfire) ──► You approve the plan
         ▼
-  4. Per-Task Loop        Isolated git worktree ──► Implement (red-green TDD)
+  4. Per-Task Loop        Isolated git worktree ──► Crew implements (red-green TDD)
         │                 ──► Automated gate (tests/lint) ──► Spec & quality review
         │                 ──► Atomic fast-forward merge into feature branch
         ▼
@@ -44,16 +44,16 @@ Requirements / JIRA Key
 
 ### Key Mechanics
 
-- **Two-phase Architect lifecycle (context vs. freshness):**
-  - During **design and planning**, one Architect session stays open across turns via CLI session resumption (`--conversation` on `agy`, `--resume` on `claude`), so it remembers your Q&A and design rationale.
-  - After **plan approval**, every Architect job (answering an implementer's question, replanning, handling metadata fixes) starts a **fresh** headless session with no prior chat history—forcing it to answer strictly from the committed spec, plan, and files on disk.
+- **Two-phase Flight Director lifecycle (context vs. freshness):**
+  - During **design and planning**, one Flight Director session stays open across turns via CLI session resumption (`--conversation` on `agy`, `--resume` on `claude`), so it remembers your Q&A and design rationale.
+  - After **plan approval**, every Flight Director job (answering a Crew question, replanning, handling metadata fixes) starts a **fresh** headless session with no prior chat history—forcing it to answer strictly from the committed spec, plan, and files on disk.
 - **Right-sized design review:** `mission` uses `draft-spec` to inspect your codebase first and draft the spec, then automatically runs `crucible` Step 2 (7-lens stress test) and `gauntlet` (5-stage review) on non-trivial designs while skipping heavy passes on small changes.
 - **Multi-harness & cross-harness role routing:** You assign a `<harness>:<model>@<effort>` pair to three roles during setup:
-  - **Architect** — designs the spec, writes the task plan, answers questions raised mid-run, and picks per-task reviewers.
-  - **Design / Plan Reviewer** — runs fresh-context `crucible` Step 2, `gauntlet`, and `crossfire` reviews before any code is written.
-  - **Base Implementer** — writes code and tests for each task (must differ from the Architect pick so stuck tasks can escalate up the effort/model ladder).
+  - **Flight Director** (`director`) — designs the spec, writes the task plan, answers questions raised mid-run, and picks per-task reviewers.
+  - **Range Safety** (`safety`) — runs fresh-context `crucible` Step 2, `gauntlet`, `crossfire`, and `spec-drift` reviews.
+  - **Crew** (`crew`) — writes code and tests for each task (must differ from the Flight Director pick so stuck tasks can escalate up the effort/model ladder).
 
-  Roles can all run on Antigravity, all on Claude Code, or be **mixed in the same run** (for example, `claude:opus@high` for the Architect and `antigravity:<model>@high` for implementers). Only [`scripts/harnesses.py`](scripts/harnesses.py) knows harness-specific CLI flags, JSON envelopes, and model catalogs.
+  Roles can all run on Antigravity, all on Claude Code, or be **mixed in the same run** (for example, `claude:opus@high` for the Flight Director and `antigravity:<model>@high` for Crew). Only [`scripts/harnesses.py`](scripts/harnesses.py) knows harness-specific CLI flags, JSON envelopes, and model catalogs.
 
   > [!NOTE]
   > **Consumer subscription Terms of Service:** Having one vendor's CLI programmatically orchestrate another vendor's CLI may violate consumer subscription Terms of Service (e.g., Google AI Pro or Claude Pro/Max). If you are on consumer subscriptions rather than API-key / commercial billing, keep all roles on the same harness as your active session (`antigravity` in `agy`, or `claude` in `claude`).
@@ -81,9 +81,9 @@ Invoke `mission` with either a JIRA key or written requirements:
 > "Use `mission` to add OAuth2 PKCE login with refresh token rotation and integration tests."
 
 **What to expect:**
-1. **Role setup:** On first run, the coordinator detects installed CLIs/models and asks you to pick `<harness>:<model>@<effort>` for Architect, Design/Plan Reviewer, and Base Implementer, then saves your choices to `~/.config/mission-control/roles.json` (on later runs it asks `same` / `new`). You can also name explicit model/effort picks in your opening prompt to confirm all three in one shot.
-2. **Design & plan sign-off:** The Architect asks clarifying questions one at a time, runs automated design reviews, and presents the spec and task plan for your approval before any production code is written.
-3. **Hands-off execution:** Each task is implemented, tested, reviewed, and merged automatically. You are only interrupted if a genuine product decision is needed or a quota limit is hit.
+1. **Role setup:** On first run, the Capsule Communicator detects installed CLIs/models and asks you to pick `<harness>:<model>@<effort>` for Flight Director, Range Safety, and Crew, then saves your choices to `~/.config/mission-control/roles.json` (on later runs it asks `same` / `new`). You can also name explicit model/effort picks in your opening prompt to confirm all three in one shot.
+2. **Design & plan sign-off:** The Flight Director asks clarifying questions one at a time, runs automated Range Safety reviews, and presents the spec and task plan for your approval before any production code is written.
+3. **Hands-off execution:** Each task is implemented by Crew, tested, reviewed, and merged automatically. You are only interrupted if a genuine product decision is needed or a quota limit is hit.
 4. **Landing:** Once all tasks pass final verification and `spec-drift`, `touchdown` asks whether to open a PR, fast-forward merge locally, keep the branch, or discard.
 
 ### 2. Execute an existing plan (`launch-plan`)
@@ -98,7 +98,7 @@ If your chat session compacts, disconnects, or pauses on a quota/rate limit, sta
 
 > "Continue my `mission` run for `<topic>`."
 
-The coordinator locates `.run/state.json` in the `<topic>-docs` worktree and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
+The Capsule Communicator locates `.run/state.json` in the `<topic>-docs` worktree and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
 
 ### 4. Use individual skills standalone
 
@@ -116,8 +116,8 @@ Every stage works on its own in your current chat session without starting the f
 
 | Skill | When to use | Execution style |
 | --- | --- | --- |
-| `mission` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Coordinator + headless `agy -p` / `claude -p` workers |
-| `launch-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through execution, verification, and landing | Coordinator + headless `agy -p` / `claude -p` workers |
+| `mission` | End-to-end flow from JIRA key or written requirements through design, plan, execution, verification, and PR | Capsule Communicator + headless `agy -p` / `claude -p` workers |
+| `launch-plan` | Execute an existing markdown plan (or `tasks/` + `run-values.txt`) through execution, verification, and landing | Capsule Communicator + headless `agy -p` / `claude -p` workers |
 | `draft-spec` | Clarify requirements, weigh approaches, and write a design doc | Interactive in-session |
 | `flight-plan` | Break a spec or design doc into TDD tasks and verification steps | Interactive in-session |
 | `crucible` | Full 4-step ideation + 7-lens stress-testing (`concepts_brief.md`); Step 2 is also used automatically inside `mission` | Fresh-context subagent lenses |
@@ -126,7 +126,7 @@ Every stage works on its own in your current chat session without starting the f
 | `spec-drift` | Compare finished source code against design docs | In-session / drift check |
 | `red-green` | Strict RED-GREEN-REFACTOR test-first workflow (lean, behavior-focused tests) | In-session or worker |
 | `gatecheck` | Require fresh command output before claiming success | In-session or worker |
-| `touchdown` | Verify tests and complete via PR, fast-forward local merge, keep, or discard | In-session or coordinator final step |
+| `touchdown` | Verify tests and complete via PR, fast-forward local merge, keep, or discard | In-session or Capsule Communicator final step |
 
 ---
 

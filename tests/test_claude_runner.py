@@ -14,7 +14,7 @@ from common import AgyRunner, Run  # noqa: E402
 
 FAKE_CLAUDE = SKILL / "tests" / "fake_claude.py"
 CATALOG_MULTI = SKILL / "tests" / "fixtures" / "catalog_multi.json"
-RUN_ARCH = SKILL / "scripts" / "run_architect.py"
+RUN_DIRECTOR = SKILL / "scripts" / "run_director.py"
 RUN_DESIGN = SKILL / "scripts" / "run_design.py"
 RUN_TASK = SKILL / "scripts" / "run_task.py"
 PROBE = SKILL / "scripts" / "probe.py"
@@ -57,9 +57,9 @@ class MultiHarnessBase(Base):
         self.assertTrue(lines, f"no output; stderr={r.stderr}")
         return r.returncode, lines[-1], lines
 
-    def arch(self, *args):
+    def director(self, *args):
         r = subprocess.run(
-            [sys.executable, "-I", str(RUN_ARCH), *args],
+            [sys.executable, "-I", str(RUN_DIRECTOR), *args],
             capture_output=True, text=True, env=self._env(),
         )
         lines = r.stdout.strip().splitlines()
@@ -238,28 +238,28 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         self.assertEqual(runner.run("p2", pair="claude:opus@high", worktree=self.impl)[0], "usage")
 
 
-class ClaudeArchitectAndTaskFallbackTests(MultiHarnessBase):
-    def test_architect_lost_13_and_usage_limit_31(self):
-        spec = self.tmp / "arch.txt"
+class ClaudeDirectorAndTaskFallbackTests(MultiHarnessBase):
+    def test_director_lost_13_and_usage_limit_31(self):
+        spec = self.tmp / "director.txt"
         spec.write_text("Start job.\n")
         self.claude_behave(
-            {"do": "response", "text": "RESULT: COMMITTED\n", "session_id": "arch_c1"},
-            {"do": "response", "text": "RESULT: COMMITTED\n", "session_id": "arch_unexpected"},
+            {"do": "response", "text": "RESULT: COMMITTED\n", "session_id": "dir_c1"},
+            {"do": "response", "text": "RESULT: COMMITTED\n", "session_id": "dir_unexpected"},
             "usage",
         )
-        rc, last = self.arch("start", "--state", str(self.state), "--spec", str(spec),
-                             "--pair", "claude:opus@high", "--keep-open")
+        rc, last = self.director("start", "--state", str(self.state), "--spec", str(spec),
+                                 "--pair", "claude:opus@high", "--keep-open")
         self.assertEqual(rc, 0, last)
-        self.assertEqual(self.st("ARCHITECT_CONVERSATION_ID"), "arch_c1")
+        self.assertEqual(self.st("DIRECTOR_CONVERSATION_ID"), "dir_c1")
 
-        rc, last = self.arch("send", "--state", str(self.state), "--spec", str(spec),
-                             "--pair", "claude:opus@high")
+        rc, last = self.director("send", "--state", str(self.state), "--spec", str(spec),
+                                 "--pair", "claude:opus@high")
         self.assertEqual(rc, 13, last)
         self.assertTrue(last.startswith("LOST "), last)
-        self.assertIsNone(self.st("ARCHITECT_CONVERSATION_ID"))
+        self.assertIsNone(self.st("DIRECTOR_CONVERSATION_ID"))
 
-        rc, last = self.arch("start", "--state", str(self.state), "--spec", str(spec),
-                             "--pair", "claude:opus@high")
+        rc, last = self.director("start", "--state", str(self.state), "--spec", str(spec),
+                                 "--pair", "claude:opus@high")
         self.assertEqual(rc, 31, last)
         self.assertTrue(last.startswith("USAGE_LIMIT "), last)
 
@@ -268,9 +268,9 @@ class ClaudeArchitectAndTaskFallbackTests(MultiHarnessBase):
         meta = self.docs / "tasks" / "01.meta"
         meta.write_text(
             "TITLE=Task 01\nTIER=standard\nSPEC_TYPE=checklist\nACS=AC-1\n"
-            "IMPLEMENTER=claude:sonnet@high\nREVIEW_1=claude:sonnet@high\nREVIEW_2=claude:sonnet@high\n"
+            "CREW=claude:sonnet@high\nREVIEW_1=claude:sonnet@high\nREVIEW_2=claude:sonnet@high\n"
         )
-        # 1. Implementer commits (sess_expired), stage 1 passes, stage 2 asks for fix.
+        # 1. Crew commits (sess_expired), stage 1 passes, stage 2 asks for fix.
         # 2. Fix round: resume gets expired-session error -> resets worktree & falls back to fresh claude run & commits.
         # 3. Stage 2 review passes -> merged.
         w = json.loads(self.claude_world.read_text())
@@ -292,7 +292,7 @@ class ClaudeArchitectAndTaskFallbackTests(MultiHarnessBase):
         meta = self.docs / "tasks" / "01.meta"
         meta.write_text(
             "TITLE=Task 01\nTIER=standard\nSPEC_TYPE=checklist\nACS=AC-1\n"
-            "IMPLEMENTER=claude:sonnet@high\nREVIEW_1=claude:sonnet@high\nREVIEW_2=claude:sonnet@high\n"
+            "CREW=claude:sonnet@high\nREVIEW_1=claude:sonnet@high\nREVIEW_2=claude:sonnet@high\n"
         )
         self.claude_behave("usage")
         last, _ = self.expect(30, "PROMPT")
@@ -303,9 +303,9 @@ class MixedCrossHarnessTests(MultiHarnessBase):
     def test_probe_step1_dispatches_to_both_harnesses(self):
         self.SCRIPT = PROBE
         s = self.st()
-        s["ROLE_ARCHITECT"] = "claude:opus@high"
-        s["ROLE_EGM"] = "antigravity:g@high"
-        s["ROLE_BASE"] = "antigravity:g@high"
+        s["ROLE_DIRECTOR"] = "claude:opus@high"
+        s["ROLE_SAFETY"] = "antigravity:g@high"
+        s["ROLE_CREW"] = "antigravity:g@high"
         self.state.write_text(json.dumps(s))
 
         self.claude_behave("ok")
@@ -320,11 +320,11 @@ class MixedCrossHarnessTests(MultiHarnessBase):
         self.assertEqual(self.claude_calls()[0]["effort"], "high")
         self.assertEqual(self.calls()[0]["model"], "g-high")
 
-    def test_run_task_mixed_agy_implementer_and_claude_reviewers(self):
+    def test_run_task_mixed_agy_crew_and_claude_reviewers(self):
         meta = self.docs / "tasks" / "01.meta"
         meta.write_text(
             "TITLE=Task 01\nTIER=standard\nSPEC_TYPE=checklist\nACS=AC-1\n"
-            "IMPLEMENTER=antigravity:g@high\nREVIEW_1=claude:sonnet@high\nREVIEW_2=claude:opus@high\n"
+            "CREW=antigravity:g@high\nREVIEW_1=claude:sonnet@high\nREVIEW_2=claude:opus@high\n"
         )
         self.behave("commit")
         self.claude_behave("pass", "pass")
@@ -335,18 +335,18 @@ class MixedCrossHarnessTests(MultiHarnessBase):
         self.assertEqual(self.claude_calls()[0]["model"], "sonnet")
         self.assertEqual(self.claude_calls()[1]["model"], "opus")
 
-    def test_run_design_with_claude_egm_resolves_claude_skills_and_dispatches(self):
+    def test_run_design_with_claude_safety_resolves_claude_skills_and_dispatches(self):
         self.SCRIPT = RUN_DESIGN
         (self.docs_wt / "design.md").write_text("design\n")
         sh("git", "-C", str(self.docs_wt), "add", "design.md")
         sh("git", "-C", str(self.docs_wt), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "design")
         s = self.st()
-        s.update({"TOPIC": "demo", "ROLE_EGM": "claude:sonnet@high"})
+        s.update({"TOPIC": "demo", "ROLE_SAFETY": "claude:sonnet@high"})
         self.state.write_text(json.dumps(s))
 
         self.claude_behave("write-output")
-        last, _ = self.expect(20, "ARCHITECT_JOB", "--result", self.result_file("RESULT: NEED egm design.md .run/egm-findings.md"))
-        self.assertTrue(last.startswith("ARCHITECT_JOB egm-done "), last)
+        last, _ = self.expect(20, "DIRECTOR_JOB", "--result", self.result_file("RESULT: NEED safety design.md .run/safety-findings.md"))
+        self.assertTrue(last.startswith("DIRECTOR_JOB safety-done "), last)
         self.assertEqual(self.calls(), [])
         self.assertEqual(len(self.claude_calls()), 1)
         self.assertIn("/claude-skills/", self.claude_calls()[0]["prompt"])

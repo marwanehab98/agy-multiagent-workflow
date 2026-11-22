@@ -1,40 +1,40 @@
-"""Run the coordinator's Step 2 read-only design workers synchronously via headless CLI workers.
+"""Run the capsule communicator's Step 2 read-only design workers synchronously via headless CLI workers.
 
-The architect asks for a worker with a NEED result: a builder check, an EGM design review, an EGM
-lens pass or an EGM plan review. Each call runs every deterministic action it can (check the docs
-worktree, test-launch the builder pair, run the worker, save its response, restore the
-docs worktree, retry once, count runs) and exits at the first point that needs the architect.
+The flight director asks for a worker with a NEED result: a builder check, a Range Safety design review,
+a Range Safety lens pass or a Range Safety plan review. Each call runs every deterministic action it can
+(check the docs worktree, test-launch the builder pair, run the worker, save its response, restore the
+docs worktree, retry once, count runs) and exits at the first point that needs the flight director.
 
 Usage:
   python3 -I run_design.py --state <RUN_DIR>/state.json advance --result <file whose first line is RESULT: ...>
-  python3 -I run_design.py --state <file> advance --answer <architect answer file after CONSULT>
+  python3 -I run_design.py --state <file> advance --answer <flight director answer file after CONSULT>
   python3 -I run_design.py --state <file> advance            # continue (re-prints a pending job or consult)
   python3 -I run_design.py --state <file> advance --docs-moved
 
 Results it accepts (the first non-empty line of the file):
   RESULT: NEED builder-check <design rel> <pair>
-  RESULT: NEED egm <design rel> <findings rel>
+  RESULT: NEED safety <design rel> <findings rel>
   RESULT: NEED lens <concepts abs>
   RESULT: NEED plan-review <plan abs> <context abs>
-  RESULT: COMMITTED                          the architect committed its docs files (after commit-docs)
+  RESULT: COMMITTED                          the flight director committed its docs files (after commit-docs)
 Anything else is ERROR UNEXPECTED_RESULT.
 
 The last line of stdout is the status.
-Exit 20  ARCHITECT_JOB <job> <input>       send that architect job with INPUT=<everything after the job name>.
-                                           Jobs: commit-docs, builder-check-done, lens-done, egm-done,
-                                           egm-limit, plan-review-done. Save its RESULT line to a file and
+Exit 20  DIRECTOR_JOB <job> <input>        send that flight director job with INPUT=<everything after the job name>.
+                                           Jobs: commit-docs, builder-check-done, lens-done, safety-done,
+                                           safety-limit, plan-review-done. Save its RESULT line to a file and
                                            call advance --result <file>
-Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run architect job `consult` with
+Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight director job `consult` with
                                            INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
 The builder check runs on the pair in its NEED line (checked with validate_meta.py harness-pair and
-test-launched first); lens, EGM and plan review run on ROLE_EGM. A worker fails when it exits failed,
-is stopped, hits a usage limit, or leaves its output file missing or empty. A failure is retried once
-(RETRY_<kind>), then the done job gets "failed: <saved file>". Run limits: EGM_RUNS 3, LENS_RUNS 2,
-PLAN_REVIEW_RUNS 3. After each worker the docs worktree is put back to DOCS_HEAD, its HEAD when the
-worker started.
+test-launched first); lens, Range Safety design review and plan review run on ROLE_SAFETY. A worker fails
+when it exits failed, is stopped, hits a usage limit, or leaves its output file missing or empty. A failure
+is retried once (RETRY_<kind>), then the done job gets "failed: <saved file>". Run limits: SAFETY_RUNS 3,
+LENS_RUNS 2, PLAN_REVIEW_RUNS 3. After each worker the docs worktree is put back to DOCS_HEAD, its HEAD
+when the worker started.
 """
 import argparse
 import shutil
@@ -47,8 +47,8 @@ from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build,
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
 
-NEED_ARGS = {"builder-check": 2, "egm": 2, "lens": 1, "plan-review": 2}
-DONE_JOB = {"builder-check": "builder-check-done", "egm": "egm-done", "lens": "lens-done",
+NEED_ARGS = {"builder-check": 2, "safety": 2, "lens": 1, "plan-review": 2}
+DONE_JOB = {"builder-check": "builder-check-done", "safety": "safety-done", "lens": "lens-done",
             "plan-review": "plan-review-done"}
 
 
@@ -66,8 +66,8 @@ class Design:
         self.r.set(DESIGN_PHASE=phase, STEP=f"run_design {phase}", **kv)
 
     def job(self, name, text, phase="job"):
-        line = f"ARCHITECT_JOB {name} {text}"
-        self.set_phase(phase, DESIGN_LINE=line, WAITING_ON="architect")
+        line = f"DIRECTOR_JOB {name} {text}"
+        self.set_phase(phase, DESIGN_LINE=line, WAITING_ON="director")
         raise Done(ESCALATE, line)
 
     def need(self):
@@ -78,7 +78,7 @@ class Design:
     def docs_wt(self):
         return self.r.need("DOCS_WORKTREE")
 
-    # -- results from the architect
+    # -- results from the flight director
     def take_result(self, path):
         words = first_words(path)
         line = " ".join(words)
@@ -89,18 +89,18 @@ class Design:
             if len(args) != NEED_ARGS[kind]:
                 raise Done(ERROR, f"ERROR BAD_NEED {line[:300]}")
             self.r.set(DESIGN_NEED=" ".join(words[2:]), **{f"RETRY_{kind}": 0})
-            if kind == "egm":
-                self.r.set(EGM_REQUESTED="yes")  # the user chose EGM in a relay; state shows what ran
+            if kind == "safety":
+                self.r.set(SAFETY_REQUESTED="yes")  # the user chose Range Safety review in a relay; state shows what ran
             self.count_run(kind)
             self.set_phase("start")
         else:
             raise Done(ERROR, f"ERROR UNEXPECTED_RESULT phase={self.phase()}: {line[:300]}")
 
     def count_run(self, kind):
-        """Count the run a NEED asks for; at the limit, send the architect the limit job. Not repeated on a retry."""
+        """Count the run a NEED asks for; at the limit, send the flight director the limit job. Not repeated on a retry."""
         r = self.r
-        if kind == "egm" and r.incr("EGM_RUNS") >= 3:
-            self.job("egm-limit", "none")
+        if kind == "safety" and r.incr("SAFETY_RUNS") >= 3:
+            self.job("safety-limit", "none")
         if kind == "lens" and r.incr("LENS_RUNS") >= 2:
             self.job("lens-done", r.get("LENS_FIRST", str(r.run_dir / "lens-1.md")))
         if kind == "plan-review" and r.incr("PLAN_REVIEW_RUNS") >= 3:
@@ -139,9 +139,9 @@ class Design:
             raise
         self.set_phase("dispatch")
 
-    def egm_skills(self, skill_name="gauntlet"):
+    def safety_skills(self, skill_name="gauntlet"):
         r = self.r
-        harness = parse_pair(r.need("ROLE_EGM")).harness
+        harness = parse_pair(r.need("ROLE_SAFETY")).harness
         rc, out = tool("harnesses.py", "skill-dir", "--catalog", r.need("CATALOG"), "--harness", harness,
                        "--skill", skill_name)
         if rc == 0:
@@ -149,31 +149,31 @@ class Design:
         else:
             skills_dir = bundled_skills_dir(skill_name)
             if not skills_dir:
-                raise Done(ERROR, f"ERROR EGM_SKILLS {out}")
+                raise Done(ERROR, f"ERROR SAFETY_SKILLS {out}")
         if skill_name == "gauntlet":
-            r.set(EGM_SKILLS=skills_dir)
+            r.set(SAFETY_SKILLS=skills_dir)
         return skills_dir
 
     def dispatch(self):
         r = self.r
         kind, args = self.need()
         spec = next_free(r.run_dir / "specs", kind + "-{n}.txt")
-        names = {"builder-check": "builder-check-{n}.md", "egm": "egm-{n}.md", "lens": "lens-{n}.md",
+        names = {"builder-check": "builder-check-{n}.md", "safety": "safety-{n}.md", "lens": "lens-{n}.md",
                  "plan-review": "plan-review-{n}.md"}
         out = next_free(r.run_dir, names[kind])
         if kind == "builder-check":
             build("builder-check.txt", spec, {"DESIGN_FILE": args[0], "OUTPUT_FILE": out})
             pair = args[1]
         else:
-            skill_map = {"egm": "gauntlet", "lens": "crucible", "plan-review": "crossfire"}
-            skills = self.egm_skills(skill_map[kind])
-            pair = r.need("ROLE_EGM")
-            if kind == "egm":
-                build("egm.txt", spec, {"EGM_SKILLS": skills, "DESIGN_FILE": args[0], "OUTPUT_FILE": args[1]})
+            skill_map = {"safety": "gauntlet", "lens": "crucible", "plan-review": "crossfire"}
+            skills = self.safety_skills(skill_map[kind])
+            pair = r.need("ROLE_SAFETY")
+            if kind == "safety":
+                build("range-safety.txt", spec, {"SAFETY_SKILLS": skills, "DESIGN_FILE": args[0], "OUTPUT_FILE": args[1]})
             elif kind == "lens":
-                build("lens.txt", spec, {"EGM_SKILLS": skills, "CONCEPTS_FILE": args[0], "OUTPUT_FILE": out})
+                build("lens.txt", spec, {"SAFETY_SKILLS": skills, "CONCEPTS_FILE": args[0], "OUTPUT_FILE": out})
             else:
-                build("plan-review.txt", spec, {"EGM_SKILLS": skills, "PLAN_FILE": args[0], "OUTPUT_FILE": out},
+                build("plan-review.txt", spec, {"SAFETY_SKILLS": skills, "PLAN_FILE": args[0], "OUTPUT_FILE": out},
                       {"CONTEXT": args[1]})
         r.set(DESIGN_SPEC=spec, DESIGN_OUT=out, DESIGN_PAIR=pair)
         self.set_phase("dispatching")
@@ -186,9 +186,9 @@ class Design:
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
 
-    def _restore_tree(self, kind, allow_egm_out=True):
+    def _restore_tree(self, kind, allow_safety_out=True):
         _, args = self.need()
-        allow = ["--allow", args[1]] if kind == "egm" and allow_egm_out else []
+        allow = ["--allow", args[1]] if kind == "safety" and allow_safety_out else []
         head = self.r.need("DOCS_HEAD")
         rc, why = tool("check-tree.sh", self.docs_wt, head, *allow)
         if rc != 0:
@@ -202,7 +202,7 @@ class Design:
             if self._restore_tree(kind):
                 ask = next_free(r.run_dir / "asks", "design-{n}.md")
                 save_body(result[2], ask, header=f"design phase ({kind})")
-                self.set_phase("consult", DESIGN_ASK_CONV=result[1], DESIGN_ASK_FILE=ask, WAITING_ON="architect")
+                self.set_phase("consult", DESIGN_ASK_CONV=result[1], DESIGN_ASK_FILE=ask, WAITING_ON="director")
                 raise Done(CONSULT, f"CONSULT {ask}")
             # Read-only worker changed the docs worktree before asking; treat as failed attempt
             result = ("stopped", "worker changed the docs worktree before asking", "", result[3])
@@ -221,11 +221,11 @@ class Design:
         ans = p.read_text(encoding="utf-8")
         r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None)
         self.set_phase("dispatching", WAITING_ON=None)
-        result = self.runner.try_resume(f"Architect answer:\n\n{ans}", pair, self.docs_wt, conv)
+        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, self.docs_wt, conv)
         if result is None:
-            self._restore_tree(kind, allow_egm_out=False)
+            self._restore_tree(kind, allow_safety_out=False)
             spec_text = Path(r.need("DESIGN_SPEC")).read_text(encoding="utf-8")
-            result = self.runner.run(f"{spec_text}\n\nArchitect answer to your question:\n{ans}",
+            result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
                                      pair=pair, worktree=self.docs_wt)
         self.handle_result(kind, result)
 
@@ -239,13 +239,13 @@ class Design:
             save_body(result[2], saved)
         else:
             saved.write_text(f"{result[0]}: {result[1]}\n", encoding="utf-8")
-        if not failed and kind == "egm":
+        if not failed and kind == "safety":
             src = Path(self.docs_wt) / args[1]
             if src.is_file():
                 shutil.copyfile(src, out)
         if not failed and not (out.is_file() and out.read_text(encoding="utf-8").strip()):
             failed = True
-        self._restore_tree(kind, allow_egm_out=not failed)
+        self._restore_tree(kind, allow_safety_out=not failed)
         if failed:
             r.log(f"design {kind} failed: {saved}")
             if r.incr(f"RETRY_{kind}") < 2:
@@ -277,7 +277,7 @@ class Design:
             if phase == "consult":
                 raise Done(CONSULT, f"CONSULT {self.r.need('DESIGN_ASK_FILE')}")
             if phase == "dispatching":
-                self._restore_tree(self.need()[0], allow_egm_out=False)
+                self._restore_tree(self.need()[0], allow_safety_out=False)
                 self.set_phase("start")
                 continue
             {"start": self.do_start, "probe": self.do_probe, "dispatch": self.dispatch}[phase]()

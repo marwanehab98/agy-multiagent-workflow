@@ -3,7 +3,7 @@
 Each pending pair is tried in DOCS_WORKTREE with its harness's launch styles in order (`slug`,
 then `flag`); the first that succeeds is recorded as LAUNCH_STYLE_<key>. Failures are appended to
 <RUN_DIR>/results/probe-<key>.md. After each attempt the docs worktree is checked against PROBE_HEAD;
-any change is discarded, except in the resume set (keep=True): an architect may be working there,
+any change is discarded, except in the resume set (keep=True): a flight director may be working there,
 so a change is only logged and left as is.
 
 Usage:
@@ -12,14 +12,14 @@ Usage:
   python3 -I probe.py --state <file> advance            # continue the stored PROBE_SET
   python3 -I probe.py --state <file> advance --docs-moved
 
-Sets: step1 = ROLE_ARCHITECT, ROLE_EGM, ROLE_BASE and the base model at BASE_TOP;
+Sets: step1 = ROLE_DIRECTOR, ROLE_SAFETY, ROLE_CREW and the crew model at CREW_TOP;
 step3 = every REVIEW_1/REVIEW_2 in the queue's .meta files plus CLERICAL_PAIR; pair = one pair;
 resume = step1 and step3 together, re-probed even when they hold LAUNCH_STYLE_<key>.
 
 The last line of stdout is the status.
 Exit 0   PROBED                            every pair in the set has a working launch style
 Exit 40  PROBE_FAILED <pair> <file>        every style failed; <file> holds each style's failure text
-Exit 21  FIX_META <file>                   step3 only: an architect-chosen pair failed; <file> holds
+Exit 21  FIX_META <file>                   step3 only: a flight-director-chosen pair failed; <file> holds
                                            validate_meta.py-style PROBLEM lines for the fix-meta job
 Exit 2   ERROR <what>                      bad state or missing catalog (OLD_FORMAT_RUN for an old state file)
 Exit 64  bad usage
@@ -138,12 +138,12 @@ def launch_problems(r, ids, failed_line):
 
 
 def docs_moved(r):
-    """--docs-moved: an architect job committed in DOCS_WORKTREE. Move PROBE_HEAD/DOCS_HEAD to current HEAD."""
+    """--docs-moved: a flight director job committed in DOCS_WORKTREE. Move PROBE_HEAD/DOCS_HEAD to current HEAD."""
     head = git(r.need("DOCS_WORKTREE"), "rev-parse", "HEAD")
     moved = [k for k in ("PROBE_HEAD", "DOCS_HEAD") if r.get(k) and r.get(k) != head]
     if moved:
         r.set(**{k: head for k in moved})
-        r.log(f"docs worktree moved by an architect job: {' '.join(moved)} now {head}")
+        r.log(f"docs worktree moved by a flight director job: {' '.join(moved)} now {head}")
 
 
 def set_pairs(r, name, one=None):
@@ -152,9 +152,9 @@ def set_pairs(r, name, one=None):
             raise Done(ERROR, "ERROR MISSING_ARG --pair")
         return [parse_pair(one)]
     if name == "step1":
-        base = parse_pair(r.need("ROLE_BASE"))
-        return [parse_pair(r.need("ROLE_ARCHITECT")), parse_pair(r.need("ROLE_EGM")), base,
-                Pair(base.harness, base.model, r.need("BASE_TOP"))]
+        crew = parse_pair(r.need("ROLE_CREW"))
+        return [parse_pair(r.need("ROLE_DIRECTOR")), parse_pair(r.need("ROLE_SAFETY")), crew,
+                Pair(crew.harness, crew.model, r.need("CREW_TOP"))]
     if name == "resume":
         return list(dict.fromkeys(set_pairs(r, "step1") + set_pairs(r, "step3")))
     if name == "step3":
@@ -196,7 +196,7 @@ def run_advance(r, set_name, one, moved=False, if_changed=False):
 
 
 def step3_problems(r, failed_line):
-    """Step 3's pairs are the architect's choices (reviewers, CLERICAL_PAIR), so a failed launch goes back
+    """Step 3's pairs are the flight director's choices (reviewers, CLERICAL_PAIR), so a failed launch goes back
     to it as fix-meta input, in validate_meta.py's PROBLEM form, instead of stopping the run."""
     _, pair, results = failed_line.split()
     queue = r.run_dir / "queue.txt"

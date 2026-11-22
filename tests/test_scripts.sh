@@ -114,7 +114,7 @@ python3 -I "$SK/gate.py" --run-values ../rv.txt --worktree ../impl --head "$H1" 
 
 echo "--- state"
 S=../state.json
-python3 -I "$SK/state.py" --file $S set BASE_SHA_02=abc ARCHITECT_CONVERSATION_ID=conv_1 >/dev/null
+python3 -I "$SK/state.py" --file $S set BASE_SHA_02=abc DIRECTOR_CONVERSATION_ID=conv_1 >/dev/null
 [ "$(python3 -I "$SK/state.py" --file $S get BASE_SHA_02)" = abc ] && ok "set/get" || bad "set/get"
 python3 -I "$SK/state.py" --file $S incr FIX_ROUNDS_02 >/dev/null
 [ "$(python3 -I "$SK/state.py" --file $S incr FIX_ROUNDS_02)" = 2 ] && ok "incr" || bad "incr"

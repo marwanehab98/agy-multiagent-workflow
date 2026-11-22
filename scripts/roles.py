@@ -2,21 +2,21 @@
 
 Usage:
   python3 -I roles.py menu --catalog C [--harness H [--model M]]
-  python3 -I roles.py check --catalog C --jira yes|no --architect P --egm P --base P [--session-harness H]
+  python3 -I roles.py check --catalog C --jira yes|no --director P --safety P --crew P [--session-harness H]
   python3 -I roles.py remembered --roles F --catalog C
-  python3 -I roles.py save --roles F --architect P --egm P --base P
+  python3 -I roles.py save --roles F --director P --safety P --crew P
   python3 -I roles.py to-state --roles F --state S --catalog C
 
 `menu` prints `N<TAB>value<TAB>label` lines (harnesses, then that harness's models, then a
 model's efforts); broken harnesses follow as `BROKEN <name>: <reason>`.
-`check` verifies the coordinator session's required skills on the session harness plus each of the 3
-worker roles (`architect`, `egm`, `base`), printing one `OK`, `UNKNOWN`, or `MISSING` line per finding.
-A base pick equal to the architect pick is UNKNOWN: the architect never implements first.
-A NOTE follows when architect and base share harness and model, and another when the architect is then
-a lower effort than the base (the ladder's last rung would be weaker). Exit 1 on UNKNOWN/MISSING.
+`check` verifies the capsule communicator session's required skills on the session harness plus each of the 3
+worker roles (`director`, `safety`, `crew`), printing one `OK`, `UNKNOWN`, or `MISSING` line per finding.
+A crew pick equal to the flight director pick is UNKNOWN: the flight director never implements first.
+A NOTE follows when director and crew share harness and model, and another when the director is then
+a lower effort than the crew (the ladder's last rung would be weaker). Exit 1 on UNKNOWN/MISSING.
 `remembered` prints `role=pair` lines then `AVAILABLE yes`, or one `AVAILABLE no <role> <pair>` line per
 remembered pick that isn't in the catalog any more; exit 1 with `NONE` when the file is missing.
-`save` writes the picks file; `to-state` copies the picks, BASE_TOP and CATALOG into a state file.
+`save` writes the picks file; `to-state` copies the picks, CREW_TOP and CATALOG into a state file.
 Exit 0 ok. Exit 1 findings or bad input. Exit 64 bad usage.
 """
 import argparse
@@ -30,18 +30,18 @@ from harnesses import detect_session_harness, top_effort  # noqa: E402
 from pairs import EFFORTS, parse_pair  # noqa: E402
 import state as state_file  # noqa: E402
 
-ROLES = ("architect", "egm", "base")
+ROLES = ("director", "safety", "crew")
 SESSION_REQUIRES = ["mission", "gatecheck", "touchdown"]
 REQUIRES = {
-    "architect": ["draft-spec", "flight-plan"],
-    "egm": ["crucible", "gauntlet", "crossfire"],
-    "base": ["red-green", "gatecheck"],
+    "director": ["draft-spec", "flight-plan"],
+    "safety": ["crucible", "gauntlet", "crossfire"],
+    "crew": ["red-green", "gatecheck"],
 }
 EXECUTE_SESSION_REQUIRES = ["launch-plan", "gatecheck", "touchdown"]
 EXECUTE_REQUIRES = {
-    "architect": [],
-    "egm": [],
-    "base": ["red-green", "gatecheck"],
+    "director": [],
+    "safety": [],
+    "crew": ["red-green", "gatecheck"],
 }
 
 
@@ -104,7 +104,7 @@ def check(catalog, jira, picks, mode="full", session_harness=None):
         if not missing_sess:
             lines.append(f"OK session {sess_name}")
 
-    a, b = parse_pair_or_none(picks["architect"]), parse_pair_or_none(picks["base"])
+    d, c = parse_pair_or_none(picks["director"]), parse_pair_or_none(picks["crew"])
     for role in ROLES:
         text = picks[role]
         try:
@@ -114,25 +114,25 @@ def check(catalog, jira, picks, mode="full", session_harness=None):
             bad = True
             continue
         why = unknown_why(catalog, pair)
-        if not why and role == "base" and pair == a:
-            why = "is the architect pick, which never implements first; pick another effort or model"
+        if not why and role == "crew" and pair == d:
+            why = "is the flight director pick, which never implements first; pick another effort or model"
         if why:
             lines.append(f"UNKNOWN {role} {text} {why}")
             bad = True
             continue
         h = catalog["harnesses"][pair.harness]
         missing = [s for s in role_reqs[role] if s not in h["skills"]]
-        if role == "architect" and jira and not has_atlassian(h):
+        if role == "director" and jira and not has_atlassian(h):
             missing.append("atlassian-mcp")
         for item in missing:
             lines.append(f"MISSING {role} {text} {item} in {pair.harness}{where(h, item)}")
         bad = bad or bool(missing)
         if not missing:
             lines.append(f"OK {role} {text}")
-    if a and b and (a.harness, a.model) == (b.harness, b.model):
-        lines.append(f"NOTE architect and base share {a.harness}:{a.model}; the ladder skips repeated rungs")
-        if a.effort in EFFORTS and b.effort in EFFORTS and EFFORTS.index(a.effort) < EFFORTS.index(b.effort):
-            lines.append(f"NOTE the ladder's last rung, architect {a}, is a lower effort than base {b} on the same "
+    if d and c and (d.harness, d.model) == (c.harness, c.model):
+        lines.append(f"NOTE director and crew share {d.harness}:{d.model}; the ladder skips repeated rungs")
+        if d.effort in EFFORTS and c.effort in EFFORTS and EFFORTS.index(d.effort) < EFFORTS.index(c.effort):
+            lines.append(f"NOTE the ladder's last rung, director {d}, is a lower effort than crew {c} on the same "
                          "model, so escalating to it is weaker than the first attempt")
     return lines, bad
 
@@ -245,12 +245,12 @@ def main(argv=None):
             path.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
         else:
             picks, catalog = read_roles(a.roles), load_catalog(a.catalog)
-            base = parse_pair(picks["base"])
+            crew = parse_pair(picks["crew"])
             path = Path(a.state)
             data = state_file.load(path)
             for role in ROLES:
                 data[f"ROLE_{role.upper()}"] = picks[role]
-            data["BASE_TOP"] = top_effort(catalog, base.harness, base.model)
+            data["CREW_TOP"] = top_effort(catalog, crew.harness, crew.model)
             data["CATALOG"] = a.catalog
             state_file.save(path, data)
     except (KeyError, ValueError, StopIteration, OSError) as e:

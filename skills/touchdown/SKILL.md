@@ -96,7 +96,7 @@ is theirs.
 
 ### Option 1: Merge Locally
 
-> If running inside an `mission` or `launch-plan` run (or when `scripts/merge-local.sh` is provided by the coordinator), run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a fast-forward-only merge without touching checkouts. Otherwise:
+> If running inside a `mission` or `launch-plan` run (or when `scripts/merge-local.sh` is provided by the Capsule Communicator), run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a fast-forward-only merge without touching checkouts. Otherwise:
 
 ```bash
 # Get main repo root for CWD safety
