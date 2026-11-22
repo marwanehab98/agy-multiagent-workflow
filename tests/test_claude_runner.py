@@ -345,7 +345,7 @@ class MixedCrossHarnessTests(MultiHarnessBase):
         self.state.write_text(json.dumps(s))
 
         self.claude_behave("write-output")
-        last, _ = self.expect(20, "DIRECTOR_JOB", "--result", self.result_file("RESULT: NEED safety design.md .run/safety-findings.md"))
+        last, _ = self.expect(20, "DIRECTOR_JOB", "--result", self.result_file("RESULT: NEED safety design.md .mission/safety-findings.md"))
         self.assertTrue(last.startswith("DIRECTOR_JOB safety-done "), last)
         self.assertEqual(self.calls(), [])
         self.assertEqual(len(self.claude_calls()), 1)

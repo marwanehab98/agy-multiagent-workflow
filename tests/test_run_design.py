@@ -6,7 +6,7 @@ from pathlib import Path
 
 from helpers import Base, SKILL, sh
 
-FINDINGS = ".run/safety-findings.md"
+FINDINGS = ".mission/safety-findings.md"
 
 
 class Design(Base):

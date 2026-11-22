@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script 
 from common import Run, git, repo_key, run, tool  # noqa: E402
 
 EXCLUDES = [
-    ".run/",
+    ".mission/",
     ".worktrees/",
     "__pycache__/",
     "*.py[cod]",
@@ -165,7 +165,7 @@ def cmd_check_topic(args):
         return 64
 
     base_docs = mc / f"{args.topic}-docs"
-    if not args.force_new and (base_docs / ".run" / "state.json").is_file():
+    if not args.force_new and (base_docs / ".mission" / "state.json").is_file():
         print(f"EXISTING {base_docs}")
         return 10
 
@@ -247,7 +247,7 @@ def cmd_init_docs(args):
             _append_excludes(common_dir, EXCLUDES)
 
     docs_dir = docs_root / "docs" / "plans"
-    run_dir = docs_root / ".run"
+    run_dir = docs_root / ".mission"
     relay_dir = run_dir / "relay"
     for d in (docs_dir, relay_dir, run_dir / "specs", run_dir / "verdicts",
               run_dir / "asks", run_dir / "gates", run_dir / "results"):
@@ -381,7 +381,7 @@ def cmd_list_runs(args):
     if not mc.is_dir():
         return 0
     for d in sorted(mc.iterdir(), key=lambda p: p.name):
-        st = d / ".run" / "state.json"
+        st = d / ".mission" / "state.json"
         if d.is_dir() and d.name.endswith("-docs") and st.is_file():
             try:
                 topic = json.loads(st.read_text(encoding="utf-8")).get("TOPIC", d.name[:-5])

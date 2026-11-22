@@ -60,9 +60,9 @@ Requirements / JIRA Key
 
 - **Automatic repo detection & multi-repo workspaces:** [`scripts/workspace.py`](scripts/workspace.py) detects whether you're running inside a single git repository or a parent workspace directory containing multiple (including nested) repositories. In a multi-repo workspace, you choose which repos are in scope, tasks declare their target `REPO`, and each repo gets its own isolated implementation worktree, verification gate, and PR/merge step under `.mission-control/<topic>-impl/`.
 - **Non-default base branches:** Runs never check out branches in your main checkout, so it doesn't need to be clean. You can name a base branch explicitly in your prompt (including local-only or pushed feature branches); if your currently checked-out branch differs from the repo default, setup asks which one to branch from.
-- **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live in a dedicated `<topic>-docs` worktree (or `.mission-control/<topic>-docs` in multi-repo workspaces) inside `.run/state.json`, while each task runs in its own isolated implementation worktree and only fast-forwards into the feature branch after passing automated gates and both spec and code-quality reviews.
+- **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live in a dedicated `<topic>-docs` worktree (or `.mission-control/<topic>-docs` in multi-repo workspaces) inside `.mission/state.json`, while each task runs in its own isolated implementation worktree and only fast-forwards into the feature branch after passing automated gates and both spec and code-quality reviews.
 - **Lean, behavior-focused TDD:** `red-green` enforces strict RED-GREEN-REFACTOR on public behaviors and realistic failure modes (preferring table-driven tests over per-helper boilerplate), and `quality-review` checks correctness and edge cases without demanding redundant tests.
-- **Rate-limit & compaction safe:** Workers never silently downgrade models on quota/rate limits—instead, the run pauses cleanly with all state saved in `.run/state.json`, ready to resume in a new session.
+- **Rate-limit & compaction safe:** Workers never silently downgrade models on quota/rate limits—instead, the run pauses cleanly with all state saved in `.mission/state.json`, ready to resume in a new session.
 
 ---
 
@@ -102,7 +102,7 @@ If your chat session compacts, disconnects, or pauses on a quota/rate limit, sta
 
 > "Continue my `mission` run for `<topic>`."
 
-The Capsule Communicator locates `.run/state.json`—either in the `<topic>-docs` worktree (single-repo) or via `scripts/workspace.py list-runs` under `.mission-control/<topic>-docs/` (multi-repo)—and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
+The Capsule Communicator locates `.mission/state.json`—either in the `<topic>-docs` worktree (single-repo) or via `scripts/workspace.py list-runs` under `.mission-control/<topic>-docs/` (multi-repo)—and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
 
 ### 4. Use individual skills standalone
 
