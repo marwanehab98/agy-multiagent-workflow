@@ -58,7 +58,9 @@ Requirements / JIRA Key
   > [!NOTE]
   > **Consumer subscription Terms of Service:** Having one vendor's CLI programmatically orchestrate another vendor's CLI may violate consumer subscription Terms of Service (e.g., Google AI Pro or Claude Pro/Max). If you are on consumer subscriptions rather than API-key / commercial billing, keep all roles on the same harness as your active session (`antigravity` in `agy`, or `claude` in `claude`).
 
-- **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live in a dedicated `<topic>-docs` worktree (`.run/state.json`), while each task runs in its own isolated implementation worktree and only fast-forwards into the feature branch after passing automated gates and both spec and code-quality reviews.
+- **Automatic repo detection & multi-repo workspaces:** [`scripts/workspace.py`](scripts/workspace.py) detects whether you're running inside a single git repository or a parent workspace directory containing multiple (including nested) repositories. In a multi-repo workspace, you choose which repos are in scope, tasks declare their target `REPO`, and each repo gets its own isolated implementation worktree, verification gate, and PR/merge step under `.mission-control/<topic>-impl/`.
+- **Non-default base branches:** Runs never check out branches in your main checkout, so it doesn't need to be clean. You can name a base branch explicitly in your prompt (including local-only or pushed feature branches); if your currently checked-out branch differs from the repo default, setup asks which one to branch from.
+- **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live in a dedicated `<topic>-docs` worktree (or `.mission-control/<topic>-docs` in multi-repo workspaces) inside `.run/state.json`, while each task runs in its own isolated implementation worktree and only fast-forwards into the feature branch after passing automated gates and both spec and code-quality reviews.
 - **Lean, behavior-focused TDD:** `red-green` enforces strict RED-GREEN-REFACTOR on public behaviors and realistic failure modes (preferring table-driven tests over per-helper boilerplate), and `quality-review` checks correctness and edge cases without demanding redundant tests.
 - **Rate-limit & compaction safe:** Workers never silently downgrade models on quota/rate limits—instead, the run pauses cleanly with all state saved in `.run/state.json`, ready to resume in a new session.
 
@@ -74,14 +76,16 @@ Requirements / JIRA Key
 
 ### 1. Run a full end-to-end feature (`mission`)
 
-Invoke `mission` with either a JIRA key or written requirements:
+Invoke `mission` from a single git repo or from a parent directory containing multiple repos, with either a JIRA key or written requirements (and an optional base branch or repo subset):
 
 > "Use `mission` to implement PROJ-1234."
 >
-> "Use `mission` to add OAuth2 PKCE login with refresh token rotation and integration tests."
+> "Use `mission` to add OAuth2 PKCE login with refresh token rotation and integration tests, starting from `release/2.4`."
+>
+> "Use `mission` across `api` and `web` to add cursor pagination for `/orders`."
 
 **What to expect:**
-1. **Role setup:** On first run, the Capsule Communicator detects installed CLIs/models and asks you to pick `<harness>:<model>@<effort>` for Flight Director, Range Safety, and Crew, then saves your choices to `~/.config/mission-control/roles.json` (on later runs it asks `same` / `new`). You can also name explicit model/effort picks in your opening prompt to confirm all three in one shot.
+1. **Role, repo & base-branch setup:** On first run, the Capsule Communicator detects installed CLIs/models and asks you to pick `<harness>:<model>@<effort>` for Flight Director, Range Safety, and Crew, then saves your choices to `~/.config/mission-control/roles.json` (on later runs it asks `same` / `new`). You can also name explicit model/effort picks in your opening prompt to confirm all three in one shot. It then detects your repo(s) and confirms the repo scope (in multi-repo workspaces) and base branch (if you're on a non-default branch).
 2. **Design & plan sign-off:** The Flight Director asks clarifying questions one at a time, runs automated Range Safety reviews, and presents the spec and task plan for your approval before any production code is written.
 3. **Hands-off execution:** Each task is implemented by Crew, tested, reviewed, and merged automatically. You are only interrupted if a genuine product decision is needed or a quota limit is hit.
 4. **Landing:** Once all tasks pass final verification and `spec-drift`, `touchdown` asks whether to open a PR, fast-forward merge locally, keep the branch, or discard.
@@ -94,11 +98,11 @@ Already have a markdown plan (or a `tasks/` directory with `flight-manifest.txt`
 
 ### 3. Resume an interrupted run
 
-If your chat session compacts, disconnects, or pauses on a quota/rate limit, start a new session and say:
+If your chat session compacts, disconnects, or pauses on a quota/rate limit, start a new session in the same repo or multi-repo workspace directory and say:
 
 > "Continue my `mission` run for `<topic>`."
 
-The Capsule Communicator locates `.run/state.json` in the `<topic>-docs` worktree and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
+The Capsule Communicator locates `.run/state.json`—either in the `<topic>-docs` worktree (single-repo) or via `scripts/workspace.py list-runs` under `.mission-control/<topic>-docs/` (multi-repo)—and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
 
 ### 4. Use individual skills standalone
 
