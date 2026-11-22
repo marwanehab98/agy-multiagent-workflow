@@ -52,7 +52,7 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
 1. **Set the values** from Setup and the user's request:
    - `REQUIREMENTS_SOURCE`: `jira` when there's a JIRA key; `written` when there's pasted text or a file path; `jira` plus a requirements file when there are both. When there's neither, say exactly "Give me a JIRA key or the requirements (pasted text or a file path)." and wait.
    - `JIRA_KEY`, or `none`. `SAFETY_REQUESTED`: `yes` only if the user asked for Range Safety or a spec review.
-   - **Run notes:** the sentences of the request that say how to run the work rather than what to build (which reviews to run or skip, how to split it, what to ask about), copied exactly. Item 9 saves them.
+   - **Mission notes:** the sentences of the request that say how to run the work rather than what to build (which reviews to run or skip, how to split it, what to ask about), copied exactly. Item 9 saves them.
    - `TOPIC`: `JIRA_KEY`, or a 2–4 word kebab-case slug of the requirements. `DATE`: today, `YYYY-MM-DD`.
    - `SKILL_DIR`: the bundle/plugin root containing `scripts/` and `references/`. `ROLES_FILE` and `SETUP_CATALOG`: the picks file and setup catalog from Setup.
    - Harness binary overrides (optional): resolved automatically by `scripts/harnesses.py` (`AGY` or equivalent state key if explicitly overridden).
@@ -95,7 +95,7 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
    | `PROBED` (0) | Go on to item 9. |
    | `PROBE_FAILED <pair> <file>` (40) | Show the user the file's contents exactly, then say exactly "The test launch of <pair> failed, so the run stops here." Start nothing (Rule 21). |
 
-9. **Save written requirements** to `<RUN_DIR>/requirements.md` and record it as `REQUIREMENTS_FILE`: for a file path, `cp` it; for pasted text, write it exactly as the user typed it, with only the requirements, not instructions about the run. Otherwise `REQUIREMENTS_FILE` is `none`. Save the run notes from item 1 the same way to `<RUN_DIR>/mission-notes.md` and record it as `RUN_NOTES`, or `RUN_NOTES=none` when there are none. Never write either in `<DOCS_DIR>`: a test launch's tree check deletes anything uncommitted there. The Flight Director commits its own copy.
+9. **Save written requirements** to `<RUN_DIR>/requirements.md` and record it as `REQUIREMENTS_FILE`: for a file path, `cp` it; for pasted text, write it exactly as the user typed it, with only the requirements, not instructions about the run. Otherwise `REQUIREMENTS_FILE` is `none`. Save the mission notes from item 1 the same way to `<RUN_DIR>/mission-notes.md` and record it as `MISSION_NOTES`, or `MISSION_NOTES=none` when there are none. Never write either in `<DOCS_DIR>`: a test launch's tree check deletes anything uncommitted there. The Flight Director commits its own copy.
 10. **Start the Flight Director:** build `director-start.txt` with `FIRST_JOB=start`, `INPUT=none`, and every run value it names. Set `STATE set LAST_JOB=start LAST_JOB_INPUT=none STEP="2 design" WAITING_ON=director`, and run `DIRECTOR start --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_DIRECTOR> --keep-open`. Handle its exit code per "Running the Flight Director" (if it immediately returns `RELAY`, show the relay and wait; if `RESULT`, go to Step 2).
 
 ## Step 2: Design phase
@@ -204,7 +204,7 @@ Use this when the user asks to continue a run or after a context compaction in t
 
 1. Find `<RUN_DIR>/state.json` (in single-repo mode, in the worktree on `refs/heads/<TOPIC>-docs`; in multi-repo mode, via `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --workspace <WORKSPACE_DIR>`) and run `STATE show`.
    - **No state file, or no `ROLE_DIRECTOR` in it:** say exactly "ERROR OLD_FORMAT_RUN remove <RUN_DIR> and start a new run" and stop.
-   - **No `RUN_NOTES` in it:** `STATE set RUN_NOTES=none`.
+   - **No `MISSION_NOTES` in it:** `STATE set MISSION_NOTES=none`.
    - **No `BASE_BRANCH` in it:** `STATE set BASE_BRANCH=<DEFAULT_BRANCH>`.
    - **No `REPOS` in it:** `STATE set REPOS=none`.
 2. **Check and re-probe the picks.** The run keeps its `ROLE_*` picks; never change one.
@@ -233,7 +233,7 @@ Use this when the user asks to continue a run or after a context compaction in t
 
 | Keys | Meaning | Set in |
 | --- | --- | --- |
-| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `RUN_NOTES`, `SAFETY_REQUESTED`, `RUN_MODE`, plus optional harness binary overrides (e.g., `AGY`) | From Setup and the request; harness binary override keys are optional; `run_design.py` sets `SAFETY_REQUESTED=yes` when the user chooses Range Safety review later; `launch-plan` sets `RUN_MODE=launch-plan` (default `full`) | 1 |
+| `SKILL_DIR`, `ROLES_FILE`, `SETUP_CATALOG`, `DATE`, `TOPIC`, `REQUIREMENTS_SOURCE`, `JIRA_KEY`, `REQUIREMENTS_FILE`, `MISSION_NOTES`, `SAFETY_REQUESTED`, `RUN_MODE`, plus optional harness binary overrides (e.g., `AGY`) | From Setup and the request; harness binary override keys are optional; `run_design.py` sets `SAFETY_REQUESTED=yes` when the user chooses Range Safety review later; `launch-plan` sets `RUN_MODE=launch-plan` (default `full`) | 1 |
 | `REPOS`, `WORKSPACE_DIR` (multi-repo), `MAIN_CHECKOUT` (single-repo), `DEFAULT_BRANCH`, `BASE_BRANCH`, `START_SHA`, `START_HOW`, and per-repo `REPO_PATH_<k>`, `DEFAULT_BRANCH_<k>`, `BASE_BRANCH_<k>`, `START_SHA_<k>`, `START_HOW_<k>` | Repo(s) | 1 |
 | `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, and per-repo `DOCS_WT_<k>` | The docs worktree / workspace | 1 |
 | `ROLE_DIRECTOR`, `ROLE_SAFETY`, `ROLE_CREW`, `CREW_TOP`, `CATALOG` | The picks, the Crew model's highest effort, and the catalog; fixed for the run | 1 (`roles.py to-state`) |

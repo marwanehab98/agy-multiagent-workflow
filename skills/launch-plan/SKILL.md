@@ -44,7 +44,7 @@ Read `<SKILL_DIR>/references/capsule-communicator.md` in full, then run Step 1 i
 - `REQUIREMENTS_SOURCE=written`
 - `JIRA_KEY=none`
 - `REQUIREMENTS_FILE=none`
-- `RUN_NOTES=none`
+- `MISSION_NOTES=none`
 - `SAFETY_REQUESTED=no`
 - `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>` (harness binaries such as `AGY` are resolved automatically by `scripts/harnesses.py` unless explicitly overridden)
 - In item 6, set `PHASE=design` and `RUN_MODE=launch-plan` (Step 4 updates `PHASE` to `execution` once plan artifacts are ready).
