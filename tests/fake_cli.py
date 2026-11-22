@@ -50,6 +50,7 @@ def run_fake_cli(
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument(*prompt_flags, dest="prompt")
     p.add_argument("--output-format", default="text")
+    p.add_argument("--verbose", action="store_true")
     p.add_argument("--dangerously-skip-permissions", action="store_true")
     p.add_argument("--model", default="")
     p.add_argument("--effort", default="")
@@ -66,6 +67,8 @@ def run_fake_cli(
         "argv": sys.argv[1:],
         "cwd": os.getcwd(),
         "prompt": ns.prompt,
+        "output_format": ns.output_format,
+        "verbose": ns.verbose,
         "model": ns.model,
         "effort": ns.effort,
         resume_dest: resume_val,
@@ -74,11 +77,14 @@ def run_fake_cli(
     def save_world():
         world_path.write_text(json.dumps(w), encoding="utf-8")
 
-    def emit(rc, payload, prefix="", pretty=False):
+    def emit(rc, payload, prefix="", pretty=False, stream_events=None, wrap_event=None):
         save_world()
         if prefix:
-            print(prefix)
-        print(json.dumps(payload, indent=2 if pretty else None))
+            print(prefix, flush=True)
+        for ev in (stream_events or []):
+            print(json.dumps(ev), flush=True)
+        final_obj = {wrap_event: payload, "event": wrap_event} if wrap_event else payload
+        print(json.dumps(final_obj, indent=2 if pretty else None), flush=True)
         return rc
 
     effective_prompt = ns.prompt or ""
@@ -151,7 +157,9 @@ def run_fake_cli(
         rc, payload = response_payload(cid, beh if isinstance(beh, dict) else {})
         prefix = beh.get("stdout_prefix", "") if isinstance(beh, dict) else ""
         pretty = bool(beh.get("pretty")) if isinstance(beh, dict) else False
-        return emit(rc, payload, prefix=prefix, pretty=pretty)
+        stream_events = beh.get("stream_events") if isinstance(beh, dict) else None
+        wrap_event = beh.get("wrap_event") if isinstance(beh, dict) else None
+        return emit(rc, payload, prefix=prefix, pretty=pretty, stream_events=stream_events, wrap_event=wrap_event)
 
     if do == "commit":
         f = Path(f"work_{seq}.txt")

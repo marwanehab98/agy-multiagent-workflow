@@ -177,8 +177,8 @@ class Design:
                       {"CONTEXT": args[1]})
         r.set(DESIGN_SPEC=spec, DESIGN_OUT=out, DESIGN_PAIR=pair)
         self.set_phase("dispatching")
-        result = self.runner.run(spec, pair=pair, worktree=self.docs_wt)
         r.log(f"design {kind} dispatched {pair}")
+        result = self.runner.run(spec, pair=pair, worktree=self.docs_wt)
         self.handle_result(kind, result)
 
     def _discard_or_error(self, head):

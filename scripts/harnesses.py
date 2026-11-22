@@ -76,12 +76,29 @@ def fixture_runner(fixtures, overrides=None):
     return run
 
 
+def _summarize_tool_args(info, limit=80):
+    """Return a short single-line summary of a tool call's arguments, or ''."""
+    if isinstance(info, str):
+        s = " ".join(info.split())
+        return (s[: limit - 3] + "...") if len(s) > limit else s
+    if not isinstance(info, dict):
+        return ""
+    for key in ("command", "CommandLine", "file_path", "TargetFile", "AbsolutePath", "path", "pattern", "query", "url", "description"):
+        val = info.get(key)
+        if isinstance(val, str) and val.strip():
+            s = " ".join(val.split())
+            return (s[: limit - 3] + "...") if len(s) > limit else s
+    return ""
+
+
 class Adapter:
     name = binary = ""
     styles = []
     version_cmd = ["--version"]
     exe_state_key = ""
     resume_flag = ""
+    json_output_args = ["--output-format", "json"]
+    stream_output_args = ["--output-format", "stream-json"]
 
     def __init__(self, runner, home, env=None):
         self.runner, self.home = runner, Path(home)
@@ -129,8 +146,9 @@ class Adapter:
         return found
 
     @classmethod
-    def build_exec_cmd(cls, exe, prompt, args, conversation_id=None):
-        cmd = [exe, "-p", prompt, "--output-format", "json", "--dangerously-skip-permissions", *args]
+    def build_exec_cmd(cls, exe, prompt, args, conversation_id=None, stream=True):
+        fmt_args = cls.stream_output_args if stream else cls.json_output_args
+        cmd = [exe, "-p", prompt, *fmt_args, "--dangerously-skip-permissions", *args]
         if conversation_id:
             cmd += [cls.resume_flag, conversation_id]
         return cmd
@@ -142,6 +160,13 @@ class Adapter:
     @classmethod
     def extract_envelope(cls, data, returncode, exe, conversation_id=None, raw_err=""):
         raise NotImplementedError
+
+    @classmethod
+    def parse_stream_event(cls, data):
+        """Parse one NDJSON event object. Return (progress_summary_or_None, final_envelope_or_None)."""
+        if cls.is_envelope(data):
+            return None, data
+        return None, None
 
 
 class AntigravityAdapter(Adapter):
@@ -224,6 +249,35 @@ class AntigravityAdapter(Adapter):
             "detail": detail,
         }
 
+    @classmethod
+    def parse_stream_event(cls, data):
+        if not isinstance(data, dict):
+            return None, None
+        ev = data.get("event")
+        if ev == "result" and isinstance(data.get("result"), dict):
+            return None, data["result"]
+        if cls.is_envelope(data):
+            return None, data
+        if ev == "init":
+            init = data.get("init") if isinstance(data.get("init"), dict) else data
+            cid = _as_text(init.get("conversation_id")).strip()
+            return (f"init conv={cid}" if cid else "init"), None
+        if ev == "step_update":
+            su = data.get("step_update") if isinstance(data.get("step_update"), dict) else data
+            step_type = _as_text(su.get("step_type")).strip()
+            state = _as_text(su.get("state")).strip().upper()
+            tool_name = _as_text(su.get("tool_name")).strip()
+            if step_type == "tool" and tool_name:
+                if state == "DONE":
+                    dur = su.get("duration_seconds")
+                    suffix = f" ({dur:.1f}s)" if isinstance(dur, (int, float)) else ""
+                    return f"tool done: {tool_name}{suffix}", None
+                hint = _summarize_tool_args(su.get("tool_info"))
+                return (f"tool: {tool_name} ({hint})" if hint else f"tool: {tool_name}"), None
+            if step_type == "agent_response" and state == "DONE":
+                return "agent response complete", None
+        return None, None
+
 
 class ClaudeAdapter(Adapter):
     name, binary = "claude", "claude"
@@ -231,6 +285,7 @@ class ClaudeAdapter(Adapter):
     models_cmd = ("--help",)
     exe_state_key = "CLAUDE"
     resume_flag = "--resume"
+    stream_output_args = ["--output-format", "stream-json", "--verbose"]
 
     def models(self):
         rc, raw = self.run(*self.models_cmd)
@@ -361,6 +416,31 @@ class ClaudeAdapter(Adapter):
             "response": resp,
             "detail": detail,
         }
+
+    @classmethod
+    def parse_stream_event(cls, data):
+        if not isinstance(data, dict):
+            return None, None
+        if cls.is_envelope(data):
+            return None, data
+        ev_type = data.get("type")
+        if ev_type == "system" and data.get("subtype") == "init":
+            sid = _as_text(data.get("session_id")).strip()
+            return (f"init session={sid}" if sid else "init"), None
+        if ev_type == "assistant":
+            msg = data.get("message") if isinstance(data.get("message"), dict) else {}
+            content = msg.get("content") if isinstance(msg.get("content"), list) else []
+            tools = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    name = _as_text(block.get("name")).strip() or "tool"
+                    hint = _summarize_tool_args(block.get("input"))
+                    tools.append(f"{name} ({hint})" if hint else name)
+            if tools:
+                return f"tool: {', '.join(tools)}", None
+            if any(isinstance(b, dict) and b.get("type") == "text" for b in content):
+                return "assistant response", None
+        return None, None
 
 
 ADAPTERS = {"antigravity": AntigravityAdapter, "claude": ClaudeAdapter}

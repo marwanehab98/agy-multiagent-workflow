@@ -241,8 +241,8 @@ class Loop:
         pair = meta[f"REVIEW_{stage}"]
         r.set(**{f"REVIEW_SPEC_{t}": spec, f"REVIEW_PAIR_{t}": pair})
         self.set_phase(t, f"reviewing:{stage}")
-        result = self.runner.run(spec, pair=pair, worktree=r.impl)
         r.log(f"{t} stage{stage} reviewer dispatched {pair}")
+        result = self.runner.run(spec, pair=pair, worktree=r.impl)
         self.after_review(t, stage, result)
 
     def _discard_or_error(self, head):

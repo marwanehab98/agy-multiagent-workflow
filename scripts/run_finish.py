@@ -109,8 +109,8 @@ class Finish:
                      {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG")})
         pair = r.need("ROLE_ARCHITECT")
         self.set_phase("reviewing", FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair)
-        result = self.runner.run(spec, pair=pair, worktree=r.impl)
         r.log(f"final review {n} dispatched {pair}")
+        result = self.runner.run(spec, pair=pair, worktree=r.impl)
         self.settle_review(result)
 
     def settle_review(self, result):
@@ -205,8 +205,8 @@ class Finish:
                       "DECISIONS_LOG": r.need("DECISIONS_LOG"), "OUTPUT_FILE": out})
         pair = r.need("ROLE_EGM")
         self.set_phase("drifting", FIN_OUT=out, FIN_SPEC=spec, FIN_PAIR=pair)
-        result = self.runner.run(spec, pair=pair, worktree=r.impl)
         r.log(f"drift check dispatched {pair}")
+        result = self.runner.run(spec, pair=pair, worktree=r.impl)
         self.settle_drift(result)
 
     def settle_drift(self, result):

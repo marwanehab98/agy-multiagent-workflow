@@ -99,7 +99,8 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         calls = self.claude_calls()
         self.assertEqual(len(calls), 3)
         self.assertIn("--output-format", calls[0]["argv"])
-        self.assertIn("json", calls[0]["argv"])
+        self.assertIn("stream-json", calls[0]["argv"])
+        self.assertIn("--verbose", calls[0]["argv"])
         self.assertIn("--dangerously-skip-permissions", calls[0]["argv"])
         self.assertEqual((calls[0]["model"], calls[0]["effort"], calls[0]["resume"]), ("opus", "high", ""))
         self.assertIn("--resume", calls[1]["argv"])
@@ -107,6 +108,91 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         self.assertEqual(calls[1]["resume"], "sess_abc")
         self.assertNotIn("--effort", calls[2]["argv"])
         self.assertEqual(calls[2]["model"], "haiku")
+
+    def test_stream_json_events_and_worker_logs_both_harnesses(self):
+        self.behave({
+            "do": "response",
+            "text": "agy streamed ok\n",
+            "conv_id": "conv_stream1",
+            "wrap_event": "result",
+            "stream_events": [
+                {"event": "init", "init": {"conversation_id": "conv_stream1"}},
+                {"event": "step_update", "step_update": {
+                    "step_type": "tool", "state": "ACTIVE", "tool_name": "run_command",
+                    "tool_info": {"command": "pytest -q"},
+                }},
+                {"event": "step_update", "step_update": {
+                    "step_type": "tool", "state": "DONE", "tool_name": "run_command",
+                    "duration_seconds": 1.2,
+                }},
+                {"event": "step_update", "step_update": {"step_type": "agent_response", "state": "DONE"}},
+            ],
+        })
+        self.claude_behave({
+            "do": "response",
+            "text": "claude streamed ok\n",
+            "session_id": "sess_stream1",
+            "stream_events": [
+                {"type": "system", "subtype": "init", "session_id": "sess_stream1"},
+                {"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "git status"}},
+                ]}},
+            ],
+        })
+        runner = self._runner()
+        r_agy = runner.run("p_agy", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, label="agy-stream")
+        self.assertEqual(r_agy, ("done", "succeeded", "agy streamed ok\n", "conv_stream1"))
+        r_cl = runner.run("p_cl", pair="claude:sonnet@high", worktree=self.impl, label="claude-stream")
+        self.assertEqual(r_cl, ("done", "succeeded", "claude streamed ok\n", "sess_stream1"))
+
+        agy_log = (self.run_dir / "logs" / "agy-stream-1.log").read_text(encoding="utf-8")
+        self.assertIn("init conv=conv_stream1", agy_log)
+        self.assertIn("tool: run_command (pytest -q)", agy_log)
+        self.assertIn("tool done: run_command (1.2s)", agy_log)
+        self.assertIn("done (succeeded)", agy_log)
+
+        cl_log = (self.run_dir / "logs" / "claude-stream-1.log").read_text(encoding="utf-8")
+        self.assertIn("init session=sess_stream1", cl_log)
+        self.assertIn("tool: Bash (git status)", cl_log)
+        self.assertIn("done (succeeded)", cl_log)
+
+    def test_heartbeat_emitted_during_silent_wait(self):
+        s = self.st()
+        s["WORKER_HEARTBEAT"] = "0.2"
+        self.state.write_text(json.dumps(s))
+        self.behave({"do": "response", "text": "slow ok\n", "sleep": 0.55})
+        runner = self._runner()
+        res = runner.run("slow", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, label="slow-worker")
+        self.assertEqual(res[0], "done")
+        log_text = (self.run_dir / "logs" / "slow-worker-1.log").read_text(encoding="utf-8")
+        self.assertIn("still running (no output for", log_text)
+
+    def test_worker_stream_disabled_and_auto_fallback_to_json(self):
+        # Explicit opt-out via WORKER_STREAM=0
+        s = self.st()
+        s["WORKER_STREAM"] = "0"
+        self.state.write_text(json.dumps(s))
+        self.claude_behave({"do": "response", "text": "json ok\n", "session_id": "s_json"})
+        runner = self._runner()
+        res = runner.run("p_json", pair="claude:sonnet@high", worktree=self.impl)
+        self.assertEqual(res, ("done", "succeeded", "json ok\n", "s_json"))
+        calls = self.claude_calls()
+        self.assertEqual(calls[0]["output_format"], "json")
+        self.assertFalse(calls[0]["verbose"])
+
+        # Re-enable stream-json and verify auto-fallback if CLI rejects stream-json
+        s.pop("WORKER_STREAM")
+        self.state.write_text(json.dumps(s))
+        self.claude_behave(
+            {"do": "response", "raw_stderr": "error: unsupported value 'stream-json' for --output-format", "rc": 2},
+            {"do": "response", "text": "fallback ok\n", "session_id": "s_fb"},
+        )
+        runner = self._runner()
+        res_fb = runner.run("p_fb", pair="claude:sonnet@high", worktree=self.impl)
+        self.assertEqual(res_fb, ("done", "succeeded", "fallback ok\n", "s_fb"))
+        calls = self.claude_calls()
+        self.assertEqual(calls[1]["output_format"], "stream-json")
+        self.assertEqual(calls[2]["output_format"], "json")
 
     def test_envelope_parsing_variants(self):
         self.claude_behave(

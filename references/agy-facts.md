@@ -7,16 +7,19 @@ Part of mission-control. Checked against the official Antigravity CLI headless m
 - **Command shape:**
   ```sh
   agy -p "<prompt>" \
-    --output-format json \
+    --output-format stream-json \
     --dangerously-skip-permissions \
     --model <slug_or_base> [--effort <effort>] \
     [--conversation <conversation_id>]
   ```
-- **JSON output envelope:**
-  - `conversation_id`: string ID used to resume the session in a subsequent `agy -p ... --conversation <id>` call.
-  - `status`: terminal status (`SUCCESS`, `ERROR`, `CANCELED`, `INTERRUPTED`, `INVALID`, `WAITING`, `RUNNING`).
-  - `response`: the model's response text for that turn.
-  - `error`: error message when `status != "SUCCESS"`.
+- **Streaming NDJSON & result envelope:**
+  - `agy -p --output-format stream-json` emits NDJSON events (`init`, `step_update` with `step_type` / `tool_name` / `tool_info` / `state`, and a terminal `result` event whose payload matches `--output-format json`).
+  - `scripts/common.py` logs concise tool/step progress and periodic heartbeats (`WORKER_HEARTBEAT`, default `30`s) to `<RUN_DIR>/logs/<worker>.log` and `stderr`, and falls back to `--output-format json` automatically if a CLI rejects `stream-json` (or when `WORKER_STREAM=0`).
+  - Terminal result fields:
+    - `conversation_id`: string ID used to resume the session in a subsequent `agy -p ... --conversation <id>` call.
+    - `status`: terminal status (`SUCCESS`, `ERROR`, `CANCELED`, `INTERRUPTED`, `INVALID`, `WAITING`, `RUNNING`).
+    - `response`: the model's response text for that turn.
+    - `error`: error message when `status != "SUCCESS"`.
 - **Working directory:** `agy -p` operates in its process `cwd` (`DOCS_WORKTREE` for design/architect workers, `IMPL_WORKTREE` for implementation/review/final-review/drift workers).
 - **Permissions:** `--dangerously-skip-permissions` approves tool calls (edits and commands) inside the isolated git worktree so unattended runs never stall on interactive permission prompts. Read-only constraints are enforced deterministically after each worker by `scripts/check-tree.sh` and `scripts/discard-changes.sh`.
 
@@ -25,18 +28,20 @@ Part of mission-control. Checked against the official Antigravity CLI headless m
 - **Command shape:**
   ```sh
   claude -p "<prompt>" \
-    --output-format json \
+    --output-format stream-json \
+    --verbose \
     --dangerously-skip-permissions \
     --model <alias> [--effort <effort>] \
     [--resume <session_id>]
   ```
-- **JSON output envelope:**
-  - `type`: `"result"`
-  - `subtype`: `"success"` or an error subtype (e.g. `"error_during_execution"`).
-  - `is_error`: boolean indicating whether the turn ended in an error.
-  - `result`: the model's response text for that turn.
-  - `session_id`: string ID used to resume the session in a subsequent `claude -p ... --resume <session_id>` call.
-  - `errors` (optional): list of error strings when `is_error` is true.
+- **Streaming NDJSON & result envelope:**
+  - `claude -p --output-format stream-json --verbose` emits NDJSON events (`system` init, `assistant` tool calls, `user` tool results) and ends with the terminal `type: "result"` envelope:
+    - `type`: `"result"`
+    - `subtype`: `"success"` or an error subtype (e.g. `"error_during_execution"`).
+    - `is_error`: boolean indicating whether the turn ended in an error.
+    - `result`: the model's response text for that turn.
+    - `session_id`: string ID used to resume the session in a subsequent `claude -p ... --resume <session_id>` call.
+    - `errors` (optional): list of error strings when `is_error` is true.
 - **Model aliases and efforts:** `opus`, `sonnet` (effort levels parsed from `claude --help`, e.g. `low..max`), and `haiku` (`@default`), launched with `flag` style (`--model` + optional `--effort`).
 - **Working directory & permissions:** same as `agy -p` (`cwd` is the target worktree; `--dangerously-skip-permissions` avoids interactive prompts; `check-tree.sh` and `discard-changes.sh` enforce read-only constraints).
 
