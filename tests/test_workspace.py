@@ -279,6 +279,33 @@ class TestWorkspace(unittest.TestCase):
             self.assertNotEqual(subprocess.run(["git", "-C", str(ws / "a"), "show-ref", "--verify", "-q",
                                                 f"refs/heads/{b}"]).returncode, 0, b)
 
+    def test_prune_removes_finished_and_orphaned_runs_only(self):
+        repos = {name: self.tmp / name for name in ("done", "live", "gone")}
+        states = {}
+        for name, repo in repos.items():
+            sha = make_repo(repo)
+            r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", name, "--start-sha", sha)
+            kv = dict(l.split(" ", 1) for l in r.stdout.strip().splitlines())
+            st = Path(kv["RUN_DIR"]) / "state.json"
+            st.write_text(json.dumps({"TOPIC": name, "REPOS": "none", "MAIN_CHECKOUT": str(repo), "START_SHA": sha,
+                                      "RUN_DIR": kv["RUN_DIR"], "DOCS_WORKTREE": kv["DOCS_WORKTREE"],
+                                      "PHASE": "done" if name == "done" else "execution"}))
+            states[name] = Path(kv["DOCS_WORKTREE"])
+        shutil.rmtree(repos["gone"])
+        dry = py(WORKSPACE, "prune", "--all")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertIn("DONE done", dry.stdout)
+        self.assertIn("ORPHANED gone", dry.stdout)
+        self.assertIn("KEEP live", dry.stdout)
+        self.assertTrue(all(d.exists() for d in states.values()))  # dry run removes nothing
+        r = py(WORKSPACE, "prune", "--all", "--apply")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(states["done"].exists())
+        self.assertFalse(states["gone"].exists())
+        self.assertTrue(states["live"].exists())
+        self.assertNotEqual(subprocess.run(["git", "-C", str(repos["done"]), "show-ref", "--verify", "-q",
+                                            "refs/heads/mission/done-docs"]).returncode, 0)
+
     def test_validate_meta_requires_repo_in_multi_repo(self):
         ws = self.tmp / "val"
         tasks = ws / "tasks"

@@ -20,6 +20,8 @@ Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight
                                            INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
 Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 5 item 7
+Exit 41  PAUSED <prompt file>              the user paused at a usage-limit prompt; nothing changed, and the next
+                                           call shows the same prompt
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 """
@@ -29,7 +31,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, AgyRunner, Done, Run, answer_worker, build,  # noqa: E402
+from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, USAGE_REPLIES, AgyRunner, Done, Run, paused,  # noqa: E402
+                    answer_worker, build,
                     bundled_skills_dir, check_repo_trees, discard_repo_trees, drive, first_words, next_free,
                     pick_verdict, read_answer, repo_key, save_ask, save_body, tool, usage_prompt, verdict_line,
                     void_prompt, write_atomic, write_prompt)
@@ -134,7 +137,7 @@ class Finish:
         head = None if r.is_multi_repo else r.need("FIN_HEAD")
         if result[0] == "usage":
             self._discard_or_error(head)
-            self.prompt("usage-limit", usage_prompt("The final reviewer", result[1]), ["retry", "stop"])
+            self.prompt("usage-limit", usage_prompt("The final reviewer", result[1]), USAGE_REPLIES)
         if result[0] == "stopped":
             self._discard_or_error(head)
             return self.void("stopped without a verdict")
@@ -254,7 +257,7 @@ class Finish:
         if result[0] == "ask":
             return self.ask_consult("drift", r.need("FIN_PAIR"), r.need("FIN_SPEC"), result[1], result[2])
         if result[0] == "usage":
-            self.prompt("drift-usage-limit", usage_prompt("The drift check", result[1]), ["retry", "stop"])
+            self.prompt("drift-usage-limit", usage_prompt("The drift check", result[1]), USAGE_REPLIES)
         out = Path(r.need("FIN_OUT"))
         ok = result[0] == "done" and result[1] == "succeeded" and out.is_file() and out.read_text(encoding="utf-8").strip()
         if ok:
@@ -382,6 +385,8 @@ class Finish:
         r.set(WAITING_ON=None)
         if word == "stop":
             raise Done(STOP, "STOP user stopped the run during the final review")
+        if word == "pause":
+            paused(r, r.need("FIN_PROMPT_FILE"))
         if name == "void":
             r.set(VOIDS_FINAL=0)
         if name == "rounds":

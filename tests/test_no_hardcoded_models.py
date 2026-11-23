@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 NAMES = re.compile(r"(?i)\b(opus|sonnet|haiku|fable|flash|hydrogen|argon|gemini|claude)\b")
 EXEMPT = re.compile(r"\bCLAUDE\.md\b")  # the project instructions file, exactly as spelled; not a model/harness name
-CHECKED = ["skills", "agents", "resources", "references/capsule-communicator.md", "references/flight-director.md", "references/templates", "scripts"]
+CHECKED = ["skills", "agents", "resources", "references/capsule-communicator.md", "references/capcom", "references/flight-director.md", "references/flight-director", "references/templates", "scripts"]
 ALLOWED = {"scripts/harnesses.py"}
 TRIGGER_SKILLS = {"skills/mission/SKILL.md", "skills/launch-plan/SKILL.md"}
 

@@ -98,7 +98,11 @@ class Review(Finish):
         self.behave("usage-edit", "pass")
         last, _ = self.expect(30, "PROMPT")
         self.assertIn("5-hour limit", self.prompt_text(last))
-        self.assertTrue(last.endswith(" retry stop"), last)
+        self.assertTrue(last.endswith(" retry pause stop"), last)
+        # "pause" changes nothing: the next call shows the same prompt.
+        paused, _ = self.expect(41, "PAUSED", "--reply", "pause")
+        again, _ = self.expect(30, "PROMPT")
+        self.assertEqual(again, last)
         self.assertFalse((self.impl / "stray_usage_edit.txt").exists())
         self.expect(0, "VERIFIED", "--reply", "retry")
 

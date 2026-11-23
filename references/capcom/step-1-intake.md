@@ -1,0 +1,46 @@
+# Capsule Communicator: Step 1: Intake
+
+Part of mission-control. Everything in `<SKILL_DIR>/references/capsule-communicator.md` ("How you work", "Messages", "State keys") and the Rules in `<SKILL_DIR>/skills/mission/SKILL.md` hold here.
+
+1. **Set the values** from Setup and the user's request:
+   - `REQUIREMENTS_SOURCE`: `jira` when there's a JIRA key; `written` when there's pasted text or a file path; `jira` plus a requirements file when there are both. When there's neither, say exactly "Give me a JIRA key or the requirements (pasted text or a file path)." and wait.
+   - `JIRA_KEY`, or `none`. `SAFETY_REQUESTED`: `yes` only if the user asked for Range Safety or a spec review.
+   - **Mission notes:** the sentences of the request that say how to run the work rather than what to build (which reviews to run or skip, how to split it, what to ask about), copied exactly. Item 9 saves them.
+   - `TOPIC`: `JIRA_KEY`, or a 2–4 word kebab-case slug of the requirements. `DATE`: today, `YYYY-MM-DD`.
+   - `SKILL_DIR`: the bundle/plugin root containing `scripts/` and `references/`. `ROLES_FILE` and `SETUP_CATALOG`: the picks file and setup catalog from Setup.
+   - Harness binary overrides (optional): resolved automatically by `scripts/harnesses.py` (`AGY` or equivalent state key if explicitly overridden).
+
+   Keep them for item 6, where the state file is created.
+2. **Find the checkout(s) and base branch(es):** run `python3 -I <SKILL_DIR>/scripts/workspace.py detect --dir "$(pwd)"`.
+   - **Exit 1 (`MODE none`):** say exactly "No git repository found in this directory or its subdirectories. Run Mission Control from a repo or a parent directory containing your repos." and stop.
+   - **`MODE single`:** set `REPOS=none`, `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, and `CURRENT_BRANCH` from its output (`-` means unknown: no `origin/HEAD` and no local `main`/`master`/`trunk`, or a detached HEAD). Choose `BASE_BRANCH`:
+     - **If the user's request explicitly names a base branch to start from:** verify `refs/heads/<branch>` exists (`git -C <MAIN_CHECKOUT> show-ref --verify --quiet refs/heads/<branch>`). If it does, set `BASE_BRANCH=<branch>`. Otherwise say exactly "Local branch `<branch>` does not exist. Check the branch name (or fetch/create it), then tell me which branch to start from." and wait.
+     - **Otherwise, if `DEFAULT_BRANCH` is `-`:** ask "Which branch should this run start from?" with `CURRENT_BRANCH` as the one option (unless it is `-`) and wait for a branch name; verify it as above.
+     - **Otherwise, if `CURRENT_BRANCH` is not `-` and differs from `DEFAULT_BRANCH`:** ask the user (using the multiple-choice question tool per "Asking" in `SKILL.md`, or a numbered list without one): "You're currently on `<CURRENT_BRANCH>` (repo default is `<DEFAULT_BRANCH>`). Which branch should this run start from?" with the two options `<CURRENT_BRANCH>` and `<DEFAULT_BRANCH>`. This is a fixed prompt. Set `BASE_BRANCH` to the chosen branch.
+     - **Otherwise:** `BASE_BRANCH` is `DEFAULT_BRANCH`.
+   - **`MODE multi`:** record `WORKSPACE_DIR`. Each `REPO <name> <key> <path> <default_branch> <current_branch>` line lists a discovered repo (with `<name>` as its relative path from `WORKSPACE_DIR`).
+     - If more than one repo was found and the user didn't already name the exact subset in their request, ask which repos are in scope (with an option for all detected repos, or multi-select when `ask_question` is available). Record the chosen repo names (space-separated) as `REPOS`, and for each chosen repo `<r>` (key `<k>`), record `REPO_PATH_<k>`, `DEFAULT_BRANCH_<k>`.
+     - For each chosen repo `<r>` (key `<k>`), choose `BASE_BRANCH_<k>` by the same rule as single-repo (honoring any base branch named in the prompt; if `<current_branch>` differs from `<default_branch>` and is not `-`, ask whether to start `<r>` from `<current_branch>` or `<default_branch>`; otherwise `<default_branch>`).
+     - Set summary values `DEFAULT_BRANCH` (`<r>=<DEFAULT_BRANCH_<k>> ...`) and `BASE_BRANCH` (`<r>=<BASE_BRANCH_<k>> ...`) for `director-start.txt`.
+
+   The run never checks out a branch in any main checkout, so none of them needs to be clean.
+3. **Choose the start commit(s):**
+   - **Single-repo (`REPOS=none`):** run `bash <SKILL_DIR>/scripts/start-point.sh <MAIN_CHECKOUT> <BASE_BRANCH>`. It prints `START <sha> <how>`, which gives `START_SHA` and `START_HOW`. On exit 3, say exactly "Local `<BASE_BRANCH>` and `origin/<BASE_BRANCH>` have diverged. Reconcile them, then tell me \"retry\"." This is a fixed prompt; "retry" repeats this item.
+   - **Multi-repo:** run `bash <SKILL_DIR>/scripts/start-point.sh <REPO_PATH_<k>> <BASE_BRANCH_<k>>` for each repo `<r>` (key `<k>`) in `REPOS`, recording `START_SHA_<k>` and `START_HOW_<k>`, plus summary values `START_SHA` (`<r>=<sha> ...`) and `START_HOW` (`<r>=<how> ...`). On exit 3 for any repo `<r>`, say exactly "In `<r>`, local `<BASE_BRANCH_<k>>` and `origin/<BASE_BRANCH_<k>>` have diverged. Reconcile them, then tell me \"retry\"." This is a fixed prompt; "retry" repeats this item.
+4. **Check for an earlier run of this topic:**
+   - Run `python3 -I <SKILL_DIR>/scripts/workspace.py check-topic --topic <TOPIC>` with `--main-checkout <MAIN_CHECKOUT>` (single-repo) or `--workspace <WORKSPACE_DIR> --repo <r>=<REPO_PATH_<k>> ...` (multi-repo, one `--repo` per repo in `REPOS`). Create nothing before it answers.
+     - **Exit 10 (`EXISTING <path>`):** say exactly "There's already a run for <TOPIC> at <path>. Reply \"resume\" to continue it, or \"new\" to start a separate run." This is a fixed prompt. "resume" hands off to "Resume a run" with `<path>/.mission/state.json`; "new" re-runs `check-topic` with `--force-new` and updates `TOPIC` from its `TOPIC <new>` output.
+     - **Exit 0 (`TOPIC <chosen>`):** update `TOPIC` to `<chosen>`.
+5. **Create the docs worktree:** run `python3 -I <SKILL_DIR>/scripts/workspace.py init-docs --topic <TOPIC>` with `--main-checkout <MAIN_CHECKOUT> --start-sha <START_SHA>` (single-repo) or `--workspace <WORKSPACE_DIR> --repo <r>=<REPO_PATH_<k>>@<START_SHA_<k>> ...` (multi-repo, one `--repo` per repo in `REPOS`). Record its printed `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, and (multi-repo) each `DOCS_WT_<k>`. On a non-zero exit, show the user its output and stop. It creates the worktree outside the checkout (under `~/.local/state/mission-control/worktrees/`) on branch `mission/<TOPIC>-docs`, and adds `.mission/` and common build-output folders to the repo's git excludes.
+6. **Create the state file:** `STATE set` every value from items 1–5, plus `PHASE=design`.
+7. **Copy the picks:** run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <RUN_DIR>/catalog.json`; then `roles.py check --catalog <RUN_DIR>/catalog.json --jira <yes|no> --director <pair> --safety <pair> --crew <pair>`; then `python3 -I <SKILL_DIR>/scripts/roles.py to-state --roles <ROLES_FILE> --state <RUN_DIR>/state.json --catalog <RUN_DIR>/catalog.json`, which sets `ROLE_DIRECTOR`, `ROLE_SAFETY`, `ROLE_CREW`, `CREW_TOP` and `CATALOG`. If any of the three exits other than 0, show the user its output exactly and stop (Rule 21).
+8. **Test-launch the picks:** run `PROBE --set step1` and branch on its last line:
+
+   | Last line (exit) | Do |
+   | --- | --- |
+   | `PROBED` (0) | Go on to item 9. |
+   | `PROBE_FAILED <pair> <file>` (40) | Show the user the file's contents exactly, then say exactly "The test launch of <pair> failed, so the run stops here." Start nothing (Rule 21). |
+
+9. **Save written requirements** to `<RUN_DIR>/requirements.md` and record it as `REQUIREMENTS_FILE`: for a file path, `cp` it; for pasted text, write it exactly as the user typed it, with only the requirements, not instructions about the run. Otherwise `REQUIREMENTS_FILE` is `none`. Save the mission notes from item 1 the same way to `<RUN_DIR>/mission-notes.md` and record it as `MISSION_NOTES`, or `MISSION_NOTES=none` when there are none. Never write either in `<DOCS_DIR>`: a test launch's tree check deletes anything uncommitted there. The Flight Director commits its own copy.
+10. **Start the Flight Director:** build `director-start.txt` with `FIRST_JOB=start`, `INPUT=none`, and every run value it names. Set `STATE set LAST_JOB=start LAST_JOB_INPUT=none STEP="2 design" WAITING_ON=director`, and run `DIRECTOR start --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_DIRECTOR> --keep-open`. Handle its exit code per "Running the Flight Director" (if it immediately returns `RELAY`, show the relay and wait; if `RESULT`, go to Step 2).
+

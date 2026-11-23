@@ -20,6 +20,8 @@ Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight
                                            INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
 Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 5 item 7
+Exit 41  PAUSED <prompt file>              the user paused at a usage-limit prompt; nothing changed, and the next
+                                           call shows the same prompt
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
@@ -46,7 +48,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR, AgyRunner, Done, Run,  # noqa: E402
+from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR, USAGE_REPLIES,  # noqa: E402
+                    AgyRunner, Done, Run, paused,
                     answer_worker, build, drive, first_words, git, next_free, pick_verdict, read_answer, read_meta,
                     repo_key, rest_path, run, save_ask, save_body, tool, usage_prompt, verdict_line, void_prompt,
                     write_atomic, write_prompt)
@@ -602,7 +605,7 @@ class Loop:
 
     def prompt_usage(self, t, kind, detail):
         self.r.set(**{f"PROMPT_KIND_{t}": kind})
-        self.prompt(t, "usage-limit", usage_prompt(f"A worker on task {t}", detail), ["retry", "stop"],
+        self.prompt(t, "usage-limit", usage_prompt(f"A worker on task {t}", detail), USAGE_REPLIES,
                     back_to="usage")
 
     def reply(self, t, word):
@@ -617,6 +620,8 @@ class Loop:
         r.log(f"{t} prompt {name}: {word}")
         if word == "stop":
             raise Done(STOP, f"STOP user stopped the run at task {t}")
+        if word == "pause":
+            paused(r, r.need(f"PROMPT_FILE_{t}"))
         if name == "not-ff" and word == "rebuild":
             repo = self.task_repo(t)
             new = git(r.repo_checkout(repo), "rev-parse", f"refs/heads/{r.repo_feature_branch(repo)}")

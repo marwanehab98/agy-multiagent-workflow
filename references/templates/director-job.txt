@@ -1,3 +1,3 @@
 mission-control Flight Director job: {{JOB}}
-Follow the "JOB: {{JOB}}" section of {{SKILL_DIR}}/references/flight-director.md.
+Follow the "JOB: {{JOB}}" section of the file that the "Jobs" table in {{SKILL_DIR}}/references/flight-director.md names for that job (read it first if you have not).
 Input: {{INPUT}}

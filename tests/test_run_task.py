@@ -560,7 +560,9 @@ class Prompts(Base):
     def test_usage_limit_on_commit_worker_preserves_uncommitted_work(self):
         self.behave("dirty", "usage", "commit-all", "pass", "pass")
         last, _ = self.expect(30, "PROMPT")
-        self.assertTrue(last.endswith(" retry stop"), last)
+        self.assertTrue(last.endswith(" retry pause stop"), last)
+        self.expect(41, "PAUSED", "--reply", "pause")
+        self.assertEqual(self.expect(30, "PROMPT")[0], last)
         dirty_files = list(self.impl.glob("dirty_*.txt"))
         self.assertEqual(len(dirty_files), 1)
         self.expect(0, "QUEUE_EMPTY", "--reply", "retry")

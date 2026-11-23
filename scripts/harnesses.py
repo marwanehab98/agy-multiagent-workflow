@@ -85,7 +85,8 @@ def _summarize_tool_args(info, limit=80):
         return (s[: limit - 3] + "...") if len(s) > limit else s
     if not isinstance(info, dict):
         return ""
-    for key in ("command", "CommandLine", "file_path", "TargetFile", "AbsolutePath", "path", "pattern", "query", "url", "description"):
+    for key in ("command", "CommandLine", "file_path", "TargetFile", "AbsolutePath", "Path", "path", "pattern", "query",
+                "url", "description"):
         val = info.get(key)
         if isinstance(val, str) and val.strip():
             s = " ".join(val.split())
@@ -122,6 +123,8 @@ def _todo_summary(info):
 
 class Adapter:
     name = binary = ""
+    # True when a resumed conversation's result reports the whole conversation's usage so far, not the turn's.
+    cumulative_usage = False
     styles = []
     version_cmd = ["--version"]
     exe_state_key = ""
@@ -204,8 +207,9 @@ class Adapter:
         raise NotImplementedError
 
     @classmethod
-    def parse_stream_event(cls, data):
-        """Parse one NDJSON event object. Return (progress_summary_or_None, final_envelope_or_None)."""
+    def parse_stream_event(cls, data, acc=None):
+        """Parse one NDJSON event object. Return (progress_summary_or_None, final_envelope_or_None). acc is a
+        dict kept for one worker run, for harnesses that stream a message in pieces."""
         if cls.is_envelope(data):
             return None, data
         return None, None
@@ -213,6 +217,7 @@ class Adapter:
 
 class AntigravityAdapter(Adapter):
     name, binary = "antigravity", "agy"
+    cumulative_usage = True  # live run 2026-11-23: a resumed turn reported turns=2 and the first turn's tokens too
     styles = ["slug", "flag"]
     models_cmd = ("models",)
     exe_state_key = "AGY"
@@ -324,9 +329,13 @@ class AntigravityAdapter(Adapter):
         }
 
     @classmethod
-    def parse_stream_event(cls, data):
+    def parse_stream_event(cls, data, acc=None):
+        """agy stream-json (captured 2026-11-23): step_update events; an agent_response streams its text as
+        text_delta pieces until its DONE event; a tool step is ACTIVE (tool_info.parameters), then DONE or ERROR
+        (tool_info.error.message)."""
         if not isinstance(data, dict):
             return None, None
+        acc = {} if acc is None else acc
         ev = data.get("event")
         if ev == "result" and isinstance(data.get("result"), dict):
             return None, data["result"]
@@ -341,15 +350,25 @@ class AntigravityAdapter(Adapter):
             step_type = _as_text(su.get("step_type")).strip()
             state = _as_text(su.get("state")).strip().upper()
             tool_name = _as_text(su.get("tool_name")).strip()
+            info = su.get("tool_info") if isinstance(su.get("tool_info"), dict) else {}
             if step_type == "tool" and tool_name:
+                if state == "ERROR":
+                    err = info.get("error") if isinstance(info.get("error"), dict) else {}
+                    msg = _one_line(err.get("message") or err.get("type") or "failed", 160)
+                    return f"tool error: {tool_name}: {msg}", None
                 if state == "DONE":
+                    # The ACTIVE event already showed the call; only a slow one is worth a second line.
                     dur = su.get("duration_seconds")
-                    suffix = f" ({dur:.1f}s)" if isinstance(dur, (int, float)) else ""
-                    return f"tool done: {tool_name}{suffix}", None
-                hint = _summarize_tool_args(su.get("tool_info"))
+                    slow = isinstance(dur, (int, float)) and dur >= 10
+                    return (f"tool done: {tool_name} ({dur:.0f}s)" if slow else None), None
+                hint = _summarize_tool_args(info.get("parameters", info))
                 return (f"tool: {tool_name} ({hint})" if hint else f"tool: {tool_name}"), None
-            if step_type == "agent_response" and state == "DONE":
-                return "agent response complete", None
+            if step_type == "agent_response":
+                key = f"text-{su.get('step_index')}"
+                acc[key] = acc.get(key, "") + _as_text(su.get("text_delta"))
+                if state == "DONE":
+                    said = _one_line(acc.pop(key), 160)
+                    return (f"says: {said}" if said else None), None
         return None, None
 
 
@@ -516,7 +535,7 @@ class ClaudeAdapter(Adapter):
         }
 
     @classmethod
-    def parse_stream_event(cls, data):
+    def parse_stream_event(cls, data, acc=None):
         if not isinstance(data, dict):
             return None, None
         if cls.is_envelope(data):

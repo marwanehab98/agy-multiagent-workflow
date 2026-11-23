@@ -119,6 +119,24 @@ class PluginBundleTests(unittest.TestCase):
         self.assertEqual(hits, [], "\n".join(hits))
 
     @unittest.skipUnless(shutil.which("agy"), "agy CLI not installed")
+
+    def test_split_instruction_files_exist_and_cover_every_job(self):
+        refs = ROOT / "references"
+        for core, folder in (("capsule-communicator.md", "capcom"), ("flight-director.md", "flight-director")):
+            text = (refs / core).read_text(encoding="utf-8")
+            named = set(re.findall(rf"`({folder}/[a-z0-9-]+\.md)`", text))
+            self.assertTrue(named, core)
+            for rel in named:
+                self.assertTrue((refs / rel).is_file(), f"{core} names missing {rel}")
+            on_disk = {f"{folder}/{f.name}" for f in (refs / folder).glob("*.md")}
+            self.assertEqual(on_disk, named, f"{folder}/ files not named in {core}'s table")
+        # Every job a template or script sends has a section in some job file.
+        jobs_text = "".join(f.read_text(encoding="utf-8") for f in (refs / "flight-director").glob("*.md"))
+        for job in ("start", "resume", "prepare-plan", "consult", "escalate", "final-review", "verification-failed",
+                    "drift-done", "fix-meta", "pr", "jira-close", "report", "user-message", "baseline-failed",
+                    "commit-docs", "lens-done", "preflight-check-done", "safety-done", "safety-limit",
+                    "plan-review-done"):
+            self.assertIn(f"JOB: {job}", jobs_text, job)
     def test_agy_plugin_validate_strict(self):
         r = subprocess.run(["agy", "plugin", "validate", "--strict", "--json", str(ROOT)],
                            capture_output=True, text=True)

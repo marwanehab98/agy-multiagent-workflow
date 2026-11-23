@@ -17,11 +17,16 @@ Usage:
   python3 -I workspace.py remove-impl --state <RUN_DIR>/state.json
   python3 -I workspace.py remove-docs --state <RUN_DIR>/state.json
   python3 -I workspace.py list-runs (--main-checkout <repo> | --workspace <dir>)
+  python3 -I workspace.py prune (--main-checkout <repo> | --workspace <dir> | --all) [--apply]
 
 init-impl reads FEATURE_BRANCH(_<k>) from FLIGHT_MANIFEST (multi-repo) or state (single repo); it can be run
 again after a failure: a feature branch already at the start commit and a worktree already on the impl branch
 are reused, and anything a failed call created is removed. remove-docs deletes the docs branch too (it holds only
 the run's documents) and prints its last commit, so `git branch <name> <sha>` brings it back.
+
+prune lists finished runs (PHASE=done) and orphaned ones (their repo or workspace no longer exists) under the
+worktrees folder, for one checkout, one workspace, or every one (--all). With --apply it removes them: a finished
+run as remove-impl + remove-docs do, an orphaned one by deleting its folder. Runs in progress are never touched.
 
 Exit 0: ok.  Exit 10: EXISTING run found (check-topic).  Exit 1: git/workspace failure.  Exit 64: bad usage.
 """
@@ -57,15 +62,20 @@ def impl_branch(topic):
     return f"{BRANCH_PREFIX}{topic}-impl"
 
 
-def worktrees_root(anchor):
-    """The folder holding this checkout's (or workspace's) run worktrees, outside it."""
-    anchor = Path(anchor).resolve()
+def worktrees_base():
+    """The folder holding every checkout's and workspace's worktrees folder."""
     base = os.environ.get("MISSION_CONTROL_WORKTREES")
     if not base:
         state_home = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
         base = str(Path(state_home) / "mission-control" / "worktrees")
+    return Path(base)
+
+
+def worktrees_root(anchor):
+    """The folder holding this checkout's (or workspace's) run worktrees, outside it."""
+    anchor = Path(anchor).resolve()
     digest = hashlib.sha1(str(anchor).encode("utf-8")).hexdigest()[:8]
-    return Path(base) / f"{anchor.name or 'root'}-{digest}"
+    return worktrees_base() / f"{anchor.name or 'root'}-{digest}"
 
 
 def _default_branch(repo_path):
@@ -604,6 +614,61 @@ def cmd_list_runs(args):
     return 0
 
 
+def _runs_under(root):
+    """(docs folder, state dict) for every run with a state file directly under root."""
+    found = []
+    if root.is_dir():
+        for d in sorted(p for p in root.iterdir() if p.is_dir() and p.name.endswith("-docs")):
+            st = d / ".mission" / "state.json"
+            try:
+                found.append((d, json.loads(st.read_text(encoding="utf-8"))))
+            except (OSError, ValueError):
+                found.append((d, {}))
+    return found
+
+
+def cmd_prune(args):
+    picked = [x for x in (args.main_checkout, args.workspace, args.all) if x]
+    if len(picked) != 1:
+        print("ERROR pass exactly one of --main-checkout, --workspace, --all", file=sys.stderr)
+        return 64
+    if args.all:
+        base = worktrees_base()
+        roots = sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
+    else:
+        roots = [worktrees_root(args.main_checkout or args.workspace)]
+    failed = False
+    for root in roots:
+        for docs, s in _runs_under(root):
+            anchor = s.get("WORKSPACE_DIR") if s.get("REPOS", "none") not in ("", "none") else s.get("MAIN_CHECKOUT")
+            topic = s.get("TOPIC", docs.name[:-5])
+            if not anchor or not Path(anchor).exists():
+                kind = "ORPHANED"
+            elif s.get("PHASE") == "done":
+                kind = "DONE"
+            else:
+                print(f"KEEP {topic} {docs} (phase {s.get('PHASE', '?')}, step {s.get('STEP', '?')})")
+                continue
+            print(f"{kind} {topic} {docs}")
+            if not args.apply:
+                continue
+            if kind == "ORPHANED":
+                for sib in (docs, docs.with_name(f"{topic}-impl")):
+                    shutil.rmtree(sib, ignore_errors=True)
+                print(f"REMOVED {docs}")
+                continue
+            ns = argparse.Namespace(state=str(docs / ".mission" / "state.json"))
+            if cmd_remove_impl(ns) != 0 or cmd_remove_docs(ns) != 0:
+                failed = True
+            else:
+                print(f"REMOVED {docs}")
+        if args.apply and root.is_dir() and not any(root.iterdir()):
+            root.rmdir()
+    if not args.apply:
+        print("(dry run: pass --apply to remove the DONE and ORPHANED runs above)")
+    return 1 if failed else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -632,6 +697,12 @@ def main():
     for name in ("init-impl", "remove-impl", "remove-docs"):
         sub.add_parser(name).add_argument("--state", required=True)
 
+    p_pr = sub.add_parser("prune")
+    p_pr.add_argument("--main-checkout")
+    p_pr.add_argument("--workspace")
+    p_pr.add_argument("--all", action="store_true")
+    p_pr.add_argument("--apply", action="store_true")
+
     p_lr = sub.add_parser("list-runs")
     p_lr.add_argument("--workspace")
     p_lr.add_argument("--main-checkout")
@@ -650,6 +721,7 @@ def main():
         "remove-impl": cmd_remove_impl,
         "remove-docs": cmd_remove_docs,
         "list-runs": cmd_list_runs,
+        "prune": cmd_prune,
     }
     return handlers[a.cmd](a)
 

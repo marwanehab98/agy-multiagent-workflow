@@ -5,7 +5,7 @@ description: Use when the user has an implementation plan (a markdown plan, or t
 
 # Launch Plan
 
-**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full, `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install, for all Capsule Communicator Rules 1–21), and `<SKILL_DIR>/references/capsule-communicator.md`, then pick up from `<RUN_DIR>/state.json`. A summary of the rules is not the rules.
+**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full, `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install, for all Capsule Communicator Rules 1–21), `<SKILL_DIR>/references/capsule-communicator.md`, and the file of the step in `<RUN_DIR>/state.json` (`STEP`), then pick up from there. A summary of the rules is not the rules.
 
 ## Overview
 
@@ -21,7 +21,7 @@ The invoking session acts as the **Capsule Communicator** and delegates every st
 
 ## Start here
 
-- **The user asks to continue or resume an earlier run:** follow "Continue a run" in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) -> `<SKILL_DIR>/references/capsule-communicator.md` "Resume a run".
+- **The user asks to continue or resume an earlier run:** follow "Continue a run" in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install) -> "Resume a run" (`<SKILL_DIR>/references/capcom/resume.md`).
 - **Otherwise:** follow Steps 1–4 below in this same session.
 
 ### Step 1: Identify the Plan
@@ -40,7 +40,7 @@ Run the same Setup flow as Setup items 1–5 in `<SKILL_DIR>/skills/mission/SKIL
 
 ### Step 3: Initialize Docs Worktree & State
 
-Read `<SKILL_DIR>/references/capsule-communicator.md` in full, then run Step 1 items 2–9 with these initial values:
+Read `<SKILL_DIR>/references/capsule-communicator.md` and `<SKILL_DIR>/references/capcom/step-1-intake.md` in full, then run Step 1 items 2–9 with these initial values:
 - `REQUIREMENTS_SOURCE=written`
 - `JIRA_KEY=none`
 - `REQUIREMENTS_FILE=none`
@@ -61,4 +61,4 @@ You never copy, edit or commit plan files yourself (Rule 4): the Flight Director
 2. Build `director-start.txt` with `FIRST_JOB=prepare-plan`, `INPUT=<that input>`, and all run values it names.
 3. `STATE set PHASE=design LAST_JOB=prepare-plan LAST_JOB_INPUT=<input> STEP="2 design" WAITING_ON=director`, and run `DIRECTOR start --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_DIRECTOR> --keep-open`.
 4. Handle `run_director.py` exits using `<SKILL_DIR>/references/capsule-communicator.md` ("Running the Flight Director": `11` RELAY, `12` NOTIFY, `31` USAGE_LIMIT, `1`/`13` Flight Director lost -> `FIRST_JOB=resume`).
-5. When `DIRECTOR` returns `0` (`RESULT <saved>`) with `RESULT: PLAN_APPROVED <flight-manifest>`, continue straight to `<SKILL_DIR>/references/capsule-communicator.md` **Step 3** (item 1 unsets `DIRECTOR_CONVERSATION_ID` and `DIRECTOR_KEEP_OPEN` and proceeds through Steps 3, 4, and 5).
+5. When `DIRECTOR` returns `0` (`RESULT <saved>`) with `RESULT: PLAN_APPROVED <flight-manifest>`, continue straight to **Step 3** (`<SKILL_DIR>/references/capcom/step-3-setup.md`; item 1 unsets `DIRECTOR_CONVERSATION_ID` and `DIRECTOR_KEEP_OPEN` and proceeds through Steps 3, 4, and 5).

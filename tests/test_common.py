@@ -189,6 +189,74 @@ class Envelopes(unittest.TestCase):
                          {"cost": "$0.12", "turns": 7, "model_time": "61s"})
 
 
+class Costs(unittest.TestCase):
+    def test_summary_by_role_and_pair(self):
+        import costs
+        d = Path(tempfile.mkdtemp())
+        log = d / "progress.log"
+        log.write_text("\n".join([
+            "10:00:00 [worker +5s] 01-implement: done (succeeded) pair=claude:haiku@default cost=$0.10 turns=3",
+            "10:00:01 [worker +4s] 01-s1-1: done (succeeded) pair=claude:haiku@default cost=$0.05 turns=2",
+            "10:00:02 [worker +9s] director-start-1: done (succeeded) pair=claude:sonnet@medium cost=$0.30 turns=6",
+            "10:00:03 [worker +2s] probe-x-0: done (succeeded) pair=antigravity:g@high turns=1 tokens=18004",
+            "10:00:04 [progress] 01 merged abc",
+        ]) + "\n")
+        text = costs.summarize(log)
+        self.assertIn("Total: $0.45 across 4 worker runs (1 reported no cost); 18,004 tokens where reported.", text)
+        self.assertIn("| Flight Director | $0.30 | 0 | 1 | 6 |", text)
+        self.assertIn("| Crew | $0.10 | 0 | 1 | 3 |", text)
+        self.assertIn("| claude:haiku@default | $0.15 | 0 | 2 | 5 |", text)
+        self.assertIn("| antigravity:g@high | $0.00 | 18,004 | 1 | 1 |", text)
+
+
+class TurnStats(unittest.TestCase):
+    def test_resumed_agy_turn_reports_only_its_share(self):
+        # Live run 2026-11-23: first turn 185176 tokens / 379s; the resumed turn reported 199092 / 427s, turns=2.
+        d = Path(tempfile.mkdtemp())
+        st = d / "state.json"
+        st.write_text(json.dumps({"RUN_DIR": str(d)}))
+        runner = common.AgyRunner(Run(st))
+        first = {"turns": 1, "model_time": "379s", "tokens": 185176}
+        runner._turn_stats(harnesses.AntigravityAdapter, "c-1", False, first)
+        self.assertEqual(first["tokens"], 185176)
+        second = {"turns": 2, "model_time": "427s", "tokens": 199092}
+        runner._turn_stats(harnesses.AntigravityAdapter, "c-1", True, second)
+        self.assertEqual(second, {"turns": 1, "model_time": "48s", "tokens": 13916})
+        claude = {"turns": 2, "model_time": "4s", "tokens": 900}
+        runner._turn_stats(harnesses.ClaudeAdapter, "c-1", True, claude)  # Claude reports per invocation
+        self.assertEqual(claude["tokens"], 900)
+
+    def test_token_only_summary(self):
+        import costs
+        log = Path(tempfile.mkdtemp()) / "progress.log"
+        log.write_text("1 [worker +5s] 01-implement: done (succeeded) pair=antigravity:g@high turns=1 tokens=40000\n")
+        text = costs.summarize(log)
+        self.assertIn("Total: 40,000 tokens across 1 worker runs (the harness reports tokens, not cost).", text)
+        self.assertNotIn("$", text)
+        self.assertIn("| Crew | 40,000 | 1 | 1 |", text)
+
+
+class AntigravityProgress(unittest.TestCase):
+    def test_real_stream_capture(self):
+        # Captured from agy 2026-11-23 (paths anonymised): text arrives in pieces, a failed read is ERROR.
+        acc, lines, env = {}, [], None
+        for raw in (ROOT / "tests" / "fixtures" / "harness" / "agy_stream.ndjson").read_text().splitlines():
+            summary, e = harnesses.AntigravityAdapter.parse_stream_event(json.loads(raw), acc)
+            lines += [summary] if summary else []
+            env = e or env
+        self.assertEqual(lines, [
+            "init",
+            "says: I am going to list the workspace directory, read `notes.txt`, and attempt to read `missing.txt`.",
+            "tool: run_command (ls)",
+            "tool: read_file (/home/u/repo/notes.txt)",
+            "tool: read_file (/home/u/repo/missing.txt)",
+            "tool error: read_file: file does not exist",
+            'says: [notes.txt](file:///home/u/repo/notes.txt) contains two lines: "hello" and "world".',
+        ])
+        self.assertEqual(env["status"], "SUCCESS")
+        self.assertEqual(common.envelope_stats(env), {"turns": 1, "model_time": "7s", "tokens": 18004})
+
+
 class AskMarker(unittest.TestCase):
     def test_ask_none_is_not_a_question(self):
         # Live run 2026-11-23: a reviewer began with "ASK: none. The review is written ..." after a denied tool.

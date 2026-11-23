@@ -5,7 +5,7 @@ description: Use when the user hands over a JIRA key or written requirements to 
 
 # Mission Control
 
-**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full and `<SKILL_DIR>/references/capsule-communicator.md`, then pick up from the run's state file. A summary of the rules is not the rules.
+**After a context compaction** (your earlier conversation is replaced by a summary): before anything else, re-read this file in full, `<SKILL_DIR>/references/capsule-communicator.md`, and the file of the step in the run's state file (`STEP`; its "Steps" table names the file), then pick up from there. A summary of the rules is not the rules.
 
 ## Overview
 
@@ -24,7 +24,7 @@ The session that loads this skill **is the Capsule Communicator**:
 
 - **The user asks to continue or resume an earlier run:** go to "Continue a run" below.
 - **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`mission-brief`, `flight-plan`, `launch-plan`, `wind-tunnel`, `flight-readiness`, `cross-check`, `spec-drift`, `red-green`, `gatecheck`, `touchdown`) directly.
-- **Otherwise:** run Setup below, then go straight to `references/capsule-communicator.md` Step 1 in this same session.
+- **Otherwise:** run Setup below, then go straight to Step 1 (`references/capcom/step-1-intake.md`) in this same session.
 
 `SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/` (two directories above this `SKILL.md` in a plugin or repo checkout, or this skill's folder in a flat `install.sh --harness` install). `CFG` is `$HOME/.config/mission-control`, and `CATALOG` is `<CFG>/catalog.json`.
 
@@ -52,16 +52,16 @@ The session that loads this skill **is the Capsule Communicator**:
    - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't start Step 1 (Rule 21).
    - **Exit 1 with only `UNKNOWN` lines:** show them exactly with a one-line plain-English explanation (e.g. `crew` cannot match the `director` pick), ask each named role again as in item 3, and repeat this item.
 5. **Save:** run `python3 -I <SKILL_DIR>/scripts/roles.py save --roles <CFG>/roles.json --director <pair> --safety <pair> --crew <pair>`.
-6. **Begin coordination in this session:** read `<SKILL_DIR>/references/capsule-communicator.md` in full and execute it from Step 1, using `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, and the user's original request verbatim.
+6. **Begin coordination in this session:** read `<SKILL_DIR>/references/capsule-communicator.md` in full, then `<SKILL_DIR>/references/capcom/step-1-intake.md`, and execute from Step 1, reading each later step's file as you reach it, using `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, and the user's original request verbatim.
 
 ### Continue a run
 
 1. Find the run's state file: run `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --main-checkout "$(git rev-parse --show-toplevel)"` in a single git repo, or `--workspace "$(pwd)"` in a multi-repo parent directory; each line is `<topic> <state file>`. If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several runs have a state file, list their topics as a numbered list and ask which one.
 2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
-3. Read `<SKILL_DIR>/references/capsule-communicator.md` in full and run "Resume a run" with that state file in this same session.
+3. Read `<SKILL_DIR>/references/capsule-communicator.md` and `<SKILL_DIR>/references/capcom/resume.md` in full, and run "Resume a run" with that state file in this same session.
 
 All required skills (`mission-brief`, `flight-plan`, `red-green`, `gatecheck`, `touchdown`, `wind-tunnel`, `flight-readiness`, `cross-check`, `spec-drift`, `launch-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
-The Flight Director worker reads `references/flight-director.md`; its spec tells it to. Confirmed headless CLI worker behavior is in `references/agy-facts.md`.
+The Flight Director worker reads `references/flight-director.md` and its job's file under `references/flight-director/`; its spec tells it to. Confirmed headless CLI worker behavior is in `references/agy-facts.md`.
 
 ## Roles
 
@@ -108,7 +108,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
    3. End your turn. The user's answer is the option they selected, or what they typed instead, or their next message that doesn't start with `capcom:`. Write it, character for character, to `<RELAY_DIR>/<NNN>-from-user.md`, and update state as the exit-`11` row says (`OPEN_RELAY`, `LAST_DIRECTOR_RESULT`, `WAITING_ON`).
    4. Resume the Flight Director with `python3 -I <SKILL_DIR>/scripts/run_director.py reply --state <RUN_DIR>/state.json --file <RELAY_DIR>/<NNN>-from-user.md --pair <the job's pair>`.
 
-   You don't summarize, shorten, reword, translate, fix, or comment, in either direction.
+   You don't summarize, shorten, reword, translate, fix, or comment, in either direction. A `DOCS:` block of links at the end of the text is part of it: show it as written, in the dialog too.
 
    When `run_director.py` exits `12` (`NOTIFY <path> <saved>`), it needs no answer. Show `<path>` to the user as in step 2 (in chat text, without ending your turn), then run `python3 -I <SKILL_DIR>/scripts/run_director.py notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` at once without waiting for the user.
 6. **One Crew worker at a time,** in one shared worktree `<IMPL_WORKTREE>`. The next task starts only after the current one passed both reviews and was merged.

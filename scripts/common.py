@@ -19,7 +19,7 @@ sys.path.insert(0, str(HERE))  # -I drops the script dir from sys.path
 from harnesses import _as_text, get_adapter, launch_args, pick_style  # noqa: E402
 from pairs import Pair, parse_pair  # noqa: E402
 
-QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR = 0, 10, 20, 21, 22, 30, 40, 2
+QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, PAUSED, ERROR = 0, 10, 20, 21, 22, 30, 40, 41, 2
 
 VERDICTS = ("VERDICT: PASS", "VERDICT: FIX")
 
@@ -561,6 +561,15 @@ def envelope_stats(data):
         out["turns"] = data["num_turns"]
     if isinstance(data.get("duration_ms"), (int, float)):
         out["model_time"] = f"{data['duration_ms'] / 1000:.0f}s"
+    elif isinstance(data.get("duration_seconds"), (int, float)):
+        out["model_time"] = f"{data['duration_seconds']:.0f}s"
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    tokens = usage.get("total_tokens")
+    if not isinstance(tokens, int) and any(isinstance(usage.get(k), int) for k in ("input_tokens", "output_tokens")):
+        tokens = sum(usage.get(k, 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                                               "cache_creation_input_tokens") if isinstance(usage.get(k), int))
+    if isinstance(tokens, int):
+        out["tokens"] = tokens
     return out
 
 
@@ -682,6 +691,23 @@ class AgyRunner:
         if to_stderr:
             progress(self.r, line, milestone=milestone)
 
+    def _turn_stats(self, adapter, conv_id, resumed, stats):
+        """For a harness that reports a resumed conversation's running totals, log this turn's share: subtract the
+        totals recorded after the conversation's previous turn (state key USAGE_SO_FAR_<conversation>)."""
+        if not adapter.cumulative_usage or not conv_id or not self.r.get("RUN_DIR"):
+            return
+        key = "USAGE_SO_FAR_" + re.sub(r"[^A-Za-z0-9_]", "_", conv_id)
+        now = {"tokens": stats.get("tokens"), "turns": stats.get("turns"),
+               "secs": int(stats["model_time"][:-1]) if str(stats.get("model_time", "")).endswith("s") else None}
+        prev = dict(zip(("tokens", "turns", "secs"), (int(x) if x.isdigit() else None
+                                                       for x in self.r.get(key, "").split(",")))) if resumed else {}
+        for k, field in (("tokens", "tokens"), ("turns", "turns")):
+            if isinstance(now[k], int) and isinstance(prev.get(k), int) and now[k] >= prev[k]:
+                stats[field] = now[k] - prev[k]
+        if isinstance(now["secs"], int) and isinstance(prev.get("secs"), int) and now["secs"] >= prev["secs"]:
+            stats["model_time"] = f"{now['secs'] - prev['secs']}s"
+        self.r.set(**{key: ",".join("" if now[k] is None else str(now[k]) for k in ("tokens", "turns", "secs"))})
+
     def _forget_worker(self, entry):
         if entry is None:
             return
@@ -718,6 +744,7 @@ class AgyRunner:
         _stream_override=None,
         access="full",
         write_extra=(),
+        pair_text="",
     ):
         """Invoke a headless worker and return (kind, detail_or_outcome, body, conversation_id).
 
@@ -741,7 +768,7 @@ class AgyRunner:
         log_path, log_fh = self._open_worker_log(tag)
         start = time.monotonic()
 
-        stats = {}
+        stats = {"pair": pair_text} if pair_text else {}
 
         def finish_log(summary):
             self._forget_worker(entry)
@@ -785,6 +812,7 @@ class AgyRunner:
         t_out.start()
         t_err.start()
 
+        stream_acc = {}  # per-run parser state (agy streams a message in pieces)
         stdout_lines = collections.deque(maxlen=2000)  # bounded: a long stream's events are not all needed
         stderr_lines = []
         stream_envelope = None
@@ -844,7 +872,7 @@ class AgyRunner:
                         obj = None
                 stdout_lines.append(payload)  # error lines may be JSON too ({"error": {"code": 429, ...}})
                 if isinstance(obj, dict):
-                    summary, env_obj = adapter.parse_stream_event(obj)
+                    summary, env_obj = adapter.parse_stream_event(obj, stream_acc)
                     if env_obj is not None:
                         stream_envelope = env_obj
                     if summary:
@@ -911,6 +939,7 @@ class AgyRunner:
                     _stream_override=False,
                     access=access,
                     write_extra=write_extra,
+                    pair_text=pair_text,
                 )
             if USAGE_RE.search(combined):
                 finish_log("usage limit")
@@ -923,6 +952,8 @@ class AgyRunner:
 
         stats.update(envelope_stats(data))
         env = adapter.extract_envelope(data, proc.returncode, exe, conversation_id=conversation_id, raw_err=raw_err)
+        self._turn_stats(adapter, env["conv_id"], bool(conversation_id) and env["returned_id"] in ("", conversation_id),
+                         stats)
         conv_id = env["conv_id"]
 
         if not env["ok"]:
@@ -963,7 +994,7 @@ class AgyRunner:
         target_harness = harness or (_as_pair(pair).harness if pair else "antigravity")
         launch = list(args) if args is not None else self.launch(pair)
         return self.exec_prompt(prompt_text, launch, worktree, spec_path=spec_path, harness=target_harness, label=label,
-                                access=access, write_extra=write_extra)
+                                access=access, write_extra=write_extra, pair_text=str(_as_pair(pair)) if pair else "")
 
     def try_resume(self, spec_or_text, pair, worktree, conversation_id, label=None, access="full", write_extra=()):
         if not conversation_id:
@@ -971,8 +1002,9 @@ class AgyRunner:
         prompt_text, spec_path = _read_spec_or_text(spec_or_text)
         target_harness = _as_pair(pair).harness
         res = self.exec_prompt(prompt_text, self.launch(pair), worktree, conversation_id=conversation_id,
-                               spec_path=spec_path, harness=target_harness, label=label, access=access,
-                               write_extra=write_extra)
+                               spec_path=spec_path, harness=target_harness,
+                               label=label or (None if spec_path else f"{target_harness}-resume"), access=access,
+                               write_extra=write_extra, pair_text=str(_as_pair(pair)))
         if res[0] == "resume_failed":
             return None
         return res
@@ -983,12 +1015,20 @@ WorkerRunner = AgyRunner
 
 # ---------------------------------------------------------------- shared by run_task, run_design and run_finish
 
-RETRY_OR_STOP = 'Reply "retry" once the limit has reset, or "stop" to stop the run.'
+USAGE_REPLIES = ["retry", "pause", "stop"]
+RETRY_PAUSE_STOP = ('Reply "retry" once the limit has reset, "pause" to leave the run exactly here and come back '
+                    'later, or "stop" to end the run now (tasks not merged yet are not built).')
 
 
 def usage_prompt(who, detail):
-    """The fixed usage-limit prompt text (replies: retry, stop)."""
-    return f"{who} hit its model's usage limit: {detail}\n{RETRY_OR_STOP}"
+    """The fixed usage-limit prompt text (replies: USAGE_REPLIES)."""
+    return f"{who} hit its model's usage limit: {detail}\n{RETRY_PAUSE_STOP}"
+
+
+def paused(r, prompt_file):
+    """The user paused at a usage-limit prompt: change nothing, so the next call shows the same prompt again."""
+    r.log("paused at a usage-limit prompt; the next call shows it again")
+    raise Done(PAUSED, f"PAUSED {prompt_file}")
 
 
 def void_prompt(what, why):

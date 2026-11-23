@@ -148,7 +148,7 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         agy_log = (self.run_dir / "logs" / "agy-stream-1.log").read_text(encoding="utf-8")
         self.assertIn("init conv=conv_stream1", agy_log)
         self.assertIn("tool: run_command (pytest -q)", agy_log)
-        self.assertIn("tool done: run_command (1.2s)", agy_log)
+        self.assertNotIn("tool done", agy_log)  # 1.2s: only calls of 10s or more get a "tool done" line
         self.assertIn("done (succeeded)", agy_log)
 
         cl_log = (self.run_dir / "logs" / "claude-stream-1.log").read_text(encoding="utf-8")
@@ -296,7 +296,7 @@ class ClaudeDirectorAndTaskFallbackTests(MultiHarnessBase):
         )
         self.claude_behave("usage")
         last, _ = self.expect(30, "PROMPT")
-        self.assertIn("retry stop", last)
+        self.assertIn("retry pause stop", last)
 
 
 class MixedCrossHarnessTests(MultiHarnessBase):
