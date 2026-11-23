@@ -118,8 +118,6 @@ class PluginBundleTests(unittest.TestCase):
                         hits.append(f"{p.relative_to(ROOT)}:{n}: {line.strip()[:120]}")
         self.assertEqual(hits, [], "\n".join(hits))
 
-    @unittest.skipUnless(shutil.which("agy"), "agy CLI not installed")
-
     def test_split_instruction_files_exist_and_cover_every_job(self):
         refs = ROOT / "references"
         for core, folder in (("capsule-communicator.md", "capcom"), ("flight-director.md", "flight-director")):
@@ -137,6 +135,8 @@ class PluginBundleTests(unittest.TestCase):
                     "commit-docs", "lens-done", "preflight-check-done", "safety-done", "safety-limit",
                     "plan-review-done"):
             self.assertIn(f"JOB: {job}", jobs_text, job)
+
+    @unittest.skipUnless(shutil.which("agy"), "agy CLI not installed")
     def test_agy_plugin_validate_strict(self):
         r = subprocess.run(["agy", "plugin", "validate", "--strict", "--json", str(ROOT)],
                            capture_output=True, text=True)
