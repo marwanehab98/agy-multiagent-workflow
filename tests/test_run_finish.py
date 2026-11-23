@@ -1,4 +1,4 @@
-"""Tests for scripts/run_finish.py (coordinator Step 8 items 1-3) against fake_agy.py. Run: bash tests/run_all.sh"""
+"""Tests for scripts/run_finish.py (capsule communicator Step 5 items 1-3) against fake_agy.py. Run: bash tests/run_all.sh"""
 import json
 import shutil
 import unittest

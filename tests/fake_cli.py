@@ -52,6 +52,12 @@ def run_fake_cli(
     p.add_argument("--output-format", default="text")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--dangerously-skip-permissions", action="store_true")
+    p.add_argument("--permission-mode", default="")
+    p.add_argument("--allowedTools", default="")
+    p.add_argument("--strict-mcp-config", action="store_true")
+    p.add_argument("--sandbox", action="store_true")
+    p.add_argument("--settings", default="")
+    p.add_argument("--add-dir", action="append", default=[])
     p.add_argument("--model", default="")
     p.add_argument("--effort", default="")
     p.add_argument(*resume_flags, dest=resume_dest, default="")
@@ -71,6 +77,10 @@ def run_fake_cli(
         "verbose": ns.verbose,
         "model": ns.model,
         "effort": ns.effort,
+        "skip_permissions": ns.dangerously_skip_permissions,
+        "permission_mode": ns.permission_mode,
+        "allowed_tools": ns.allowedTools,
+        "sandbox": ns.sandbox,
         resume_dest: resume_val,
     })
 

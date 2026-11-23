@@ -59,7 +59,8 @@
    "mcp": {
     "claude_ai_Atlassian": true
    },
-   "broken": null
+   "broken": null,
+   "read_sandbox": true
   },
   "antigravity": {
    "orca_agent": "antigravity",
@@ -111,7 +112,8 @@
    "mcp": {
     "claude_ai_Atlassian": true
    },
-   "broken": null
+   "broken": null,
+   "read_sandbox": true
   }
  }
 }

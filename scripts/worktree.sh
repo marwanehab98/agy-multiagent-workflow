@@ -5,7 +5,8 @@
 #   bash worktree.sh create <main_checkout> <name> <branch> <base_ref>
 #   bash worktree.sh remove <main_checkout> <worktree_path> [--delete-branch] [--merged-into <ref>]
 #
-# `create` creates <main_checkout>/.worktrees/<name> on new branch <branch> at <base_ref> and prints its path.
+# `create` creates <name> on new branch <branch> at <base_ref> under this checkout's worktrees folder, outside
+# the checkout (`python3 workspace.py worktrees-root --anchor <main_checkout>`), and prints its path.
 # `remove` removes <worktree_path> (never --force) and with --delete-branch deletes its merged branch (-d,
 # or -D after verifying reachability from --merged-into <ref>). Checks merge status before removing the worktree.
 # Exit 0 ok. Exit 1 git failure. Exit 64 bad usage.
@@ -24,9 +25,10 @@ case "$op" in
     fi
     main_checkout=$1; name=$2; branch=$3; base_ref=$4
     main_abs=$(cd "$main_checkout" 2>/dev/null && pwd) || { echo "ERROR missing checkout: $main_checkout" >&2; exit 1; }
-    wt_dir="$main_abs/.worktrees"
+    wt_dir=$(python3 -I "$(dirname "$0")/workspace.py" worktrees-root --anchor "$main_abs") || exit 1
     wt_path="$wt_dir/$name"
     mkdir -p "$wt_dir" || exit 1
+    git -C "$main_abs" worktree prune >/dev/null 2>&1
     out=$(git -C "$main_abs" worktree add -b "$branch" "$wt_path" "$base_ref" 2>&1) || {
       echo "$out" >&2
       exit 1

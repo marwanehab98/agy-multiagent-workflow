@@ -64,7 +64,8 @@
     "/home/u/.gemini/config/skills"
    ],
    "plugin_cmd": "agy plugin list",
-   "mcp_cmd": "agy mcp list"
+   "mcp_cmd": "agy mcp list",
+   "read_sandbox": true
   },
   "claude": {
    "binary": "claude",
@@ -129,7 +130,8 @@
     "/home/u/.claude/skills"
    ],
    "plugin_cmd": "claude plugin list",
-   "mcp_cmd": "claude mcp list"
+   "mcp_cmd": "claude mcp list",
+   "read_sandbox": true
   }
  }
 }

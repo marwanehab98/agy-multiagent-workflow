@@ -1,5 +1,7 @@
 # GREEN and REFACTOR rounds: coordinator scenarios against the rewritten prose
 
+> **Historical record.** This file records a pressure-test round against an earlier architecture (`.run/`, coordinator / architect, EGM, Orca wake-ups, `references/coordinator.md`, `-design.md`). Names and mechanics here are not the current ones, and these results are not evidence for the current prose.
+
 Run 2026-11-15, Task 10. One fresh general-purpose agent (sonnet) per scenario per round, reading this worktree's `SKILL.md` and `references/coordinator.md`; prompts as in `coordinator-scenarios.md`. Baseline: `coordinator-baseline.md`.
 
 ## Round 1 (GREEN, first rewrite)

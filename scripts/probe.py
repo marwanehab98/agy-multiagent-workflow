@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (FIX_META, STOP, ERROR, AgyRunner, Done, Run, build, check_repo_trees,  # noqa: E402
-                    discard_repo_trees, git, next_free, save_body, tool)
+                    discard_repo_trees, drive, git, next_free, read_meta, save_body, tool)
 from harnesses import launch_args  # noqa: E402
 from pairs import Pair, parse_pair, pair_key  # noqa: E402
 
@@ -75,7 +75,7 @@ class Prober:
         for idx, style in enumerate(styles):
             spec = build("probe.txt", self.r.run_dir / "specs" / f"probe-{key}-{idx}.txt")
             args = launch_args(self.catalog, pair, style)
-            result = self.runner.run(spec, pair=pair, args=args, worktree=self.wt)
+            result = self.runner.run(spec, pair=pair, args=args, worktree=self.wt, access="read")
             self.finish_attempt(pair)
             if result[0] == "done" and result[1] == "succeeded":
                 self.r.set(**{f"LAUNCH_STYLE_{key}": style, f"PROBE_RECHECK_{key}": None})
@@ -103,9 +103,11 @@ class Prober:
                 f.write(f"## {note}\n")
         elif rc != 0:
             rc2, out2 = tool("discard-changes.sh", self.wt, head)
-            if self.r.is_multi_repo:
-                discard_repo_trees(self.r, "docs")
+            if rc2 == 0 and self.r.is_multi_repo:
+                rc2, out2 = discard_repo_trees(self.r, "docs")
             self.r.log(f"probe {pair}: docs worktree changed ({out}); discarded: {out2} (exit {rc2})")
+            if rc2 != 0:
+                raise Done(ERROR, f"ERROR RESET {out2}")
 
 
 def harness_versions(catalog):
@@ -113,15 +115,6 @@ def harness_versions(catalog):
     harnesses = catalog.get("harnesses", {})
     parts = [f"{name}:{harnesses[name].get('version', '')}" for name in sorted(harnesses)]
     return ",".join(parts)
-
-
-def read_meta(path):
-    meta = {}
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            meta[k.strip()] = v.strip()
-    return meta
 
 
 def review_pairs(r, ids):
@@ -135,7 +128,7 @@ def review_pairs(r, ids):
 
 def launch_problems(r, ids, failed_line):
     """validate_meta.py-style PROBLEM lines for the tasks whose reviewer pair failed its test launch."""
-    _, pair, results = failed_line.split()
+    _, pair, results = failed_line.split(" ", 2)
     lines = [f"PROBLEM {t}: {k} {pair} failed its test launch; see {results}"
              for t in ids for k, v in read_meta(r.task_file(t, ".meta")).items()
              if k in ("REVIEW_1", "REVIEW_2") and v == pair]
@@ -203,7 +196,7 @@ def run_advance(r, set_name, one, moved=False, if_changed=False):
 def step3_problems(r, failed_line):
     """Step 3's pairs are the flight director's choices (reviewers, GROUND_CREW_PAIR), so a failed launch goes back
     to it as fix-meta input, in validate_meta.py's PROBLEM form, instead of stopping the run."""
-    _, pair, results = failed_line.split()
+    _, pair, results = failed_line.split(" ", 2)
     queue = r.run_dir / "queue.txt"
     ids = queue.read_text(encoding="utf-8").split() if queue.exists() else []
     lines = [l for l in launch_problems(r, ids, failed_line).splitlines() if l.startswith("PROBLEM ") and ":" in l.split()[1]]
@@ -228,13 +221,7 @@ def main():
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
-    try:
-        run_advance(Run(a.state), a.set, a.pair, a.docs_moved, a.if_changed)
-        code, line = ERROR, "ERROR NO_STATUS"
-    except Done as d:
-        code, line = d.code, d.line
-    print(line)
-    return code
+    return drive(a.state, lambda events: run_advance(Run(a.state), a.set, a.pair, a.docs_moved, a.if_changed))
 
 
 if __name__ == "__main__":

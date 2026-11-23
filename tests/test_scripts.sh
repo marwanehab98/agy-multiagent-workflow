@@ -3,6 +3,7 @@
 set -u
 SK=$(cd "$(dirname "$0")/../scripts" && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/amwtest.XXXX"); cd "$T"
+export MISSION_CONTROL_WORKTREES="$T/wt-root"
 pass=0; fail=0
 ok()  { echo "PASS $1"; pass=$((pass+1)); }
 bad() { echo "FAIL $1"; fail=$((fail+1)); }
@@ -63,7 +64,10 @@ H1=$(git -C "$WT_IMPL" rev-parse HEAD)
 bash "$SK/merge-task.sh" . feature "$BASE" "$H1" >/dev/null; expect 0 $? "ff without checkout"
 [ "$(git rev-parse feature)" = "$H1" ] && ok "branch moved" || bad "branch moved"
 [ "$(git branch --show-current)" = "main" ] && ok "main checkout untouched" || bad "main checkout untouched"
-bash "$SK/merge-task.sh" . feature "$BASE" "$H1" >/dev/null; expect 3 $? "stale expected_old refused"
+bash "$SK/merge-task.sh" . feature "$BASE" "$H1" >/dev/null; expect 0 $? "repeat of an applied merge (resume after a crash) is a no-op"
+[ "$(git rev-parse feature)" = "$H1" ] && ok "repeat leaves branch at H1" || bad "repeat leaves branch at H1"
+H1b=$(git -C "$WT_IMPL" commit-tree "$H1^{tree}" -p "$BASE" -m other)
+bash "$SK/merge-task.sh" . feature "$BASE" "$H1b" >/dev/null; expect 3 $? "stale expected_old refused"
 git branch side "$BASE"; (cd "$WT_IMPL" && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m t2); H2=$(git -C "$WT_IMPL" rev-parse HEAD)
 bash "$SK/merge-task.sh" . feature "$H1" "$(git rev-parse side)" >/dev/null; expect 3 $? "non-ff target refused"
 git switch -q feature
@@ -124,6 +128,20 @@ python3 -I "$SK/gate.py" --flight-manifest ../rv.txt --worktree ../impl --head "
 grep -q "GATE_1 exit=1" ../gate2.log && ok "failure logged" || bad "failure logged"
 python3 -I "$SK/gate.py" --flight-manifest ../rv.txt --worktree ../impl --head "$H2" --log ../gate3.log --prefix VERIFY >/dev/null; expect 0 $? "--prefix VERIFY ignores GATE_"
 python3 -I "$SK/gate.py" --flight-manifest ../rv.txt --worktree ../impl --head "$H1" --log ../gate4.log >/dev/null; expect 2 $? "refuses when HEAD != head"
+
+echo "--- base-drift.sh"
+D=$(mktemp -d "$T/drift.XXXX")
+git -C "$D" init -q -b main && git -C "$D" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+git -C "$D" branch feat
+bash "$SK/base-drift.sh" "$D" main feat >/dev/null; expect 0 $? "base current"
+echo a > "$D/f.txt"; git -C "$D" add f.txt; git -C "$D" -c user.email=t@t -c user.name=t commit -qm "main moves"
+out=$(bash "$SK/base-drift.sh" "$D" main feat); expect 1 $? "base ahead"
+case "$out" in "BASE_AHEAD 1 "*local*) ok "base ahead counts 1 local commit" ;; *) bad "base ahead line: $out" ;; esac
+git -C "$D" switch -q feat; echo b > "$D/f.txt"; git -C "$D" add f.txt; git -C "$D" -c user.email=t@t -c user.name=t commit -qm "feat edits"
+git -C "$D" switch -q main
+out=$(bash "$SK/base-drift.sh" "$D" main feat)
+case "$out" in *CONFLICTS*) ok "trial merge reports conflicts" ;; *) bad "no CONFLICTS line: $out" ;; esac
+[ "$(git -C "$D" rev-parse feat)" = "$(git -C "$D" rev-parse feat)" ] && [ -z "$(git -C "$D" status --porcelain)" ] && ok "drift check wrote nothing" || bad "drift check wrote nothing"
 
 echo "--- state"
 S=../state.json

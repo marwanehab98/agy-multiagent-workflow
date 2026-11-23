@@ -1,5 +1,7 @@
 # Baseline (RED): coordinator scenarios against the pre-Task-10 prose
 
+> **Historical record.** This file records a pressure-test round against an earlier architecture (`.run/`, coordinator / architect, EGM, Orca wake-ups, `references/coordinator.md`, `-design.md`). Names and mechanics here are not the current ones, and these results are not evidence for the current prose.
+
 Run 2026-11-15. Skill under test: `SKILL.md` and `references/coordinator.md` as of commit `19ec40b` (after Task 9), copied out of the worktree so the rewrite could not leak into the baseline. One fresh general-purpose agent (sonnet) per scenario, prompt as in `coordinator-scenarios.md`.
 
 | # | Scenario | Result | Why |

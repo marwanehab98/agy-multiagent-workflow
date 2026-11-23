@@ -1,6 +1,6 @@
 ---
 name: gatecheck
-description: Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence before assertions always
+description: Use when about to claim work is complete, fixed, or passing, or before committing or opening a PR. Run the verification command and read its output before any success claim.
 ---
 
 # Gatecheck

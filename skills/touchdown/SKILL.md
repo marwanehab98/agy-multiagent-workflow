@@ -1,6 +1,6 @@
 ---
 name: touchdown
-description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work
+description: Use when implementation on a branch is complete and the user wants to land it. Verifies tests, then offers a PR, a fast-forward local merge, or keeping the branch.
 ---
 
 # Touchdown
@@ -14,6 +14,8 @@ description: Use when implementation is complete, all tests pass, and you need t
 ## Step 1: Verify Tests
 
 Run the project's full test suite (`npm test` / `cargo test` / `pytest` / `go test ./...`).
+
+If the caller says the branch was already verified at its current HEAD and gives the verification log (as a `mission` or `launch-plan` run does), don't re-run the suite: cite that log and continue to Step 2.
 
 **If tests fail**, report the failures and stop — the menu comes after a green suite:
 
@@ -57,7 +59,7 @@ Confirm before merging: merging into the wrong base is expensive to undo.
 ```
 Implementation complete. What would you like to do?
 
-1. Merge back to <base-branch> locally
+1. Fast-forward <base-branch> to this branch locally
 2. Push and create a Pull Request
 3. Keep the branch as-is (I'll handle it later)
 
@@ -69,7 +71,7 @@ Which option?
 ```
 Implementation complete. What would you like to do?
 
-1. Merge back to <base-branch> locally
+1. Fast-forward <base-branch> to this branch locally
 2. Keep the branch as-is (I'll handle it later)
 
 Which option?
@@ -94,30 +96,29 @@ is theirs.
 
 ## Step 5: Execute Choice
 
-### Option 1: Merge Locally
+### Option 1: Fast-Forward Locally
 
-> If running inside a `mission` or `launch-plan` run (or when `scripts/merge-local.sh` is provided by the Capsule Communicator), run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a fast-forward-only merge without touching checkouts. Otherwise:
+The merge is fast-forward only, so `<base-branch>` ends exactly at the
+tested branch tip. Use the bundled script, resolved from the plugin/bundle
+root (`../../scripts/` from this `SKILL.md` in a plugin or repo layout,
+`../mission/scripts/` in a flat skills install), never from the user's repo.
+Inside a `mission` or `launch-plan` run, use the run's `MAIN_CHECKOUT`,
+`PR_TARGET` and `FEATURE_BRANCH`.
 
 ```bash
-# Get main repo root for CWD safety
 MAIN_ROOT=$(git -C "$(git rev-parse --git-common-dir)/.." rev-parse --show-toplevel)
 cd "$MAIN_ROOT"
-
-# Merge first — verify success before removing anything
-git checkout <base-branch>
-git pull
-git merge <feature-branch>
-
-# Verify tests on merged result
-<test command>
+bash <bundle>/scripts/merge-local.sh "$MAIN_ROOT" <base-branch> <feature-branch>
 ```
 
-If tests fail on the merged result: stop, leave the worktree and branch in
-place, and investigate — nothing has been pushed, so the merge is local
-and recoverable.
+It moves `<base-branch>` without checking anything out, or by
+`git merge --ff-only` where `<base-branch>` is checked out with no
+uncommitted changes. On `NOT_FAST_FORWARD` (the base has commits this
+branch lacks) or any other refusal, nothing changed: show the output, stop,
+and offer to rebase the branch onto the base and re-verify, or to open a PR.
 
-Once the merged result is green: clean up the worktree (Step 6), then
-delete the branch:
+Once it prints `MERGED`: clean up the worktree (Step 6), then delete the
+branch:
 
 ```bash
 git branch -d <feature-branch>
@@ -179,8 +180,8 @@ Step 2, from before that directory change.
 
 **If `GIT_DIR == GIT_COMMON`:** Normal repo, no worktree to clean up. Done.
 
-**If `WORKTREE_PATH` is under `.worktrees/` or `worktrees/`:** Superpowers
-created this worktree — we own cleanup:
+**If `WORKTREE_PATH` is under `.worktrees/` or `worktrees/`:** a
+project-local worktree made for this work — we own cleanup:
 
 ```bash
 git worktree remove "$WORKTREE_PATH"
@@ -217,7 +218,7 @@ place. If your platform provides a workspace-exit tool, use it.
 
 | Option | Merge | Push | Keep Worktree | Cleanup Branch |
 |--------|-------|------|---------------|----------------|
-| 1. Merge locally | yes | - | - | yes |
+| 1. Fast-forward locally | yes | - | - | yes |
 | 2. Create PR | - | yes | yes | - |
 | 3. Keep as-is | - | - | yes | - |
 | Discard (explicit request only) | - | - | - | yes (force) |
@@ -233,6 +234,6 @@ place. If your platform provides a workspace-exit tool, use it.
 | "The PR is up, so the worktree is clutter now" | PR feedback gets fixed in that worktree. It stays until the work lands. |
 | "This other worktree looks stale — I'll clean it too" | Clean up only worktrees under `.worktrees/` or `worktrees/`. Everything else belongs to the host. |
 | "Removal refused — `--force` is just finishing the cleanup" | The refusal means files exist only in that worktree. `--force` destroys them permanently. Show your human partner and ask. |
-| "The merged-result failure is probably flaky" | A failing merged result stops everything. Branch and worktree stay put while you investigate. |
+| "It isn't a fast-forward — a merge commit is fine" | Only a fast-forward lands exactly what was tested. Stop and offer a rebase or a PR. |
 | "The base branch is obviously main" | Confirm the fork point or ask. Merging into the wrong base is expensive to undo. |
 | "The push was rejected — force-push will fix it" | A rejected push means the remote moved. Investigate; force-push only on your human partner's explicit request. |

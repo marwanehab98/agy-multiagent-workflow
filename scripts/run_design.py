@@ -42,8 +42,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, build, bundled_skills_dir,  # noqa: E402
-                    check_repo_trees, discard_repo_trees, first_words, git, next_free, save_body, tool)
+from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, answer_worker, build,  # noqa: E402
+                    bundled_skills_dir, check_repo_trees, discard_repo_trees, drive, first_words, git, next_free,
+                    read_answer, save_ask, save_body, tool)
 from pairs import parse_pair  # noqa: E402
 from probe import Prober, docs_moved  # noqa: E402
 
@@ -135,7 +136,7 @@ class Design:
             Prober(self.r, self.runner).advance([pair])
         except Done as d:
             if d.code == STOP and d.line.startswith("PROBE_FAILED"):
-                self.job(DONE_JOB["preflight-check"], f"failed: {d.line.split()[-1]}")
+                self.job(DONE_JOB["preflight-check"], f"failed: {d.line.split(' ', 2)[-1]}")
             raise
         self.set_phase("dispatch")
 
@@ -178,7 +179,7 @@ class Design:
         r.set(DESIGN_SPEC=spec, DESIGN_OUT=out, DESIGN_PAIR=pair)
         self.set_phase("dispatching")
         r.log(f"design {kind} dispatched {pair}")
-        result = self.runner.run(spec, pair=pair, worktree=self.docs_wt)
+        result = self.runner.run(spec, pair=pair, worktree=self.docs_wt, access="read", write_extra=[self.docs_wt])
         self.handle_result(kind, result)
 
     def _discard_or_error(self, head):
@@ -206,8 +207,7 @@ class Design:
         r = self.r
         if result[0] == "ask":
             if self._restore_tree(kind):
-                ask = next_free(r.run_dir / "asks", "design-{n}.md")
-                save_body(result[2], ask, header=f"design phase ({kind})")
+                ask = save_ask(r, "design", result[2], header=f"design phase ({kind})")
                 self.set_phase("consult", DESIGN_ASK_CONV=result[1], DESIGN_ASK_FILE=ask, WAITING_ON="director")
                 raise Done(CONSULT, f"CONSULT {ask}")
             # Read-only worker changed the docs worktree before asking; treat as failed attempt
@@ -218,21 +218,15 @@ class Design:
         r = self.r
         if self.phase() != "consult":
             raise Done(ERROR, f"ERROR NO_CONSULT_OPEN phase={self.phase()}")
-        p = Path(answer_path)
-        if not p.is_file():
-            raise Done(ERROR, f"ERROR MISSING_FILE {p}")
+        ans = read_answer(answer_path)
         kind, _ = self.need()
         pair = r.need("DESIGN_PAIR")
         conv = r.get("DESIGN_ASK_CONV", "")
-        ans = p.read_text(encoding="utf-8")
         r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None)
         self.set_phase("dispatching", WAITING_ON=None)
-        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, self.docs_wt, conv)
-        if result is None:
-            self._restore_tree(kind, allow_safety_out=False)
-            spec_text = Path(r.need("DESIGN_SPEC")).read_text(encoding="utf-8")
-            result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
-                                     pair=pair, worktree=self.docs_wt)
+        result = answer_worker(self.runner, ans, pair, self.docs_wt, conv, r.need("DESIGN_SPEC"),
+                               lambda: self._restore_tree(kind, allow_safety_out=False),
+                               access="read", write_extra=[self.docs_wt])
         self.handle_result(kind, result)
 
     def settle(self, kind, result):
@@ -302,13 +296,7 @@ def main():
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
-    try:
-        Design(a.state).advance(a.result, a.answer, a.docs_moved)
-        code, line = ERROR, "ERROR NO_STATUS"
-    except Done as d:
-        code, line = d.code, d.line
-    print(line)
-    return code
+    return drive(a.state, lambda events: Design(a.state).advance(a.result, a.answer, a.docs_moved))
 
 
 if __name__ == "__main__":

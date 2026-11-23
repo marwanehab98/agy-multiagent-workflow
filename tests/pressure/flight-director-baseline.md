@@ -1,5 +1,7 @@
 # Baseline (RED): architect scenarios against the post-Task-10 prose
 
+> **Historical record.** This file records a pressure-test round against an earlier architecture (`.run/`, coordinator / architect, EGM, Orca wake-ups, `references/coordinator.md`, `-design.md`). Names and mechanics here are not the current ones, and these results are not evidence for the current prose.
+
 Run 2026-11-15. Skill under test: `references/architect.md` as of commit `d47a018` (after Task 10), copied out of the worktree (`git archive HEAD`, without `tests/` and `docs/`) so neither the rewrite nor these scenarios could leak into the baseline. The catalog was a copy of `architect-catalog.json` outside the skill folder. One fresh general-purpose agent (sonnet) per scenario, prompt as in `architect-scenarios.md`, with the run values of the configurable-roles run (`ROLE_ARCHITECT`, `ROLE_BASE`, `BASE_TOP`, `CATALOG`), which the old prose doesn't know.
 
 | # | Scenario | Result | Why |

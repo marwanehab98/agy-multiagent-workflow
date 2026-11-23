@@ -1,6 +1,6 @@
 ---
 name: mission-brief
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, modifying behavior, or planning anything new, in software or out of it (a talk, a business, a renovation)."
+description: Use when the user asks to design, spec, or think through a feature or behavior change before building it. Clarifies intent, weighs approaches, and writes a design doc for their approval.
 ---
 
 # Mission Brief
@@ -29,7 +29,8 @@ Before you start implementing, you must, in order:
    human partner pick one (see Lay out the approaches).
 2. Write the design doc, short or full (see Size the Work).
 3. Get their approval of that doc.
-4. Invoke the flight-plan skill.
+4. Invoke the flight-plan skill (optionally after `flight-readiness`; see
+   the gate below).
 
 If nothing is open when you write your first message and there's one
 sensible way, steps 1 to 3 happen in that message (see Your First
@@ -271,9 +272,10 @@ and the gate goes with it. A spike they said yes to may be built; it
 stays labeled throwaway, and keeping what it produced is a new request
 that comes back through this gate.
 
-If you or the user want an independent multi-angle design audit first,
-optionally run `flight-readiness` on the approved design doc. Otherwise, the
-next step is the plan: invoke `flight-plan` and no other skill.
+After approval, the next step is the plan: invoke `flight-plan`. The one
+skill that may come first is `flight-readiness` on the approved design doc,
+if you or the user want an independent multi-angle audit. Invoke no other
+skill.
 </HARD-GATE>
 
 ## Red Flags

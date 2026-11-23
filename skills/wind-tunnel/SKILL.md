@@ -1,12 +1,11 @@
 ---
 name: wind-tunnel
 license: Apache-2.0
-disable-model-invocation: true
 description: >-
-  Interactive ideation and concept stress-testing skill using stateless
-  Range Safety Officer (RSO) lenses. Helps turn half-baked concepts into structured
-  hypotheses via clarifying questions, multi-lens review, and iterative refinement.
-  Produces an RFC summary (`concepts_brief.md`) for human review or downstream design/planning with `mission-brief` or `flight-plan`.
+  Use when the user explicitly asks to wind-tunnel, stress-test, or brainstorm
+  a half-baked idea before any design exists. Asks clarifying questions, runs
+  fresh-context Range Safety Officer (RSO) lenses, and writes an RFC brief
+  (`concepts_brief.md`) for `mission-brief` or `flight-plan`.
 ---
 
 # Wind Tunnel: Interactive Multi-Lens Ideation & Refinement
@@ -21,8 +20,22 @@ hypotheses by combining **interactive clarifying questions** with an automated
 
 ## Delegation
 
-An RSO reviewer runs in a fresh context with no conversation history. Spawn each
-subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
+An RSO reviewer runs in a fresh context with no conversation history. You, the primary session, dispatch every reviewer yourself, in parallel where the step allows, and wait for each report: a subagent cannot spawn subagents, so never ask one to launch reviewers. Where the plugin's agents are registered as subagent types, use `mission-control:<name>` (e.g. `mission-control:rso-design`) when it is available. Otherwise (Antigravity's `invoke_subagent` / `define_subagent`, or a general subagent), tell the subagent to read its persona file first. Either way, give it the absolute path of any assigned standard in `resources/document_standards/`, and pass the prompt verbatim.
+
+| Name (either form) | Persona file |
+| --- | --- |
+| `rso-zoom-out` / `zoom_out` | `agents/zoom_out.md` |
+| `rso-inventive-catalyst` / `inventive_catalyst` | `agents/inventive_catalyst.md` |
+| `rso-comprehension` / `comprehension` | `agents/comprehension.md` |
+| `rso-design` / `design_critic` | `agents/design_critic.md` |
+| `rso-structural` / `structural` | `agents/structural.md` |
+| `rso-style` / `style` | `agents/style.md` |
+| `rso-implementation-readiness` / `implementation_readiness` | `agents/implementation_readiness.md` |
+| `rso-codebase-details` / `codebase_details` | `agents/codebase_details.md` |
+| `rso-synthesizer` / `synthesizer` | `agents/synthesizer.md` |
+
+`rso-synthesizer` is not a reviewer. To keep raw reports out of your context, you may pass the reports you collected to it; it deduplicates them and writes the consolidated report, and never dispatches reviewers.
+
 If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated RSO context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not an isolated RSO review.
 
 ## Asset Resolution
@@ -77,11 +90,13 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 12. **Banned Apologies**: You MUST NOT output polite apologies (e.g., "I
     apologize," "I am sorry," "Forgive me") when challenged or corrected.
     Instead, outline the corrected technical logic or trade-offs directly.
-13. **Interaction Invariants**: All interactive gates (structured question tools
-    such as `ask_question` / `AskUserQuestion`, if your harness has one, or plain chat) MUST contain
-    strictly one question (`len(questions) == 1`), be the sole tool call in the
-    turn, and provide clear, action-oriented options without `(Recommended)`
-    prefixes.
+13. **Interaction Invariants**: Ask every gate with your harness's structured
+    question tool if it has one (e.g. `AskUserQuestion`: 2-4 options
+    as `{label, description}`, `multiSelect: false`; Antigravity:
+    `ask_question` with `options` and `is_multi_select: false`); otherwise ask
+    in plain text with numbered options. Each gate asks exactly one question,
+    is the sole tool call in the turn, and offers clear, action-oriented
+    options without `(Recommended)` prefixes.
 
 ## The Range Safety (RSO) Wind-Tunnel Lenses
 
@@ -122,28 +137,12 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 
 3.  **Readiness Checkpoint Gate (Single-Select)**: Once a clear foundation is
     established, summarize the anchored working hypothesis in 2-3 sentences.
-    Present an explicit single-select confirmation gate (using a structured
-    question tool such as `ask_question` / `AskUserQuestion` if your harness has one, or plain
-    chat):
-
-    ```json
-    {
-      "questions": [
-        {
-          "question": "Anchored feature hypothesis: [2-3 sentence summary]. How would you like to proceed?",
-          "options": [
-            "Run Wind-Tunnel RSO Review",
-            "Clarify additional constraints or assumptions in chat"
-          ],
-          "is_multi_select": false
-        }
-      ]
-    }
-    ```
+    Present an explicit single-select confirmation gate (see Interaction
+    Invariants). Question: `Anchored feature hypothesis: [2-3 sentence
+    summary]. How would you like to proceed?`
 
     *   **Option 0: `Run Wind-Tunnel RSO Review`**: The user confirms readiness.
-        Proceed immediately to Step 2 (RSO Review & Synthesis) to invoke
-        `rso-synthesizer`.
+        Proceed immediately to Step 2 (RSO Review & Synthesis).
     *   **Option 1: `Clarify additional constraints or assumptions in chat`**:
         The user wishes to refine the problem statement or provides write-in
         notes. Stay in Step 1, yield the turn in chat for details, incorporate
@@ -155,22 +154,16 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 
 ### Step 2: RSO Review & Synthesis
 
-1.  **Delegate to Synthesizer Subagent**: Spawn the intermediate
-    **`rso-synthesizer`** agent (or parallel RSO subagents across the 7
-    specialized lenses if your harness cannot nest subagents):
-    *   Subagent: `rso-synthesizer` (`agents/synthesizer.md`)
-    *   `Prompt`: >- Conduct multi-lens brainstorm for feature concept:
-        `[AnchoredFeatureHypothesis]`. Mode: `BRAINSTORM`. Reviewers:
-        `[rso-design, rso-codebase-details, rso-zoom-out, rso-comprehension,
-        rso-implementation-readiness, rso-structural, rso-inventive-catalyst]`.
-2.  **Synthesizer Execution**: The `rso-synthesizer` subagent launches the
-    parallel RSO reviewers across the specialized lenses (`rso-design`,
-    `rso-codebase-details`, `rso-zoom-out`, `rso-comprehension`,
-    `rso-implementation-readiness`, `rso-structural`,
-    `rso-inventive-catalyst`) with `Mode: BRAINSTORM`.
-3.  **Deduplication**: Collect the raw findings from the RSO reviewers,
-    deduplicate overlapping points, and format them into a cohesive analysis.
-4.  **Write/Update Artifact**: Format and write the synthesized brief to
+1.  **Dispatch the Lenses**: Dispatch these 7 reviewers yourself, in
+    parallel (see Delegation): `rso-design`, `rso-codebase-details`,
+    `rso-zoom-out`, `rso-comprehension`, `rso-implementation-readiness`,
+    `rso-structural`, `rso-inventive-catalyst`. Prompt each: `Mode:
+    BRAINSTORM. FeatureConcept: [AnchoredFeatureHypothesis]`. A lens that
+    fails or returns no report is retried once, then recorded as `not run`.
+2.  **Deduplication**: Collect the raw findings, deduplicate overlapping
+    points, and format them into a cohesive analysis. Optionally pass the
+    raw reports to `rso-synthesizer` (`Mode: BRAINSTORM`) to do this.
+3.  **Write/Update Artifact**: Format and write the synthesized brief to
     `concepts_brief.md` in the working directory (or your harness's artifact
     directory, if it has one) using your file-writing tool.
 
@@ -219,25 +212,8 @@ The `concepts_brief.md` artifact follows this structure:
 1.  **Artifact Alignment**: Ask the user to review the final `concepts_brief.md`
     artifact and confirm their alignment.
 2.  **Step 4 Handoff Gate Modal (Single-Select)**: Once approved, present the
-    standardized handoff choices (using a structured question tool such as
-    `ask_question` / `AskUserQuestion` if your harness has one, or plain chat):
-
-    ```json
-    {
-      "questions": [
-        {
-          "question": "Brainstorming complete. concepts_brief.md is finalized. Select next step:",
-          "options": [
-            "Publish concepts_brief.md as RFC for team feedback",
-            "Proceed to flight-plan / mission-brief (Create formal design or implementation plan)",
-            "Continue refining concepts_brief.md in ideation mode",
-            "Conclude wind-tunnel and keep brief for later"
-          ],
-          "is_multi_select": false
-        }
-      ]
-    }
-    ```
+    standardized handoff choices (see Interaction Invariants). Question:
+    `Brainstorming complete. concepts_brief.md is finalized. Select next step:`
 
     *   **Option 0: `Publish concepts_brief.md as RFC for team feedback`**:
         *   Write `concepts_brief.md` to `docs/designs/<feature_name>.md` using

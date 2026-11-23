@@ -8,12 +8,14 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
 - **The state file holds every value** (Rule 18). `STATE` below means `python3 -I <SKILL_DIR>/scripts/state.py --file <RUN_DIR>/state.json`.
   - Record a value the moment you learn it: `STATE set KEY=value`. Read it when a command needs it: `STATE get KEY`. Counters: `STATE incr KEY` prints the new count; a missing counter is 0.
   - **Before every turn you end while waiting on the user,** set `STEP` (where to pick up, e.g. `2 design` or `3 setup`) and `WAITING_ON=user`.
-- **Script shorthands:** `DESIGN`, `TASKLOOP`, `FINISH` and `PROBE` mean `python3 -I <SKILL_DIR>/scripts/<run_design|run_task|run_finish|probe>.py --state <RUN_DIR>/state.json advance`. They run headless CLI workers synchronously and print any events (`MERGED ...`) followed by their status as the last line. An `ERROR <what>` line (exit 2) from any of them: show the user the line exactly and stop.
+- **Script shorthands:** `DESIGN`, `TASKLOOP`, `FINISH` and `PROBE` mean `python3 -I <SKILL_DIR>/scripts/<run_design|run_task|run_finish|probe>.py --state <RUN_DIR>/state.json advance`. They run headless CLI workers synchronously and print any events (`MERGED ...`) followed by their status as the last line. An `ERROR <what>` line (exit 2) from any of them: show the user the line exactly and stop. `ERROR RUN_BUSY` means one of them is already running on this run: wait for that call to finish (or ask the user whether it is still running), never start a second.
+- **Long calls run in the background.** `DESIGN`, `TASKLOOP`, `FINISH`, `PROBE` and `DIRECTOR` can each run for far longer than a shell tool allows in the foreground (one worker may take 30 minutes; `TASKLOOP` runs several in a row). If your shell tool can run a command in the background and notify you when it exits (for example a `run_in_background` option), always use it for these calls, and wait for the exit notification instead of polling. If it cannot, run them in the foreground with the longest timeout your tool allows. If a call is cut off (no status line, or a timeout), run the same command again: the scripts resume where they stopped and stop any worker the cut-off call left running.
+- **Progress.** Every script appends what happens to `<RUN_DIR>/progress.log`: `[progress]` milestones (task started, gate result, reviewer verdict, merge, escalation) and one line per worker action (tool calls, what it says, failed tool calls, to-do updates, and at the end its cost and turns when the harness reports them). Full per-worker logs are in `<RUN_DIR>/logs/`. While a call runs in the background, and if your harness can watch a file and wake you on new lines, watch `<RUN_DIR>/progress.log` and print each new `[progress]` line as it arrives, exactly. Otherwise print the call's `[progress]` lines when it ends. Before the first `TASKLOOP` of a run, say exactly once: "Live progress: `<RUN_DIR>/progress.log` (worker logs in `<RUN_DIR>/logs/`)."
 - **You never write spec text.** Build every spec with `python3 -I <SKILL_DIR>/scripts/build_spec.py --template <SKILL_DIR>/references/templates/<name>.txt --out <RUN_DIR>/specs/<name-for-it>.txt --set NAME=value ... --file NAME=path ...`. If it prints `UNFILLED`, `MISSING_FILE` or `UNUSED`, fix your command, not the template. You fill only `director-start.txt` (`FIRST_JOB`, `INPUT`, and every run value it names) and `director-job.txt` (`SKILL_DIR`, `JOB`, `INPUT`); the scripts fill every other template.
 - **You never retype a worker's message.** `run_director.py` saves every Flight Director response verbatim to `<RUN_DIR>/results/director-{n}.md`. The loop scripts save their own workers' outputs and asks. Only the user's own replies are written by hand.
 - **File numbers:** `{n}` in a path you pass to `gate.py` is filled in by the script with the next free number; use the path its output names (`log=<path>`). Elsewhere, `<n>` or `<NNN>` in a file name is the next free number in that folder. The exception is `<NNN>-from-user.md`, which takes the number of the `<NNN>-to-user.md` it answers. All paths you pass to scripts are absolute.
 - **Fixed prompts:** some steps stop with a fixed prompt and list the replies they accept. While one is open, a user message that isn't one of those replies and doesn't start with `capcom:` gets the same prompt again, followed by "Reply with exactly one of: <the accepted replies>." Don't send it to the Flight Director.
-- **What you print.** Keep output concise: emit brief one-line status updates when starting or finishing long script calls (e.g. `Running plan review...`, `Merged task <id> at <head>.`, `Running final verification...`), and otherwise print only relays (Rule 5; one ending in a choice block is a dialog, never printed text) and the exact output or fixed lines a step specifies. Never summarize, reword, or comment on a relay.
+- **What you print** (Rule 14): relays (Rule 5; one ending in a choice block is a dialog, never printed text), the fixed lines the steps give, `[progress]` lines exactly as the scripts print them, and these status lines: `Running <DESIGN|TASKLOOP|FINISH|PROBE>...` when a call starts and `Merged task <id> at <head>.` for each `MERGED` event. Nothing else; never summarize, reword, or comment on a relay or a progress line.
 - **Keep a mission log:** append one line per event to `<RUN_DIR>/mission-log.md`, `<time> <event>` for what you do yourself: the Flight Directors you start, merges you see, the PR URL. The scripts log their own workers.
 - **Running the Flight Director** (`run_director.py`, Rule 15). `DIRECTOR` below means `python3 -I <SKILL_DIR>/scripts/run_director.py`. Set `LAST_JOB=<JOB>` and `LAST_JOB_INPUT=<input>` before running it, and record the event in `mission-log.md`.
   - **Design phase** (`PHASE=design`): build `director-job.txt` and run `DIRECTOR send --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_DIRECTOR>`. (The first job uses `DIRECTOR start --keep-open`.)
@@ -26,7 +28,7 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
     | `11` (`RELAY <relay_path> <saved>`) | `STATE set OPEN_RELAY=<relay_path> WAITING_ON=user`, `STATE unset OPEN_USAGE_PROMPT LAST_DIRECTOR_OP LAST_DIRECTOR_ARG`, relay `<relay_path>` verbatim (Rule 5), and end your turn. When the user replies, write their answer verbatim to `<RELAY_DIR>/<NNN>-from-user.md`, `STATE unset OPEN_RELAY LAST_DIRECTOR_RESULT`, `STATE set WAITING_ON=director`, and run `DIRECTOR reply --state <RUN_DIR>/state.json --file <from-user> --pair <the job's pair>`, then handle its exit code using this table. |
     | `12` (`NOTIFY <notify_path> <saved>`) | `STATE unset LAST_DIRECTOR_RESULT`, show `<notify_path>` to the user verbatim (Rule 5), then immediately run `DIRECTOR notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` and handle its exit code using this table. |
     | `13` (`LOST <detail>`) | In `PHASE=design`, follow "Flight Director lost". After plan approval, follow "A fresh Flight Director fails". |
-    | `31` (`USAGE_LIMIT <detail>`) | `STATE set OPEN_USAGE_PROMPT=yes WAITING_ON=user LAST_DIRECTOR_OP=<start|send|reply|notify-ack> LAST_DIRECTOR_ARG=<spec, file, or empty>`, then say exactly "The Flight Director hit its model's usage limit: <detail>\nReply \"retry\" once the limit has reset, or \"stop\" to stop the run." This is a fixed prompt. "retry" unsets `OPEN_USAGE_PROMPT` and retries the same `DIRECTOR` command; "stop" goes to Step 8 item 7. |
+    | `31` (`USAGE_LIMIT <detail>`) | `STATE set OPEN_USAGE_PROMPT=yes WAITING_ON=user LAST_DIRECTOR_OP=<start|send|reply|notify-ack> LAST_DIRECTOR_ARG=<spec, file, or empty>`, then say exactly "The Flight Director hit its model's usage limit: <detail>\nReply \"retry\" once the limit has reset, or \"stop\" to stop the run." This is a fixed prompt. "retry" unsets `OPEN_USAGE_PROMPT` and retries the same `DIRECTOR` command; "stop" goes to Step 5 item 7. |
     | `1` (`FAILED <saved>`) | Follow "Flight Director lost" (design phase) or "A fresh Flight Director fails" (after plan approval). |
     | `2` (`ERROR <what>`) | Show the user the line exactly and stop. |
 
@@ -35,7 +37,7 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
   | Job | Pair |
   | --- | --- |
   | `consult`, `escalate`, `final-review`, `verification-failed`, `drift-done`, `baseline-failed`, `user-message` | `ROLE_DIRECTOR` |
-  | `fix-meta`, `pr`, `jira-close`, `report` | `GROUND_CREW_PAIR` once Step 3 item 8 has printed `PROBED`; `ROLE_DIRECTOR` before that |
+  | `fix-meta`, `pr`, `jira-close`, `report` | `GROUND_CREW_PAIR` once Step 3 item 7 has printed `PROBED`; `ROLE_DIRECTOR` before that |
 
 - **Workers by role.** You run only the Flight Director through `run_director.py`; the loop scripts run every other worker synchronously on its pair:
 
@@ -60,9 +62,10 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
    Keep them for item 6, where the state file is created.
 2. **Find the checkout(s) and base branch(es):** run `python3 -I <SKILL_DIR>/scripts/workspace.py detect --dir "$(pwd)"`.
    - **Exit 1 (`MODE none`):** say exactly "No git repository found in this directory or its subdirectories. Run Mission Control from a repo or a parent directory containing your repos." and stop.
-   - **`MODE single`:** set `REPOS=none`, `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, and `CURRENT_BRANCH` from its output. Choose `BASE_BRANCH`:
+   - **`MODE single`:** set `REPOS=none`, `MAIN_CHECKOUT`, `DEFAULT_BRANCH`, and `CURRENT_BRANCH` from its output (`-` means unknown: no `origin/HEAD` and no local `main`/`master`/`trunk`, or a detached HEAD). Choose `BASE_BRANCH`:
      - **If the user's request explicitly names a base branch to start from:** verify `refs/heads/<branch>` exists (`git -C <MAIN_CHECKOUT> show-ref --verify --quiet refs/heads/<branch>`). If it does, set `BASE_BRANCH=<branch>`. Otherwise say exactly "Local branch `<branch>` does not exist. Check the branch name (or fetch/create it), then tell me which branch to start from." and wait.
-     - **Otherwise, if `CURRENT_BRANCH` is non-empty and differs from `DEFAULT_BRANCH`:** ask the user (using the multiple-choice question tool per "Asking" in `SKILL.md`, or a numbered list without one): "You're currently on `<CURRENT_BRANCH>` (repo default is `<DEFAULT_BRANCH>`). Which branch should this run start from?" with the two options `<CURRENT_BRANCH>` and `<DEFAULT_BRANCH>`. This is a fixed prompt. Set `BASE_BRANCH` to the chosen branch.
+     - **Otherwise, if `DEFAULT_BRANCH` is `-`:** ask "Which branch should this run start from?" with `CURRENT_BRANCH` as the one option (unless it is `-`) and wait for a branch name; verify it as above.
+     - **Otherwise, if `CURRENT_BRANCH` is not `-` and differs from `DEFAULT_BRANCH`:** ask the user (using the multiple-choice question tool per "Asking" in `SKILL.md`, or a numbered list without one): "You're currently on `<CURRENT_BRANCH>` (repo default is `<DEFAULT_BRANCH>`). Which branch should this run start from?" with the two options `<CURRENT_BRANCH>` and `<DEFAULT_BRANCH>`. This is a fixed prompt. Set `BASE_BRANCH` to the chosen branch.
      - **Otherwise:** `BASE_BRANCH` is `DEFAULT_BRANCH`.
    - **`MODE multi`:** record `WORKSPACE_DIR`. Each `REPO <name> <key> <path> <default_branch> <current_branch>` line lists a discovered repo (with `<name>` as its relative path from `WORKSPACE_DIR`).
      - If more than one repo was found and the user didn't already name the exact subset in their request, ask which repos are in scope (with an option for all detected repos, or multi-select when `ask_question` is available). Record the chosen repo names (space-separated) as `REPOS`, and for each chosen repo `<r>` (key `<k>`), record `REPO_PATH_<k>`, `DEFAULT_BRANCH_<k>`.
@@ -74,18 +77,10 @@ Part of mission-control. The Rules in `<SKILL_DIR>/skills/mission/SKILL.md` (or 
    - **Single-repo (`REPOS=none`):** run `bash <SKILL_DIR>/scripts/start-point.sh <MAIN_CHECKOUT> <BASE_BRANCH>`. It prints `START <sha> <how>`, which gives `START_SHA` and `START_HOW`. On exit 3, say exactly "Local `<BASE_BRANCH>` and `origin/<BASE_BRANCH>` have diverged. Reconcile them, then tell me \"retry\"." This is a fixed prompt; "retry" repeats this item.
    - **Multi-repo:** run `bash <SKILL_DIR>/scripts/start-point.sh <REPO_PATH_<k>> <BASE_BRANCH_<k>>` for each repo `<r>` (key `<k>`) in `REPOS`, recording `START_SHA_<k>` and `START_HOW_<k>`, plus summary values `START_SHA` (`<r>=<sha> ...`) and `START_HOW` (`<r>=<how> ...`). On exit 3 for any repo `<r>`, say exactly "In `<r>`, local `<BASE_BRANCH_<k>>` and `origin/<BASE_BRANCH_<k>>` have diverged. Reconcile them, then tell me \"retry\"." This is a fixed prompt; "retry" repeats this item.
 4. **Check for an earlier run of this topic:**
-   - **Single-repo (`REPOS=none`):** run `git -C <MAIN_CHECKOUT> worktree list --porcelain`, and look for a worktree on `refs/heads/<TOPIC>-docs`.
-     - **If one exists and its `.mission/state.json` exists,** say exactly "There's already a run for <TOPIC> at <its path>. Reply \"resume\" to continue it, or \"new\" to start a separate run." This is a fixed prompt. "new" goes to the next bullet. "resume" hands off to "Resume a run" with that state file. Create nothing first.
-     - **If `<TOPIC>-docs` or `<TOPIC>-impl` exists as a branch** (`git -C <MAIN_CHECKOUT> show-ref --verify refs/heads/<name>`), or the user said "new," change `TOPIC` to `<TOPIC>-<k>`, the smallest `<k>` from 2 up for which neither branch exists.
-   - **Multi-repo:** run `python3 -I <SKILL_DIR>/scripts/workspace.py check-topic --workspace <WORKSPACE_DIR> --topic <TOPIC> --repo <r>=<REPO_PATH_<k>> ...` (one `--repo` per repo in `REPOS`).
+   - Run `python3 -I <SKILL_DIR>/scripts/workspace.py check-topic --topic <TOPIC>` with `--main-checkout <MAIN_CHECKOUT>` (single-repo) or `--workspace <WORKSPACE_DIR> --repo <r>=<REPO_PATH_<k>> ...` (multi-repo, one `--repo` per repo in `REPOS`). Create nothing before it answers.
      - **Exit 10 (`EXISTING <path>`):** say exactly "There's already a run for <TOPIC> at <path>. Reply \"resume\" to continue it, or \"new\" to start a separate run." This is a fixed prompt. "resume" hands off to "Resume a run" with `<path>/.mission/state.json`; "new" re-runs `check-topic` with `--force-new` and updates `TOPIC` from its `TOPIC <new>` output.
      - **Exit 0 (`TOPIC <chosen>`):** update `TOPIC` to `<chosen>`.
-5. **Create the docs worktree:**
-   - **Single-repo (`REPOS=none`):**
-     1. Run `bash <SKILL_DIR>/scripts/worktree.sh create <MAIN_CHECKOUT> <TOPIC>-docs <TOPIC>-docs <START_SHA>`. Record its printed path as `DOCS_WORKTREE`. Then `DOCS_DIR` is `<DOCS_WORKTREE>/docs/plans`, `RUN_DIR` is `<DOCS_WORKTREE>/.mission`, and `RELAY_DIR` is `<RUN_DIR>/relay`.
-     2. `bash <SKILL_DIR>/scripts/check-tree.sh <DOCS_WORKTREE> <START_SHA>` must exit 0. On exit 1, run `bash <SKILL_DIR>/scripts/discard-changes.sh <DOCS_WORKTREE> <START_SHA>`; the branch is new, so nothing is lost.
-     3. Append `.mission/` to `$(git -C <MAIN_CHECKOUT> rev-parse --path-format=absolute --git-common-dir)/info/exclude`, plus `.worktrees/`, and these build-output and cache patterns, each on its own line, so running tests never leaves files a worker could commit: `__pycache__/`, `*.py[cod]`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `node_modules/`, `.DS_Store`. Skip any line the file already has. Run `mkdir -p <DOCS_DIR> <RELAY_DIR> <RUN_DIR>/specs <RUN_DIR>/verdicts <RUN_DIR>/asks <RUN_DIR>/gates <RUN_DIR>/results`.
-   - **Multi-repo:** run `python3 -I <SKILL_DIR>/scripts/workspace.py init-docs --workspace <WORKSPACE_DIR> --topic <TOPIC> --repo <r>=<REPO_PATH_<k>>@<START_SHA_<k>> ...` (one `--repo` per repo in `REPOS`). Record its printed `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, and each `DOCS_WT_<k>` value.
+5. **Create the docs worktree:** run `python3 -I <SKILL_DIR>/scripts/workspace.py init-docs --topic <TOPIC>` with `--main-checkout <MAIN_CHECKOUT> --start-sha <START_SHA>` (single-repo) or `--workspace <WORKSPACE_DIR> --repo <r>=<REPO_PATH_<k>>@<START_SHA_<k>> ...` (multi-repo, one `--repo` per repo in `REPOS`). Record its printed `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, and (multi-repo) each `DOCS_WT_<k>`. On a non-zero exit, show the user its output and stop. It creates the worktree outside the checkout (under `~/.local/state/mission-control/worktrees/`) on branch `mission/<TOPIC>-docs`, and adds `.mission/` and common build-output folders to the repo's git excludes.
 6. **Create the state file:** `STATE set` every value from items 1–5, plus `PHASE=design`.
 7. **Copy the picks:** run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <RUN_DIR>/catalog.json`; then `roles.py check --catalog <RUN_DIR>/catalog.json --jira <yes|no> --director <pair> --safety <pair> --crew <pair>`; then `python3 -I <SKILL_DIR>/scripts/roles.py to-state --roles <ROLES_FILE> --state <RUN_DIR>/state.json --catalog <RUN_DIR>/catalog.json`, which sets `ROLE_DIRECTOR`, `ROLE_SAFETY`, `ROLE_CREW`, `CREW_TOP` and `CATALOG`. If any of the three exits other than 0, show the user its output exactly and stop (Rule 21).
 8. **Test-launch the picks:** run `PROBE --set step1` and branch on its last line:
@@ -120,25 +115,20 @@ Entered on `RESULT: PLAN_APPROVED <flight-manifest>` from Step 2 (or from `launc
 
 1. **Close the design Flight Director conversation:** `STATE unset DIRECTOR_CONVERSATION_ID DIRECTOR_KEEP_OPEN` and `STATE set PHASE=execution STEP="3 setup"`. From now on every Flight Director job starts a fresh worker run.
 2. **Read `<flight-manifest>`** and `STATE set` each of `FEATURE_BRANCH` (if present), `CONVENTION_PATHS` (if present), `PR_TARGET` (if present), `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS` and `GROUND_CREW_PAIR`, plus `FLIGHT_MANIFEST=<flight-manifest path>`, `BASELINE_SKIP` (empty when the file has none) and `DRIFT_CHECK` (`no` when the file has none). The `VERIFY_*` and `GATE_*` commands stay in that file; `gate.py` reads them from there.
-3. **Create the feature branch(es) and implementation worktree(s):**
-   - **Single-repo (`REPOS=none`):**
-     - Run `git -C <MAIN_CHECKOUT> branch <FEATURE_BRANCH> <START_SHA>` without checking it out. If that fails, show the user its output and stop. `STATE set INITIAL_BASE_SHA=<START_SHA> LAST_MERGED=<START_SHA>`.
-     - Run `bash <SKILL_DIR>/scripts/worktree.sh create <MAIN_CHECKOUT> <TOPIC>-impl <TOPIC>-impl <FEATURE_BRANCH>` and record its path as `IMPL_WORKTREE`. `bash <SKILL_DIR>/scripts/check-tree.sh <IMPL_WORKTREE> <INITIAL_BASE_SHA>` must exit 0; otherwise show its output to the user and stop.
-   - **Multi-repo:** run `python3 -I <SKILL_DIR>/scripts/workspace.py init-impl --state <RUN_DIR>/state.json`. It creates each repo's feature branch and `<WORKSPACE_DIR>/.mission-control/<TOPIC>-impl/<r>` worktree, checks every tree, and sets `IMPL_WORKTREE`, `IMPL_WT_<k>`, `FEATURE_BRANCH_<k>`, `PR_TARGET_<k>`, `INITIAL_BASE_SHA_<k>`, `LAST_MERGED_<k>`, and any per-repo `CONVENTION_PATHS_<k>` / `BASELINE_SKIP_<k>`. If it exits non-zero, show the user its output and stop.
-4. *(Reserved; combined with item 3 above.)*
-5. **Check the base passes the checks:**
+3. **Create the feature branch(es) and implementation worktree(s):** run `python3 -I <SKILL_DIR>/scripts/workspace.py init-impl --state <RUN_DIR>/state.json`. It creates the feature branch at the start commit without checking it out, and the implementation worktree on `mission/<TOPIC>-impl` next to the docs worktree, checks the tree, and sets `IMPL_WORKTREE`, `INITIAL_BASE_SHA` and `LAST_MERGED` (multi-repo: per repo, `IMPL_WT_<k>`, `FEATURE_BRANCH_<k>`, `PR_TARGET_<k>`, `INITIAL_BASE_SHA_<k>`, `LAST_MERGED_<k>`, and any `CONVENTION_PATHS_<k>` / `BASELINE_SKIP_<k>`). It is safe to run again: a failed call removes what it created, and a repeat reuses what an earlier call made. If it exits non-zero, show the user its output and stop.
+4. **Check the base passes the checks:**
    - **Single-repo (`REPOS=none`):** run `python3 -I <SKILL_DIR>/scripts/gate.py --flight-manifest <FLIGHT_MANIFEST> --worktree <IMPL_WORKTREE> --head <INITIAL_BASE_SHA> --log "<RUN_DIR>/gates/baseline-{n}.log" --prefix VERIFY --skip "<BASELINE_SKIP>"`. If the file has `GATE_` lines (`grep -q '^GATE_' <FLIGHT_MANIFEST>`), run it again without `--prefix`, keeping `--skip`.
    - **Multi-repo:** for each repo `<r>` (key `<k>`) in `REPOS` that has `VERIFY_<k>_` lines in `<FLIGHT_MANIFEST>`, run `gate.py --flight-manifest <FLIGHT_MANIFEST> --worktree <IMPL_WT_<k>> --head <INITIAL_BASE_SHA_<k>> --log "<RUN_DIR>/gates/baseline-<k>-{n}.log" --prefix VERIFY --repo <k> --skip "<BASELINE_SKIP_<k>>"` (and again without `--prefix` if `<FLIGHT_MANIFEST>` has `GATE_<k>_` lines).
    - **All exit 0:** `STATE set BASELINE_OK=yes` and go on. **Exit 2 or 64:** show the user its output and stop.
-   - **Any exits 1:** `STATE incr BASELINE_FAILS`. At 3, show the user the last log's path and stop. Otherwise send job `baseline-failed` with `INPUT=<that log>`. `RESULT: FLIGHT_MANIFEST_FIXED` repeats this item; `RESULT: STOP` goes to Step 8 item 7.
-6. **Write the queue:** put the `TASKS` ids, space-separated, in `<RUN_DIR>/queue.txt`. It is the only list of tasks you follow; `REPLAN` and `FINAL_FIX` change it.
-7. **Validate the plan:** run `python3 -I <SKILL_DIR>/scripts/validate_meta.py tasks --state <RUN_DIR>/state.json --tasks-dir <DOCS_DIR>/tasks --ids "<the queue>" --design <DESIGN_FILE> > <RUN_DIR>/validate-<n>.txt`, then `python3 -I <SKILL_DIR>/scripts/validate_meta.py harness-pair --state <RUN_DIR>/state.json --pair <GROUND_CREW_PAIR> >> <the same file>`.
+   - **Any exits 1:** `STATE incr BASELINE_FAILS`. At 3, show the user the last log's path and stop. Otherwise send job `baseline-failed` with `INPUT=<that log>`. `RESULT: FLIGHT_MANIFEST_FIXED` repeats this item; `RESULT: STOP` goes to Step 5 item 7.
+5. **Write the queue:** put the `TASKS` ids, space-separated, in `<RUN_DIR>/queue.txt`. It is the only list of tasks you follow; `REPLAN` and `FINAL_FIX` change it.
+6. **Validate the plan:** run `python3 -I <SKILL_DIR>/scripts/validate_meta.py tasks --state <RUN_DIR>/state.json --tasks-dir <DOCS_DIR>/tasks --ids "<the queue>" --design <DESIGN_FILE> > <RUN_DIR>/validate-<n>.txt`, then `python3 -I <SKILL_DIR>/scripts/validate_meta.py harness-pair --state <RUN_DIR>/state.json --pair <GROUND_CREW_PAIR> >> <the same file>`.
    - **Both exit 0:** `STATE set META_FAILS=0` and go on.
    - **Otherwise:** `STATE incr META_FAILS`. At 3, show the user the last output and stop. Otherwise send job `fix-meta` with `INPUT=<that file>`. On `RESULT: META_FIXED`, read `GROUND_CREW_PAIR` from `<FLIGHT_MANIFEST>` again, `STATE set` it, and repeat this item.
-8. **Test-launch the plan's pairs:** run `PROBE --set step3`.
-   - **`PROBED` (0):** `STATE set STEP3_PROBED=yes` and go on to item 9.
-   - **`FIX_META <file>` (21):** a reviewer pair or `GROUND_CREW_PAIR` the Flight Director chose failed its test launch. Handle it as a failed validation in item 7: `STATE set STEP="3 setup"`, `STATE incr META_FAILS` (at 3, show the user the file and stop), send job `fix-meta` with `INPUT=<file>`, and on `RESULT: META_FIXED` re-read `GROUND_CREW_PAIR`, then repeat item 7 and this item.
-9. **Tell the user:** "Plan approved: <number of tasks> tasks. Implementation is starting." Then go to Step 4.
+7. **Test-launch the plan's pairs:** run `PROBE --set step3`.
+   - **`PROBED` (0):** `STATE set STEP3_PROBED=yes` and go on to item 8.
+   - **`FIX_META <file>` (21):** a reviewer pair or `GROUND_CREW_PAIR` the Flight Director chose failed its test launch. Handle it as a failed validation in item 6: `STATE set STEP="3 setup"`, `STATE incr META_FAILS` (at 3, show the user the file and stop), send job `fix-meta` with `INPUT=<file>`, and on `RESULT: META_FIXED` re-read `GROUND_CREW_PAIR`, then repeat item 6 and this item.
+8. **Tell the user:** "Plan approved: <number of tasks> tasks. Implementation is starting." Then go to Step 4.
 
 ## Step 4: Run the task loop
 
@@ -148,18 +138,18 @@ Entered on `RESULT: PLAN_APPROVED <flight-manifest>` from Step 2 (or from `launc
 
    | Last line (exit) | Do |
    | --- | --- |
-   | `QUEUE_EMPTY` (0) | If `PHASE` is `execution`, go to Step 8. If it is `finish`, run `FINISH` and branch as in Step 8 items 1–3. |
+   | `QUEUE_EMPTY` (0) | If `PHASE` is `execution`, go to Step 5. If it is `finish`, run `FINISH` and branch as in Step 5 items 1–3. |
    | `ESCALATE <input>` (20) | Send job `escalate` with `INPUT=<input>` (everything after `ESCALATE `). When the Flight Director returns `RESULT`, run `TASKLOOP --director-result <saved>` and branch again. |
    | `FIX_META <file>` (21) | Send job `fix-meta` with `INPUT=<file>`. When the Flight Director returns `RESULT`, run `TASKLOOP --director-result <saved>` and branch again. |
    | `CONSULT <ask_file>` (22) | Send job `consult` with `INPUT=<ask_file>`. When the Flight Director returns `RESULT: ANSWER <answer_file>`, run `TASKLOOP --answer <answer_file>` and branch again. |
    | `PROMPT <file> <reply>...` (30) | A fixed prompt. Show the user `<file>`'s contents exactly, and end your turn (`STATE set WAITING_ON=user`). A reply that is one of the listed words: run `TASKLOOP --reply <word>` and branch again. Any other reply that doesn't start with `capcom:`: show the file again, followed by "Reply with exactly one of: <the words>." |
-   | `STOP <reason>` (40) | Dispatch nothing more and go to Step 8 item 7. |
+   | `STOP <reason>` (40) | Dispatch nothing more and go to Step 5 item 7. |
 
 You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in this step; the script does all of it.
 
-## Step 8: Finish
+## Step 5: Finish
 
-**Items 1–3: final review and verification.** Run `FINISH` and branch on its last line. At each of items 4–7, first `STATE set STEP="8 <item number>"`.
+**Items 1–3: final review and verification.** Run `FINISH` and branch on its last line. At each of items 4–7, first `STATE set STEP="5 <item number>"`.
 
 | Last line (exit) | Do |
 | --- | --- |
@@ -171,30 +161,30 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 | `STOP <reason>` (40) | Dispatch nothing more and go to item 7. |
 
 4. **Open the PR (or finish locally):**
+   - **First, check the target moved** (once per run; skip when `BASE_DRIFT_OK` is `yes`): run `bash <SKILL_DIR>/scripts/base-drift.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` (multi-repo: for each touched repo, with `<REPO_PATH_<k>> <PR_TARGET_<k>> <FEATURE_BRANCH_<k>>`).
+     - **Exit 0 (`BASE_CURRENT`) everywhere:** `STATE set BASE_DRIFT_OK=yes` and go on.
+     - **Exit 1 (`BASE_AHEAD ...`) anywhere:** show its output exactly, then say exactly "`<PR_TARGET>` moved while this run worked. Reply \"continue\" to land the branch as it is (a PR will show any conflicts), or \"keep\" to keep the branch without landing it." This is a fixed prompt. "continue": `STATE set BASE_DRIFT_OK=yes` and go on. "keep": skip to item 6.
+     - **Exit 64:** show its output and go on.
    - **Single-repo (`REPOS=none`):**
      1. **When `START_HOW` is `no-remote` and `REQUIREMENTS_SOURCE` is `written`:** skip `job=pr` (there is no remote to push to). Invoke `touchdown` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, telling it `START_HOW=no-remote` (omit the Push/PR option and offer only local merge or keep as-is), that the branch is not checked out anywhere, that it has already been verified (`<the passing verify log>`), and to skip its own worktree cleanup. Carry out the user's choice, using `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` for a local merge (never through that skill or a hand-typed git command; on exit 2 or 3 show its output and offer the options again).
      2. **Otherwise:** send job `pr` with `INPUT=<the passing verify log>`. On `RESULT: PR_READY <title> <body>`, invoke `touchdown` for `<FEATURE_BRANCH>` with target `<PR_TARGET>`, title `$(cat <title>)`, and body file `<body>`. Tell it the branch is not checked out anywhere (it pushes with `git -C <MAIN_CHECKOUT> push -u origin <FEATURE_BRANCH>`), that it has already been verified (the log above), and to skip its own worktree cleanup. For `jira`, tell it to push and create the PR immediately, without presenting options; for `written`, let it offer its usual options and carry out the user's choice, with one change: a local merge never goes through that skill or a hand-typed git command. Run `bash <SKILL_DIR>/scripts/merge-local.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` and show its output exactly. On exit 2 or 3 nothing changed: show its output, then offer the options again.
      3. Log the PR URL (if a PR was created).
    - **Multi-repo:** determine the touched repos (each `<r>` in `REPOS` where `LAST_MERGED_<k> != INITIAL_BASE_SHA_<k>`). Send job `pr` with `INPUT=<the passing verify log>` unless every touched repo has `START_HOW_<k>=no-remote` and `REQUIREMENTS_SOURCE=written` (for multi-repo, `job=pr` writes per-repo title/body files and lists `<repo> <title> <body>` in a manifest, or returns `PR_READY <manifest>`). Then for each touched repo `<r>` (key `<k>`), run the same `touchdown` flow against `<REPO_PATH_<k>>` for `<FEATURE_BRANCH_<k>>` targeting `<PR_TARGET_<k>>` (using `bash <SKILL_DIR>/scripts/merge-local.sh <REPO_PATH_<k>> <PR_TARGET_<k>> <FEATURE_BRANCH_<k>>` for local merges), and log each PR URL.
 5. **Update JIRA** (`jira` with a PR only): send job `jira-close` with `INPUT=<PR URL(s)>`, and log the `RESULT: JIRA_DONE` line.
-6. **Clean up:** once PR(s) are open or the branch(es) are merged:
-   - **Single-repo (`REPOS=none`):** run `bash <SKILL_DIR>/scripts/worktree.sh remove <MAIN_CHECKOUT> <IMPL_WORKTREE> --delete-branch --merged-into <FEATURE_BRANCH>`, never with `--force`. If it fails, show the user the output.
-   - **Multi-repo:** run `python3 -I <SKILL_DIR>/scripts/workspace.py remove-impl --state <RUN_DIR>/state.json`. If it fails, show the user the output.
-   If the user chose keep or discard, leave the worktree(s) in place.
+6. **Clean up:** run `python3 -I <SKILL_DIR>/scripts/workspace.py remove-impl --state <RUN_DIR>/state.json`, whatever the user chose: every task is merged into the feature branch, so it removes only the implementation worktree(s) and the `mission/<TOPIC>-impl` branch, never the feature branch. If it fails, show the user the output.
 7. **Report:** send job `report` with `INPUT=<RUN_DIR>/mission-log.md`. On `RESULT: REPORT <path>`, relay `<path>` to the user as in Rule 5, then add exactly:
-   - **Single-repo:** "Run documents: `<DOCS_DIR>`. Remove the docs worktree with `bash <SKILL_DIR>/scripts/worktree.sh remove <MAIN_CHECKOUT> <DOCS_WORKTREE>` when you're done with them."
-   - **Multi-repo:** "Run documents: `<DOCS_DIR>`. Remove the docs workspace with `python3 -I <SKILL_DIR>/scripts/workspace.py remove-docs --state <RUN_DIR>/state.json` when you're done with them."
+   "Run documents: `<DOCS_DIR>`. When you're done with them, remove them and their `mission/<TOPIC>-docs` branch with `python3 -I <SKILL_DIR>/scripts/workspace.py remove-docs --state <RUN_DIR>/state.json` (it prints the branch's last commit, so you can restore it)."
    Then `STATE set PHASE=done WAITING_ON=`.
 
 ## Messages (any step)
 
 - **A user message:**
-  - **Starting with `capcom:`:** it is for you. "status" means show the last 10 mission-log lines. "use the fallback" means "Flight Director lost" below. "stop" goes to Step 8 item 7. Anything else, including a request to change a pick, a model or a `.meta`: say exactly "I only understand: status, use the fallback, stop." and change nothing.
+  - **Starting with `capcom:`:** it is for you. "status" means show the last 10 mission-log lines. "use the fallback" means "Flight Director lost" below. "stop" goes to Step 5 item 7. Anything else, including a request to change a pick, a model or a `.meta`: say exactly "I only understand: status, use the fallback, stop." and change nothing.
   - **Otherwise, with a relay open (`OPEN_RELAY` is set):** it is the answer. Write it, exactly as typed, to `<RELAY_DIR>/<NNN>-from-user.md`, `STATE unset OPEN_RELAY LAST_DIRECTOR_RESULT`, `STATE set WAITING_ON=director`, and run `DIRECTOR reply --state <RUN_DIR>/state.json --file <from-user> --pair <the job's pair>` (using `LAST_JOB` and "Flight Director job models" for `<the job's pair>`).
-  - **Otherwise, with `OPEN_USAGE_PROMPT` set to `yes`:** it answers the Flight Director usage-limit prompt ("retry" unsets `OPEN_USAGE_PROMPT` and retries `DIRECTOR <LAST_DIRECTOR_OP>` with `LAST_DIRECTOR_ARG`; "stop" goes to Step 8 item 7).
+  - **Otherwise, with `OPEN_USAGE_PROMPT` set to `yes`:** it answers the Flight Director usage-limit prompt ("retry" unsets `OPEN_USAGE_PROMPT` and retries `DIRECTOR <LAST_DIRECTOR_OP>` with `LAST_DIRECTOR_ARG`; "stop" goes to Step 5 item 7).
   - **Otherwise, with a fixed prompt open:** follow "Fixed prompts" in "How you work".
   - **Otherwise:** write it to `<RELAY_DIR>/<NNN>-from-user.md` and send job `user-message` with `INPUT=<that path>`. When it finishes with `RESULT: NOTED`, pass `--docs-moved` on the next call to `DESIGN`, `TASKLOOP`, `FINISH`, or `PROBE`.
-- **A fresh Flight Director fails** (after plan approval): `run_director.py` exits `1`, `13`, or returns an unexpected line. `STATE incr JOB_RETRIES`. At 1, start the same job again from `LAST_JOB` and `LAST_JOB_INPUT`. At 2, say exactly "The Flight Director failed twice on job <LAST_JOB>. Reply \"retry\" to try again, or \"stop\" to stop the run." This is a fixed prompt: "retry" resets `JOB_RETRIES` to 0 and starts the job again; "stop" goes to Step 8 item 7. Reset `JOB_RETRIES` to 0 after every job that settles with a `RESULT:` line.
+- **A fresh Flight Director fails** (after plan approval): `run_director.py` exits `1`, `13`, or returns an unexpected line. `STATE incr JOB_RETRIES`. At 1, start the same job again from `LAST_JOB` and `LAST_JOB_INPUT`. At 2, say exactly "The Flight Director failed twice on job <LAST_JOB>. Reply \"retry\" to try again, or \"stop\" to stop the run." This is a fixed prompt: "retry" resets `JOB_RETRIES` to 0 and starts the job again; "stop" goes to Step 5 item 7. Reset `JOB_RETRIES` to 0 after every job that settles with a `RESULT:` line.
 - **Flight Director lost** (design phase only): `run_director.py` exits `1` or `13`, or the user says "use the fallback".
   Build `director-start.txt` with `FIRST_JOB=resume` and `INPUT=none`, run `DIRECTOR start --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_DIRECTOR> --keep-open` (leave `LAST_JOB` as it is). After `RESULT: RESUMED`, resend `LAST_JOB` with `LAST_JOB_INPUT`, if it had no `RESULT`. Any relay the lost Flight Director had open is dead: the new Flight Director asks again if it still needs the answer, and a user's answer to it anyway goes as a `user-message` job.
 
@@ -202,7 +192,7 @@ You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in 
 
 Use this when the user asks to continue a run or after a context compaction in the same session (first re-read `<SKILL_DIR>/skills/mission/SKILL.md` — or `<SKILL_DIR>/SKILL.md` in a flat install — and this file in full).
 
-1. Find `<RUN_DIR>/state.json` (in single-repo mode, in the worktree on `refs/heads/<TOPIC>-docs`; in multi-repo mode, via `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --workspace <WORKSPACE_DIR>`) and run `STATE show`.
+1. Find `<RUN_DIR>/state.json` with `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --main-checkout <the repo>` (single repo) or `--workspace <WORKSPACE_DIR>` (multi-repo); each line is `<topic> <state file>`. Then run `STATE show`.
    - **No state file, or no `ROLE_DIRECTOR` in it:** say exactly "ERROR OLD_FORMAT_RUN remove <RUN_DIR> and start a new run" and stop.
    - **No `MISSION_NOTES` in it:** `STATE set MISSION_NOTES=none`.
    - **No `BASE_BRANCH` in it:** `STATE set BASE_BRANCH=<DEFAULT_BRANCH>`.
@@ -215,17 +205,17 @@ Use this when the user asks to continue a run or after a context compaction in t
    - **`OPEN_RELAY` is set:** show `<OPEN_RELAY>` to the user again as in Rule 5, and wait. When the user replies, write their answer to `<RELAY_DIR>/<NNN>-from-user.md`, unset `OPEN_RELAY LAST_DIRECTOR_RESULT`, and run `DIRECTOR reply` using `LAST_JOB` and "Flight Director job models" for `<the job's pair>`; once `DIRECTOR reply` returns `0` (`RESULT <saved>`), route it by `LAST_JOB` and `STEP`:
      - `LAST_JOB=user-message` (expecting `RESULT: NOTED`): continue at `STEP` passing `--docs-moved` on the next `DESIGN`, `TASKLOOP`, `FINISH`, or `PROBE` call;
      - `2 design`: branch per Step 2;
-     - `3 setup`: continue Step 3 from the failing item (`baseline-failed` -> item 5; `fix-meta` -> item 7);
+     - `3 setup`: continue Step 3 from the failing item (`baseline-failed` -> item 4; `fix-meta` -> item 6);
      - `run_design ...`: pass `--result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `DESIGN` and branch per Step 2;
      - `run_task ...`: pass `--director-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `TASKLOOP` and branch per Step 4;
-     - `run_finish ...`: pass `--director-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `FINISH` and branch per Step 8;
-     - `8 <n>`: continue Step 8 at item `<n>` with `<saved>`.
+     - `run_finish ...`: pass `--director-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `FINISH` and branch per Step 5;
+     - `5 <n>`: continue Step 5 at item `<n>` with `<saved>`.
    - **`LAST_DIRECTOR_RESULT` is set** (an interrupted `run_director.py` call already finished and saved its response):
      - **`RESULT <saved>`** (and `<saved>` exists): `STATE set JOB_RETRIES=0`, `STATE unset LAST_DIRECTOR_RESULT`, and route `<saved>` directly via the `LAST_JOB` / `STEP` rules above without spawning a fallback Flight Director.
      - **`NOTIFY <notify_path> <saved>`** (and `<notify_path>` exists): `STATE unset LAST_DIRECTOR_RESULT`, show `<notify_path>` verbatim, and run `DIRECTOR notify-ack` using `LAST_JOB` and "Flight Director job models" for `<the job's pair>`.
    - **`STEP` is `2 design`:** run "Flight Director lost" to start a fallback design Flight Director (`FIRST_JOB=resume`) and resend `LAST_JOB` with `LAST_JOB_INPUT`.
-   - **`STEP` is `3 setup`:** redo Step 3 from item 2, skipping item 3 if `IMPL_WORKTREE` is set (or `INITIAL_BASE_SHA` is set in single-repo mode), and item 5 if `BASELINE_OK` is `yes`.
-   - **`STEP` is `8 <n>`:** continue Step 8 at item `<n>`.
+   - **`STEP` is `3 setup`:** redo Step 3 from item 2 (item 3 is safe to repeat), skipping item 4 if `BASELINE_OK` is `yes`.
+   - **`STEP` is `5 <n>`:** continue Step 5 at item `<n>`.
    - **`STEP` starts with `run_design`, `run_task` or `run_finish`:** run `DESIGN`, `TASKLOOP` or `FINISH` and branch as its step says.
 4. Say exactly "Resumed the <TOPIC> run at step <STEP>." and continue.
 
@@ -238,11 +228,13 @@ Use this when the user asks to continue a run or after a context compaction in t
 | `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, and per-repo `DOCS_WT_<k>` | The docs worktree / workspace | 1 |
 | `ROLE_DIRECTOR`, `ROLE_SAFETY`, `ROLE_CREW`, `CREW_TOP`, `CATALOG` | The picks, the Crew model's highest effort, and the catalog; fixed for the run | 1 (`roles.py to-state`) |
 | `LAUNCH_STYLE_<pair key>`, `PROBE_HARNESS_VERSIONS` | The launch style a test launch proved for a pair and the harness versions probed. Never set them | `probe.py` |
-| `PHASE` | `design`, `execution`, `finish`, or `done` | 1, 3, 8 |
+| `PHASE` | `design`, `execution`, `finish`, or `done` | 1, 3, 5 |
 | `STEP`, `WAITING_ON`, `OPEN_RELAY`, `OPEN_USAGE_PROMPT`, `LAST_DIRECTOR_OP`, `LAST_DIRECTOR_ARG` | Where to pick up after a compaction or restart | every wait |
 | `DIRECTOR_CONVERSATION_ID`, `DIRECTOR_KEEP_OPEN`, `LAST_JOB`, `LAST_JOB_INPUT`, `LAST_DIRECTOR_RESULT`, `JOB_RETRIES` | The current Flight Director conversation, its job, and its settled result | `run_director.py` |
 | `FLIGHT_MANIFEST`, `FEATURE_BRANCH`, `CONVENTION_PATHS`, `PR_TARGET`, `DESIGN_FILE`, `DECISIONS_LOG`, `TASKS`, `GROUND_CREW_PAIR`, `BASELINE_SKIP`, `DRIFT_CHECK` | From `flight-manifest.txt` | 3 |
-| `INITIAL_BASE_SHA`, `LAST_MERGED`, `IMPL_WORKTREE` | Execution | 3; `run_task.py` updates `LAST_MERGED` |
+| `INITIAL_BASE_SHA`, `LAST_MERGED`, `IMPL_WORKTREE` | Execution | 3 (`workspace.py init-impl`); `run_task.py` updates `LAST_MERGED` |
+| `BASE_DRIFT_OK` | The target-moved check before landing was passed or accepted | 5 |
+| `WORKER_PID`, `WORKER_EXE` | The worker a script is running now; the next call stops it if its script was killed. Never set them | the scripts |
 | `META_FAILS`, `BASELINE_FAILS`; `BASELINE_OK`, `STEP3_PROBED` | Run counters and flags | 3, and the scripts |
 | `PROBE_*`; `DESIGN_*`, `DOCS_HEAD`, `SAFETY_SKILLS`, `SAFETY_RUNS`, `LENS_RUNS`, `PLAN_REVIEW_RUNS`, `RETRY_<kind>`; `CURRENT_TASK`, `LOOP_<id>`, `IMPL_CONVERSATION_ID_<id>`, `TASK_ASK_*`, and every key naming a task id; `FIN_*`, `FINAL_FIX_ROUNDS`, `VOIDS_FINAL` | The scripts' own state (`probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`; their docstrings list them). Read them for status; never set them | 1–8 |
 
@@ -271,5 +263,7 @@ Use this when the user asks to continue a run or after a context compaction in t
 | "I remember task 02's BASE_SHA and fix count; the summary says round 1." | Rule 18. `STATE get` them. Memory and summaries are not sources. |
 | "The docs worktree has a stray file; discard-changes will tidy it." | Rule 12. `run_design.py` sends `commit-docs`. Never discard the Flight Director's files. |
 | "To merge, I'll check out the feature branch in the main checkout." | Rule 13. `merge-task.sh` moves it with `update-ref`. |
+| "The script is taking long; I'll start it again to speed things up." | `ERROR RUN_BUSY`: only one script runs on a run. Wait for the exit notification. |
+| "The target branch moved; I'll rebase the feature branch so the PR is clean." | Rule 13. Show `base-drift.sh`'s output and the fixed prompt. |
 | "The user's deadline justifies skipping a gate." | Never. Keep the gates. The user can ask `capcom: status`; anything more they need to hear comes from the Flight Director. |
 | "The user said 'just rebase it'; that's authorization." | Rule 13. At a fixed prompt, only its listed replies count. Show the prompt again. |

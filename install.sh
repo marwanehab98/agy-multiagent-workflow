@@ -15,9 +15,10 @@
 #   --home, --harness-fixtures  for tests: the home folder and captured CLI output harnesses.py uses
 #
 # What gets installed:
-#   --target: plugin.json, .claude-plugin/, THIRD_PARTY_NOTICES.md, assets/, skills/, scripts/, references/, agents/, resources/, docs/, VERSION.
+#   --target: plugin.json, .claude-plugin/, THIRD_PARTY_NOTICES.md, assets/, skills/, scripts/, references/, agents/, resources/, VERSION.
+#   (docs/ holds historical design notes for maintainers and is not installed.)
 #   --harness / update: each skill under skills/<name>/ into <skills_dir>/<name>/, plus shared runtime
-#             (scripts/, references/, agents/, resources/, assets/, docs/, plugin.json, .claude-plugin/, THIRD_PARTY_NOTICES.md, VERSION)
+#             (scripts/, references/, agents/, resources/, assets/, plugin.json, .claude-plugin/, THIRD_PARTY_NOTICES.md, VERSION)
 #             inside <skills_dir>/mission/.
 # Exit 0: INSTALLED <sha> ... .  Exit 1: tests failed or the ref is unknown; nothing changed.
 set -euo pipefail
@@ -129,7 +130,8 @@ else:
 
 release="$work/release"
 mkdir -p "$release"
-for part in SKILL.md plugin.json .claude-plugin THIRD_PARTY_NOTICES.md assets skills references scripts agents resources docs; do
+# A root SKILL.md only exists in pre-plugin versions; it is kept so --ref can still roll back to them.
+for part in SKILL.md plugin.json .claude-plugin THIRD_PARTY_NOTICES.md assets skills references scripts agents resources; do
   [ -e "$work/$part" ] && copy_item "$work/$part" "$release/$part"
 done
 find "$release" -name __pycache__ -prune -exec rm -rf {} +
@@ -213,7 +215,7 @@ for i in "${!targets[@]}"; do
       copy_item "$release/SKILL.md" "$dest/$main_skill/SKILL.md"
       count=1
     fi
-    for part in plugin.json .claude-plugin THIRD_PARTY_NOTICES.md assets references scripts agents resources docs VERSION; do
+    for part in plugin.json .claude-plugin THIRD_PARTY_NOTICES.md assets references scripts agents resources VERSION; do
       [ -e "$release/$part" ] && copy_item "$release/$part" "$dest/$main_skill/$part"
     done
     # Install each standalone skill directly into $dest/<skill_name>

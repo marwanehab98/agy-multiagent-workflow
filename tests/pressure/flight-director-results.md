@@ -1,5 +1,7 @@
 # GREEN and REFACTOR rounds: architect scenarios against the rewritten prose
 
+> **Historical record.** This file records a pressure-test round against an earlier architecture (`.run/`, coordinator / architect, EGM, Orca wake-ups, `references/coordinator.md`, `-design.md`). Names and mechanics here are not the current ones, and these results are not evidence for the current prose.
+
 Run 2026-11-15, Task 11. One fresh general-purpose agent (sonnet) per scenario, reading this worktree's `references/architect.md` (and, where it chose to, other files under `references/` and `scripts/`). Prompts as in `architect-scenarios.md`; the catalog was a copy of `architect-catalog.json` outside the skill folder. Baseline: `architect-baseline.md`.
 
 What changed between the baseline and round 1 (all in `references/architect.md` unless named):

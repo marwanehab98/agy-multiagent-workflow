@@ -1,14 +1,11 @@
 ---
 name: cross-check
 license: Apache-2.0
-disable-model-invocation: true
 description: >-
-  Executes an automated adversarial multi-agent Range Safety Officer (RSO)
-  review loop to audit documents
-  against qualitative standards and structural templates, and automatically
-  apply approved fixes. Use when reviewing design docs, READMEs, feature
-  specifications, implementation plans, or verifying document completeness
-  and tone.
+  Use when the user explicitly asks to cross-check, adversarially review, or
+  audit a document (design doc, spec, implementation plan, README) with
+  several fresh-context reviewers, or when another bundled skill calls it.
+  Runs a Range Safety Officer (RSO) review loop and applies approved fixes.
 ---
 
 # Cross-Check: Adversarial Review Loop
@@ -30,8 +27,22 @@ with the primary session context to resolve findings.
 
 ## Delegation
 
-An RSO reviewer runs in a fresh context with no conversation history. Spawn each
-subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
+An RSO reviewer runs in a fresh context with no conversation history. You, the primary session, dispatch every reviewer yourself, in parallel where the step allows, and wait for each report: a subagent cannot spawn subagents, so never ask one to launch reviewers. Where the plugin's agents are registered as subagent types, use `mission-control:<name>` (e.g. `mission-control:rso-design`) when it is available. Otherwise (Antigravity's `invoke_subagent` / `define_subagent`, or a general subagent), tell the subagent to read its persona file first. Either way, give it the absolute path of any assigned standard in `resources/document_standards/`, and pass the prompt verbatim.
+
+| Name (either form) | Persona file |
+| --- | --- |
+| `rso-zoom-out` / `zoom_out` | `agents/zoom_out.md` |
+| `rso-inventive-catalyst` / `inventive_catalyst` | `agents/inventive_catalyst.md` |
+| `rso-comprehension` / `comprehension` | `agents/comprehension.md` |
+| `rso-design` / `design_critic` | `agents/design_critic.md` |
+| `rso-structural` / `structural` | `agents/structural.md` |
+| `rso-style` / `style` | `agents/style.md` |
+| `rso-implementation-readiness` / `implementation_readiness` | `agents/implementation_readiness.md` |
+| `rso-codebase-details` / `codebase_details` | `agents/codebase_details.md` |
+| `rso-synthesizer` / `synthesizer` | `agents/synthesizer.md` |
+
+`rso-synthesizer` is not a reviewer. To keep raw reports out of your context, you may pass the reports you collected to it; it deduplicates them and writes the consolidated report, and never dispatches reviewers.
+
 If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated RSO context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not an isolated RSO review.
 
 ## Asset Resolution
@@ -63,11 +74,10 @@ The caller or user provides exactly these parameters:
 
 When resolving names in `Reviewers` and `Standards`:
 
-*   **Reviewer Shortnames**: Map reviewer shortname (e.g., `design_critic`,
-    `structural`, `style`, `implementation_readiness`,
-    `codebase_details`, `comprehension`, `zoom_out`) to `agents/{name}.md`.
+*   **Reviewer Names**: Map each reviewer name, in either form (`rso-design`
+    or `design_critic`), to its persona file with the table in Delegation.
     The persona file defines the reviewer's core mandates, audit vectors, and
-    output format.
+    output format. Map `Standards` keys the same way.
 *   **Standard Shortnames**: Map standard shortname (e.g., `feature-spec-standard`,
     `implementation-readiness-standard`, `zoom-out-standard`, `heilmeier-standard`,
     `re-implementation-standard`) to `resources/document_standards/{name}.md`.
@@ -88,12 +98,11 @@ Evaluate the provided inputs (`TargetFile`, `SemanticTarget`, `Reviewers`,
     *   If **some or all** inputs are missing, interactively prompt the user
         **only for the missing inputs**, one at a time via chat messages.
 3.  **Reviewer Recommendations**:
-    *   *Feature Specs*: Recommend `design_critic` (mapped to
-        `resources/document_standards/feature-spec-standard.md`) and
-        `structural` (mapped to `resources/document_standards/feature-spec-standard.md`).
-    *   *Implementation Plans*: Recommend `implementation_readiness`
-        (mapped to `resources/document_standards/implementation-readiness-standard.md`)
-        and `codebase_details`.
+    *   *Feature Specs*: Recommend `rso-design` and `rso-structural`, both
+        mapped to `feature-spec-standard`.
+    *   *Implementation Plans*: Recommend `rso-implementation-readiness`
+        (mapped to `implementation-readiness-standard`) and
+        `rso-codebase-details`.
 4.  **Confirm Configuration**: Display the consolidated plan (Target, Reviewers,
     and mapped Standards) and ask the user to confirm before proceeding.
 
@@ -111,25 +120,14 @@ file` mode is specified, confirm full-file line bounds).
 
 #### 2.2 Review Swarm Execution
 
-1.  **Launch Subagent Swarm**:
-    Spawn subagents to execute the review:
-    *   **Hierarchical Dispatch (Synthesizer)**: Spawn the intermediate
-        synthesizer subagent (`agents/synthesizer.md` / `rso-synthesizer`).
-        The synthesizer spawns the RSO review panel in
-        parallel, deduplicates findings, writes the report artifact, and
-        returns a single summary message to avoid context pollution in the root
-        conversation. Pass it the Failed Reviewers rule below and
-        `ReviewContext`, and tell it to give those files to each reviewer.
-        Its summary must give a status, `completed` or `not run`, for each
-        requested reviewer.
-    *   **Direct Dispatch (Flat Swarm)**: Alternatively, spawn each requested
-        reviewer subagent in `Reviewers` directly.
-        Instruct each subagent to first read its persona definition in
-        `agents/{name}.md`, then audit `TargetFile` at the resolved line range
-        against its designated standard in `resources/document_standards/`,
-        supplying `ReviewContext`.
-    *   Each reviewer produces findings with severity (🔴 Blocker, 🟡 Major, 🟢
-        Nit), line numbers, discrepancy descriptions, and rationales.
+1.  **Launch the Review Panel**: Dispatch every reviewer in `Reviewers`
+    yourself, in parallel (see Delegation). Each audits `TargetFile` at the
+    resolved line range against its designated standard, with
+    `ReviewContext`, and reports findings with severity (🔴 Blocker, 🟡
+    Major, 🟢 Nit), line numbers, discrepancy descriptions, and rationales.
+    Optionally pass the raw reports to `rso-synthesizer` to deduplicate them
+    and write the report; its summary must give a status, `completed` or
+    `not run`, for each requested reviewer.
 2.  **Consolidate Findings**: Collect all findings across reviewers into a single
     flat `FindingsList`. Give each finding a stable id
     (`<reviewer>-<round>-<n>`) and record its reviewer, severity, and affected

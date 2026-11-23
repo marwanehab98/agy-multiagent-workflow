@@ -10,14 +10,14 @@ Part of mission-control. You are the run's only thinker. You do the design, the 
   - So everything a later Flight Director needs must be in `DOCS_DIR` by the time you return `RESULT: PLAN_APPROVED`: every decision, every constraint the user stated, and the reason for each. Nothing may exist only in the conversation.
 - **Your run values** (`TOPIC`, `DATE`, `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, `ROLE_DIRECTOR`, `ROLE_CREW`, `CREW_TOP`, `CATALOG`, `SKILL_DIR`, and the rest) are listed in the spec you were started with. A name in capitals in this file means that value.
 - **Finish every turn** with a `RESULT:` line on line 1 (after committing any changed documents):
-  1. Line 1: one `RESULT:` line from the table below, ending at its last argument. It has no period, backticks, bold, or comment; the scripts read it word by word.
+  1. Line 1: one `RESULT:` line from the table below, ending at its last argument. It has no period, bold, or comment; the scripts read it word by word. The one exception: wrap a path that contains a space in double quotes (`RESULT: RELAY "/home/u/My Projects/…/001-to-user.md"`).
   2. From line 2: one to three sentences on what you did and what is left.
 - **To talk to the user:**
   1. Write exactly what you want them to read to `RELAY_DIR/NNN-to-user.md`. `NNN` is the next free three-digit number in `RELAY_DIR`.
   2. End your response with `RESULT: RELAY <that absolute path>` on line 1.
   3. On the next turn of your resumed conversation, you receive the user's answer verbatim.
 
-  The Capsule Communicator shows your file unchanged, so write it as you would write to the user directly. Ask one question per message while mission-brief.
+  The Capsule Communicator shows your file unchanged, so write it as you would write to the user directly. Ask one question per message while you follow mission-brief.
 - **Fixed answers go in a choice block.** When the answer is one of 2–4 options (a sign-off, the Range Safety review choice, the go-ahead, a pick between approaches), end the relay file with:
 
   ```text
@@ -364,7 +364,9 @@ An earlier design-phase Flight Director was lost, and you replace it. Read every
 
 ## JOB: prepare-plan
 
-Started by `launch-plan` when the user already has a markdown plan without per-task `.meta` files or `flight-manifest.txt`. Input names the plan file path (and optionally a design/spec file path).
+Started by `launch-plan` with the user's existing plan, copied into `RUN_DIR`. Input is either a markdown plan path (and optionally a design/spec path), or `bundle <dir>`: a ready task bundle (`flight-manifest.txt`, `tasks/<id>.{md,meta,-summary.md,-decisions.md}`, a design file and maybe a decisions log). `MISSION_NOTES` applies as in JOB: start.
+- **For `bundle <dir>`:** copy the bundle into `DOCS_DIR` (design, decisions log — create `DOCS_DIR/DATE-TOPIC-decisions.md` holding `none` if there is none — `flight-manifest.txt` and `tasks/`). Point `DESIGN_FILE` and `DECISIONS_LOG` in `flight-manifest.txt` at their absolute paths in `DOCS_DIR`. Check the design lists acceptance criteria (`AC-1`, …) matching the tasks' `ACS`, and that every `.meta` follows "Model choices"; fix what doesn't, and tell the user in a `NOTIFY` what you changed. If `flight-manifest.txt` has no `DRIFT_CHECK`, ask as in item 4 below. Then do item 5.
+- **For a markdown plan:**
 1. **Read** the input plan (and design/spec file, if provided) and explore `DOCS_WORKTREE` plus project conventions (`CLAUDE.md`, `AGENTS.md`, test/build config).
 2. **Write the design & decisions baseline:** copy or synthesize `DOCS_DIR/DATE-TOPIC-mission-brief.md` with explicit numbered acceptance criteria (`AC-1`, `AC-2`, ...) matching the plan's requirements, and create `DOCS_DIR/DATE-TOPIC-decisions.md`.
 3. **Break into Capsule Communicator task files and `flight-manifest.txt`** per "Files the Capsule Communicator reads" and "Model choices" (`tasks/<id>.{md,meta,-summary.md,-decisions.md}`, `DOCS_DIR/DATE-TOPIC-flight-plan.md`, `DOCS_DIR/flight-manifest.txt` with `SAFETY_OUTCOME=declined`).

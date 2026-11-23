@@ -1,12 +1,11 @@
 ---
 name: flight-readiness
 license: Apache-2.0
-disable-model-invocation: true
 description: >-
- Orchestrates the 5-stage Range Safety Officer (RSO) Flight Readiness Review
- for design documents. Executes five review phases:
- Initial Zoom Out Review, Comprehension Review, Design Critique, Intermediate
- Zoom Out Review, and Implementation Readiness.
+ Use when the user explicitly asks for a flight-readiness review or a full
+ multi-stage review of a design document, or when another bundled skill calls
+ it. Runs five Range Safety Officer (RSO) stages: zoom out, comprehension,
+ design critique, intermediate zoom out, implementation readiness.
 ---
 
 # Flight Readiness Review
@@ -15,8 +14,22 @@ Reviews and validates a design document through specialized reviewer personas.
 
 ## Delegation
 
-An RSO reviewer runs in a fresh context with no conversation history. Spawn each
-subagent with your harness's subagent tool (`invoke_subagent` / `define_subagent` or `Agent`), instructing it to read its persona file in `agents/<file>.md` (and any assigned standard in `resources/document_standards/`) first. Pass the prompt verbatim and wait for the report.
+An RSO reviewer runs in a fresh context with no conversation history. You, the primary session, dispatch every reviewer yourself, in parallel where the step allows, and wait for each report: a subagent cannot spawn subagents, so never ask one to launch reviewers. Where the plugin's agents are registered as subagent types, use `mission-control:<name>` (e.g. `mission-control:rso-design`) when it is available. Otherwise (Antigravity's `invoke_subagent` / `define_subagent`, or a general subagent), tell the subagent to read its persona file first. Either way, give it the absolute path of any assigned standard in `resources/document_standards/`, and pass the prompt verbatim.
+
+| Name (either form) | Persona file |
+| --- | --- |
+| `rso-zoom-out` / `zoom_out` | `agents/zoom_out.md` |
+| `rso-inventive-catalyst` / `inventive_catalyst` | `agents/inventive_catalyst.md` |
+| `rso-comprehension` / `comprehension` | `agents/comprehension.md` |
+| `rso-design` / `design_critic` | `agents/design_critic.md` |
+| `rso-structural` / `structural` | `agents/structural.md` |
+| `rso-style` / `style` | `agents/style.md` |
+| `rso-implementation-readiness` / `implementation_readiness` | `agents/implementation_readiness.md` |
+| `rso-codebase-details` / `codebase_details` | `agents/codebase_details.md` |
+| `rso-synthesizer` / `synthesizer` | `agents/synthesizer.md` |
+
+`rso-synthesizer` is not a reviewer. To keep raw reports out of your context, you may pass the reports you collected to it; it deduplicates them and writes the consolidated report, and never dispatches reviewers.
+
 If running inside a headless CLI worker started by `mission` (`lens.txt`, `range-safety.txt`, `plan-review.txt`), you are already executing in a fresh isolated RSO context; if nested subagent tools are unavailable in that headless process, execute the requested reviewer personas directly in sequence and write the report requested by your prompt. Otherwise, in an interactive session without a subagent tool, stop and tell the user: a review in the same context is not an isolated RSO review.
 
 ## Asset Resolution
@@ -31,7 +44,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
 2. **Plain-English Standard**: Write briefs, summaries, and communications in direct, jargon-free plain English. Explain mechanisms concretely; avoid promotional adjectives (*seamless*, *robust*, *blazingly fast*) and decorative adverbs (*seamlessly*, *effortlessly*, *literally*, *drastically*, *obviously*).
 3. **Stress-Test & Critique First**: Never agree by default or echo framing reflexively. Lead with weaknesses, edge cases, blind spots, and the strongest counter-arguments before noting merits; only agree after objective scrutiny.
 4. **No Flattery or Apologies**: Never use validating filler ("brilliant," "great," "smart," "correct," "perfect," "excellent," "spot-on") or polite apologies ("I apologize," "I am sorry," "Forgive me"). State corrected technical logic and trade-offs directly.
-5. **Interaction Invariants**: Every interactive gate (structured question tool such as `ask_question` / `AskUserQuestion`, or plain chat) MUST ask strictly one question (`len(questions) == 1`), be the sole tool call in the turn, and offer clear action-oriented options without `(Recommended)` prefixes.
+5. **Interaction Invariants**: Every interactive gate (asked as in Step 2 item 2) MUST ask exactly one question, be the sole tool call in the turn, and offer clear action-oriented options without `(Recommended)` prefixes.
 
 ## Inputs
 
@@ -80,8 +93,8 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
   pass its absolute path instead. If a page cannot be saved, ask the user for
   a local copy and end your turn; if no one can answer, as in a headless run,
   leave it out, tell the user, and keep going. Pass
-  `ReviewContext` to every stage except Stage 6, which reads the document
-  alone; tell any synthesizer to give these files to each reviewer.
+  `ReviewContext` to every reviewer in every stage except Stage 6, which
+  reads the document alone.
 
 ### Step 2: Curated Pipeline Preset Selection
 
@@ -91,38 +104,24 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     individual stage `5`, `6`, `7`, `8`, `9`), map to the corresponding
     preset or subflow and bypass the interactive preset selection gate.
   - Otherwise (if `Step` was omitted), you **MUST** present the Curated
-    Pipeline Presets single-select gate to the user (using a structured
-    question tool such as `ask_question` / `AskUserQuestion` if your harness has one, or plain
-    chat).
-2. **Modal Invariants & Wire Payload**:
+    Pipeline Presets single-select gate to the user.
+2. **Asking**: Use your harness's structured question tool if it has one
+  (e.g. `AskUserQuestion`: 2-4 options as `{label, description}`,
+  `multiSelect: false`; Antigravity: `ask_question` with `options` and
+  `is_multi_select: false`); otherwise ask in plain text with numbered
+  options. Ask one question, as the sole tool call of the turn, then yield.
+  Never multi-select: the stages depend on each other (5 → 6 → 7 → 8 → 9).
+  Option 0 is the default action, without a `(Recommended)` prefix.
 
-  - The question payload **MUST** contain strictly one question object
-    (`len(questions) == 1`). Multi-question payloads are strictly forbidden.
-  - The question tool **MUST** be the sole tool call in this turn payload.
-    You **MUST** yield execution immediately upon invocation.
-  - `is_multi_select` **MUST** be `false`. Combinatorial multi-select
-    checklists are strictly prohibited to protect topological dependencies
-    (5 → 6 → 7 → 8 → 9).
-  - Option 0 **MUST** be the primary default action (without a
-    `(Recommended)` prefix).
-  - Payload specification:
-
-    ```json
-    {
-      "questions": [
-        {
-          "question": "Select the review execution mode for this document:",
-          "options": [
-            "Interactive review with all review rubrics (step-by-step, check in after each review)",
-            "Consolidated report with all review rubrics (runs full flow without stopping)",
-            "Feature spec only (evaluate design without considering implementation)",
-            "Implementation plan only (evaluate design for implementation readiness)"
-          ],
-          "is_multi_select": false
-        }
-      ]
-    }
-    ```
+  - Question: `Select the review execution mode for this document:`
+  - Option 0: `Interactive review with all review rubrics` (step-by-step,
+    check in after each review)
+  - Option 1: `Consolidated report with all review rubrics` (runs the full
+    flow without stopping)
+  - Option 2: `Feature spec only` (evaluate the design without considering
+    implementation)
+  - Option 3: `Implementation plan only` (evaluate the design for
+    implementation readiness)
 
 3. **Action Dispatch Based on Preset**:
 
@@ -161,9 +160,7 @@ Resolve `agents/<file>.md` and `resources/document_standards/<name>.md` from the
     - Proceed directly to Step 4 without presenting a confirmation modal.
   - **Ambiguous Boundary / Multiple Candidate Headers**: If multiple
     conflicting headers or non-standard structures exist:
-    - Present a single-select gate (using a structured question tool such
-      as `ask_question` / `AskUserQuestion` with `len(questions) == 1`, or plain chat)
-      proposing the most likely split line as Option 0, with Option 1
+    - Present a single-select gate (asked as in Step 2 item 2) proposing the most likely split line as Option 0, with Option 1
       allowing custom line ranges via write-in.
   - **No Implementation Plan Found**: If the document contains only a
     high-level feature specification:
@@ -193,10 +190,8 @@ Once the semantic split and execution preset are confirmed:
 
 ### Subflow Checkpoint Gates & Pause/Resume Protocol
 
-All interactive review stages conclude with an explicit single-select gate
-(using a structured question tool such as `ask_question` / `AskUserQuestion` with
-`len(questions) == 1`, `is_multi_select: false`, sole tool call in turn, or
-plain chat):
+All interactive review stages conclude with an explicit single-select gate,
+asked as in Step 2 item 2:
 
 1. **Stage Checkpoint Patterns**:
   - **Stages 5, 6, 8 (Altitude & Comprehension Checkpoints)**:
@@ -250,23 +245,21 @@ plain chat):
   stage, write the individual report file to the working directory (or your
   harness's artifact directory, if it has one). Pass `ReviewContext` to
   every step except Step 6.
-  - **Step 5 (Initial Zoom Out)**: Spawn `rso-synthesizer` (or direct
-    subagent) with `Reviewers: [rso-zoom-out, rso-inventive-catalyst]` on
-    `full file` → write `zoom_out_report.md`.
-  - **Step 6 (Comprehension Test)**: Spawn the `rso-comprehension`
-    subagent directly (not the synthesizer) on `FeatureRange` &
-    `DetailedRange` → write its complete result to
-    `comprehension_report.md`.
-  - **Step 7 (Critic Review)**: Spawn `rso-synthesizer` (or direct
-    subagents) with `Reviewers: [rso-design, rso-structural, rso-style]` on
-    `FeatureRange` → write `critic_report.md`.
-  - **Step 8 (Intermediate Zoom Out)**: Spawn `rso-synthesizer` (or direct
-    subagent) with `Reviewers: [rso-zoom-out]` on `full file` → write
+  Dispatch each stage's reviewers yourself, in parallel (see Delegation);
+  optionally pass their raw reports to `rso-synthesizer` to write the stage
+  report.
+  - **Step 5 (Initial Zoom Out)**: `rso-zoom-out` and
+    `rso-inventive-catalyst` on `full file` → `zoom_out_report.md`.
+  - **Step 6 (Comprehension Test)**: `rso-comprehension` alone on
+    `FeatureRange` & `DetailedRange` → write its complete result, not a
+    synthesis, to `comprehension_report.md`.
+  - **Step 7 (Critic Review)**: `rso-design`, `rso-structural`, and
+    `rso-style` on `FeatureRange` → `critic_report.md`.
+  - **Step 8 (Intermediate Zoom Out)**: `rso-zoom-out` on `full file` →
     `intermediate_zoom_out_report.md`.
-  - **Step 9 (Implementation Readiness Test)**: Spawn `rso-synthesizer` (or
-    direct subagents) with `Reviewers: [rso-implementation-readiness,
-    rso-codebase-details, rso-style]` on `DetailedRange` → write
-    `implementation_readiness_report.md`.
+  - **Step 9 (Implementation Readiness Test)**:
+    `rso-implementation-readiness`, `rso-codebase-details`, and `rso-style`
+    on `DetailedRange` → `implementation_readiness_report.md`.
 2. **Cross-Stage Synthesis & Deduplication**:
   - Collect all findings across the 5 stage reports.
   - Consolidate observations into actionable tasks by priority (🔴 Blocker, 🟡
@@ -280,7 +273,7 @@ plain chat):
 
 ### Subflow: Zoom Out Review
 
-1. **Delegate to Synthesizer Subagent**: Spawn `rso-synthesizer` (or `rso-zoom-out` at `agents/zoom_out.md`) on `full file` applying `resources/document_standards/zoom-out-standard.md`, passing `ReviewContext`. For Stage 5, also spawn `rso-inventive-catalyst` in parallel and write both into `zoom_out_report.md`. For Stage 8 (Intermediate Zoom Out), include `zoom_out_report.md` in context and focus on additions/mitigations from Stages 6–7.
+1. **Dispatch Reviewers**: Dispatch `rso-zoom-out` on `full file` applying `zoom-out-standard`, passing `ReviewContext`. For Stage 5, also dispatch `rso-inventive-catalyst` in parallel and write both into `zoom_out_report.md`. For Stage 8 (Intermediate Zoom Out), include `zoom_out_report.md` in context and focus on additions/mitigations from Stages 6–7.
 2. **Delivery & Notify**: Write findings to `zoom_out_report.md` (Stage 5) or `intermediate_zoom_out_report.md` (Stage 8) and notify the user with the path (no chat dumps).
 3. **Checkpoint Gate** (tri-state gate per Checkpoint Gate Protocol — Options 1 & 2 standard):
   - **Stage 5**: Question: `"Stage 5 (Initial Zoom Out Review) completed. Findings written to zoom_out_report.md. How would you like to proceed?"`, Option 0: `"Proceed to next stage: Stage 6 (Comprehension Test)"`.
@@ -289,7 +282,7 @@ plain chat):
 
 ### Subflow: Comprehension Test
 
-1. **Spawn Reviewer Directly**: Spawn `rso-comprehension` (`agents/comprehension.md`) directly on `FeatureRange` & `DetailedRange` with no document standard (do not use the synthesizer, which drops the paraphrase; do not apply `re-implementation-standard.md`, which asks for code-level detail forbidden in `FeatureRange`).
+1. **Dispatch Reviewer Directly**: Dispatch `rso-comprehension` directly on `FeatureRange` & `DetailedRange` with no document standard (do not use the synthesizer, which drops the paraphrase; do not apply `re-implementation-standard.md`, which asks for code-level detail forbidden in `FeatureRange`).
 2. **Delivery & Notify**: Write the complete reviewer result to `comprehension_report.md` (starting with the two paraphrase headings verbatim, then findings; keep the paraphrase even with zero findings) and notify the user with the path.
 3. **Checkpoint Gate** (tri-state gate per Checkpoint Gate Protocol — Options 1 & 2 standard):
   - Question: `"Stage 6 (Comprehension Test) completed. Findings written to comprehension_report.md. How would you like to proceed?"`

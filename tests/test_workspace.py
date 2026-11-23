@@ -46,6 +46,13 @@ class TestWorkspace(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="mc-ws-"))
         self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
+        old = os.environ.get("MISSION_CONTROL_WORKTREES")
+        os.environ["MISSION_CONTROL_WORKTREES"] = str(self.tmp / "wt-root")
+        self.addCleanup(lambda: os.environ.pop("MISSION_CONTROL_WORKTREES") if old is None
+                        else os.environ.__setitem__("MISSION_CONTROL_WORKTREES", old))
+
+    def root(self, anchor):
+        return Path(py(WORKSPACE, "worktrees-root", "--anchor", str(anchor)).stdout.strip())
 
     def test_detect_single_multi_and_none(self):
         empty = self.tmp / "empty"
@@ -85,7 +92,7 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "TOPIC auth")
 
-        # init-docs creates hidden .mission-control/auth-docs with mounted repo worktrees
+        # init-docs creates <worktrees root>/auth-docs, outside the workspace, with mounted repo worktrees
         r = py(WORKSPACE, "init-docs", "--workspace", str(ws), "--topic", "auth",
                "--repo", f"my-api={ws / 'my-api'}@{sha_api}",
                "--repo", f"web-app={ws / 'web-app'}@{sha_web}")
@@ -94,7 +101,9 @@ class TestWorkspace(unittest.TestCase):
         docs_wt = Path(kv["DOCS_WORKTREE"])
         run_dir = Path(kv["RUN_DIR"])
         docs_dir = Path(kv["DOCS_DIR"])
-        self.assertEqual(docs_wt, (ws / ".mission-control" / "auth-docs").resolve())
+        self.assertEqual(docs_wt, self.root(ws) / "auth-docs")
+        self.assertFalse(docs_wt.is_relative_to(ws))
+        self.assertTrue(str(self.root(ws)).startswith(str(self.tmp / "wt-root")))
         self.assertTrue((docs_wt / "my-api" / "README.md").is_file())
         self.assertTrue((docs_wt / "web-app" / "README.md").is_file())
 
@@ -162,6 +171,113 @@ class TestWorkspace(unittest.TestCase):
         r_rd = py(WORKSPACE, "remove-docs", "--state", str(state))
         self.assertEqual(r_rd.returncode, 0, r_rd.stderr)
         self.assertFalse(docs_wt.exists())
+
+    def test_single_repo_lifecycle(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        g = lambda *a: sh("git", "-C", str(repo), *a)
+        r = py(WORKSPACE, "check-topic", "--main-checkout", str(repo), "--topic", "auth")
+        self.assertEqual(r.stdout.strip(), "TOPIC auth", r.stderr)
+        r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", "auth", "--start-sha", sha)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        kv = dict(line.split(" ", 1) for line in r.stdout.strip().splitlines())
+        docs_wt, run_dir = Path(kv["DOCS_WORKTREE"]), Path(kv["RUN_DIR"])
+        self.assertEqual(docs_wt, self.root(repo) / "auth-docs")
+        self.assertFalse(docs_wt.is_relative_to(repo))
+        self.assertEqual(sh("git", "-C", str(docs_wt), "branch", "--show-current"), "mission/auth-docs")
+        self.assertIn(".mission/", (repo / ".git" / "info" / "exclude").read_text())
+        state = run_dir / "state.json"
+        state.write_text(json.dumps({"TOPIC": "auth", "REPOS": "none", "MAIN_CHECKOUT": str(repo),
+                                     "START_SHA": sha, "FEATURE_BRANCH": "feat/auth", "RUN_DIR": str(run_dir),
+                                     "DOCS_WORKTREE": str(docs_wt)}))
+        # An existing run is found; a new one gets the next free topic.
+        r = py(WORKSPACE, "check-topic", "--main-checkout", str(repo), "--topic", "auth")
+        self.assertEqual((r.returncode, r.stdout.strip()), (10, f"EXISTING {docs_wt}"))
+        r = py(WORKSPACE, "list-runs", "--main-checkout", str(repo))
+        self.assertIn(f"auth {state}", r.stdout)
+        r = py(WORKSPACE, "check-topic", "--main-checkout", str(repo), "--topic", "auth", "--force-new")
+        self.assertEqual(r.stdout.strip(), "TOPIC auth-2")
+
+        # init-impl twice: the second call reuses what the first created.
+        for _ in range(2):
+            r = py(WORKSPACE, "init-impl", "--state", str(state))
+            self.assertEqual(r.returncode, 0, r.stderr)
+        st = json.loads(state.read_text())
+        impl = Path(st["IMPL_WORKTREE"])
+        self.assertEqual(impl, self.root(repo) / "auth-impl")
+        self.assertEqual((st["INITIAL_BASE_SHA"], st["LAST_MERGED"]), (sha, sha))
+        self.assertEqual(g("rev-parse", "feat/auth"), sha)
+        self.assertEqual(g("branch", "--show-current"), "main")  # the main checkout is never switched
+
+        r = py(WORKSPACE, "remove-impl", "--state", str(state))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(impl.exists())
+        self.assertNotEqual(subprocess.run(["git", "-C", str(repo), "show-ref", "--verify", "-q",
+                                            "refs/heads/mission/auth-impl"]).returncode, 0)
+
+        r = py(WORKSPACE, "remove-docs", "--state", str(state))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("DELETED_BRANCH mission/auth-docs", r.stdout)
+        self.assertFalse(docs_wt.exists())
+
+    def test_init_impl_recreates_a_worktree_deleted_by_hand(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", "t", "--start-sha", sha)
+        run_dir = Path(dict(l.split(" ", 1) for l in r.stdout.strip().splitlines())["RUN_DIR"])
+        state = run_dir / "state.json"
+        state.write_text(json.dumps({"TOPIC": "t", "REPOS": "none", "MAIN_CHECKOUT": str(repo), "START_SHA": sha,
+                                     "FEATURE_BRANCH": "feat/t", "RUN_DIR": str(run_dir)}))
+        self.assertEqual(py(WORKSPACE, "init-impl", "--state", str(state)).returncode, 0)
+        impl = Path(json.loads(state.read_text())["IMPL_WORKTREE"])
+        shutil.rmtree(impl)  # git still lists it until pruned
+        r = py(WORKSPACE, "init-impl", "--state", str(state))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((impl / "README.md").is_file())
+
+    def test_init_impl_refuses_an_existing_branch_and_remove_docs_checks_its_branch(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", "t", "--start-sha", sha)
+        kv = dict(l.split(" ", 1) for l in r.stdout.strip().splitlines())
+        state = Path(kv["RUN_DIR"]) / "state.json"
+        base = {"TOPIC": "t", "REPOS": "none", "MAIN_CHECKOUT": str(repo), "START_SHA": sha,
+                "RUN_DIR": kv["RUN_DIR"], "DOCS_WORKTREE": kv["DOCS_WORKTREE"]}
+        # FEATURE_BRANCH naming the user's own branch (here the base branch, at the start commit) is refused.
+        state.write_text(json.dumps({**base, "FEATURE_BRANCH": "main"}))
+        r = py(WORKSPACE, "init-impl", "--state", str(state))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("already exists", r.stderr)
+        self.assertEqual(sh("git", "-C", str(repo), "rev-parse", "main"), sha)
+        # remove-docs deletes only the run's docs branch, never one the docs worktree was switched to.
+        sh("git", "-C", kv["DOCS_WORKTREE"], "switch", "-q", "-c", "other")
+        r = py(WORKSPACE, "remove-docs", "--state", str(state))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not mission/t-docs", r.stderr)
+        self.assertTrue(Path(kv["DOCS_WORKTREE"]).exists())
+
+    def test_init_impl_rolls_back_a_partial_failure(self):
+        ws = self.tmp / "parent"
+        sha_a = make_repo(ws / "a")
+        sha_b = make_repo(ws / "b")
+        sh("git", "-C", str(ws / "b"), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
+           "--allow-empty", "-m", "moved")
+        sh("git", "-C", str(ws / "b"), "branch", "feat/x", "HEAD")  # exists, but not at the start commit
+        run_dir = self.tmp / "run"
+        run_dir.mkdir()
+        fm = run_dir / "flight-manifest.txt"
+        fm.write_text("FEATURE_BRANCH=feat/x\n")
+        state = run_dir / "state.json"
+        state.write_text(json.dumps({
+            "TOPIC": "x", "WORKSPACE_DIR": str(ws), "REPOS": "a b", "RUN_DIR": str(run_dir),
+            "FLIGHT_MANIFEST": str(fm), "REPO_PATH_a": str(ws / "a"), "REPO_PATH_b": str(ws / "b"),
+            "BASE_BRANCH_a": "main", "BASE_BRANCH_b": "main", "START_SHA_a": sha_a, "START_SHA_b": sha_b}))
+        r = py(WORKSPACE, "init-impl", "--state", str(state))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("feat/x already exists", r.stderr)
+        for b in ("feat/x", "mission/x-impl"):  # repo a is back as it was
+            self.assertNotEqual(subprocess.run(["git", "-C", str(ws / "a"), "show-ref", "--verify", "-q",
+                                                f"refs/heads/{b}"]).returncode, 0, b)
 
     def test_validate_meta_requires_repo_in_multi_repo(self):
         ws = self.tmp / "val"

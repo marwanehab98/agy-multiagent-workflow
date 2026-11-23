@@ -10,9 +10,11 @@ Usage:
   python3 -I state.py --file <file> show               # prints every KEY=value, sorted
 
 Exit 0: done.  Exit 1: `get` of a missing key (prints MISSING KEY).  Exit 64: bad usage.
-Writes are atomic (temp file + rename), so a crash never leaves a half-written file.
+Writes are atomic (temp file + rename), so a crash never leaves a half-written file, and locked, so
+they merge with a run_*.py script writing at the same time.
 """
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -51,6 +53,15 @@ def main():
     p.add_argument("args", nargs="*")
     a = p.parse_args()
     path = Path(a.file)
+    # The same lock run_*.py take for every write (common.state_lock), held from read to write, so a
+    # STATE set while a script runs in the background is never lost and never loses the script's writes.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(f".{path.name}.lock"), "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return run_op(a, path)
+
+
+def run_op(a, path):
     data = load(path)
 
     if a.op == "set":

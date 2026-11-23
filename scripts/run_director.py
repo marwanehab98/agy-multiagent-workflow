@@ -22,7 +22,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import ERROR, AgyRunner, Done, Run, first_words, next_free, save_body  # noqa: E402
+from common import AgyRunner, Run, drive, first_words, next_free, rest_path, save_body  # noqa: E402
+
+def quote_path(p):
+    """A path for a status line, in double quotes when it has whitespace, so the line stays unambiguous."""
+    return f'"{p}"' if any(c.isspace() for c in p) else p
+
 
 RC_RESULT, RC_FAILED, RC_ERROR, RC_RELAY, RC_NOTIFY, RC_LOST, RC_USAGE = 0, 1, 2, 11, 12, 13, 31
 
@@ -51,6 +56,8 @@ def _handle_response(r, result, keep_open):
 
     save_body(body, saved)
     words = first_words(saved)
+    if len(words) >= 3 and words[:2] in (["RESULT:", "RELAY"], ["RESULT:", "NOTIFY"]):
+        words = words[:2] + [rest_path(words, 2)]  # a path with spaces, unquoted
     if len(words) >= 3 and words[:2] == ["RESULT:", "RELAY"]:
         if not Path(words[2]).is_file():
             save_body(f"\nERROR: RELAY target file does not exist: {words[2]}", saved, append=True)
@@ -64,7 +71,7 @@ def _handle_response(r, result, keep_open):
             if not keep_open:
                 r.set(DIRECTOR_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
-        line = f"RELAY {words[2]} {saved}"
+        line = f"RELAY {quote_path(words[2])} {saved}"
         r.set(DIRECTOR_CONVERSATION_ID=conv_id, OPEN_RELAY=words[2], LAST_DIRECTOR_RESULT=line)
         return RC_RELAY, line
     if len(words) >= 3 and words[:2] == ["RESULT:", "NOTIFY"]:
@@ -80,7 +87,7 @@ def _handle_response(r, result, keep_open):
             if not keep_open:
                 r.set(DIRECTOR_CONVERSATION_ID=None)
             return RC_FAILED, f"FAILED {saved}"
-        line = f"NOTIFY {words[2]} {saved}"
+        line = f"NOTIFY {quote_path(words[2])} {saved}"
         r.set(DIRECTOR_CONVERSATION_ID=conv_id, LAST_DIRECTOR_RESULT=line)
         return RC_NOTIFY, line
     if len(words) >= 2 and words[0] == "RESULT:":
@@ -103,6 +110,8 @@ def run_cmd(ns):
     r.require_new_format()
     runner = AgyRunner(r)
     wt = r.need("DOCS_WORKTREE")
+    if ns.op in ("start", "send") and not Path(ns.spec).is_file():
+        return RC_ERROR, f"ERROR MISSING_FILE {ns.spec}"
     if ns.op == "start":
         keep = bool(ns.keep_open)
         r.set(DIRECTOR_KEEP_OPEN="yes" if keep else "no", LAST_DIRECTOR_RESULT=None)
@@ -152,14 +161,7 @@ def main(argv=None):
         ns = ap.parse_args(argv)
     except SystemExit as e:
         return 64 if e.code else 0
-    try:
-        code, line = run_cmd(ns)
-    except Done as d:
-        code, line = d.code, d.line
-    except (OSError, ValueError) as e:
-        code, line = RC_ERROR, f"ERROR {e}"
-    print(line)
-    return code
+    return drive(ns.state, lambda events: run_cmd(ns))
 
 
 if __name__ == "__main__":

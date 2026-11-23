@@ -1,4 +1,4 @@
-"""Run the per-task loop (capsule communicator Steps 4-7) synchronously via headless CLI workers.
+"""Run the per-task loop (capsule communicator Step 4) synchronously via headless CLI workers.
 
 Each call runs every deterministic action it can (start workers, save their results,
 check the tree, run the gate, run both reviews, count rounds, merge) and exits at the first point
@@ -19,7 +19,7 @@ Exit 21  FIX_META <validate output file>   send flight director job fix-meta wit
 Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight director job `consult` with
                                            INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
-Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 8 item 7
+Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 5 item 7
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
@@ -47,18 +47,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR, AgyRunner, Done, Run,  # noqa: E402
-                    build, first_words, git, next_free, pick_verdict, repo_key, run, save_body, tool, verdict_line)
+                    answer_worker, build, drive, first_words, git, next_free, pick_verdict, read_answer, read_meta,
+                    repo_key, rest_path, run, save_ask, save_body, tool, usage_prompt, verdict_line, void_prompt,
+                    write_atomic, write_prompt)
 from pairs import ladder, parse_pair  # noqa: E402
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
-
-
-def read_meta(path):
-    meta = {}
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            meta[k.strip()] = v.strip()
-    return meta
 
 
 # ---------------------------------------------------------------- the loop
@@ -79,7 +72,7 @@ class Loop:
         return p.read_text(encoding="utf-8").split() if p.exists() else []
 
     def write_queue(self, ids):
-        self.queue_path().write_text(" ".join(ids) + "\n", encoding="utf-8")
+        write_atomic(self.queue_path(), " ".join(ids) + "\n")
 
     def phase(self, t):
         return self.r.get(f"LOOP_{t}", "start")
@@ -100,6 +93,27 @@ class Loop:
 
     def task_impl(self, t):
         return self.r.repo_impl(self.task_repo(t))
+
+    def guard_other_repos(self, t):
+        """Multi-repo: a worker on task t may only change t's repo. Put every other repo's implementation
+        worktree back at its LAST_MERGED_<k>, so nothing unreviewed reaches a later task's merge."""
+        if not self.r.is_multi_repo:
+            return
+        mine = self.task_repo(t)
+        for repo in self.r.repos:
+            if repo == mine:
+                continue
+            # A replan may have kept commits past LAST_MERGED for that repo's next task (REPLAN_HEAD_<k>).
+            wt = self.r.repo_impl(repo)
+            sha = self.r.get(f"REPLAN_HEAD_{repo_key(repo)}") or self.r.repo_last_merged(repo)
+            rc, out = tool("check-tree.sh", wt, sha)
+            if rc == 0:
+                continue
+            rc2, out2 = tool("discard-changes.sh", wt, sha)
+            self.r.log(f"{t} worker changed repo {repo}, which is not its task's repo; reset to {sha}: "
+                       + " ".join(out.split())[:300])
+            if rc2 != 0:
+                raise Done(ERROR, f"ERROR RESET [{repo}] {out2}")
 
     # -- crew
     def start_impl(self, t, spec, kind, title, reuse):
@@ -141,11 +155,22 @@ class Loop:
         rc, out = tool("check-tree.sh", wt, head)
         if rc != 0 or run(["git", "-C", wt, "merge-base", "--is-ancestor", last_merged, head]).returncode:
             raise Done(ERROR, f"ERROR IMPL_WORKTREE_NOT_READY head={head} last_merged={last_merged} {out}")
+        keep_key = f"REPLAN_HEAD_{repo_key(repo)}" if repo else "REPLAN_HEAD"
+        if head != last_merged and head != r.get(keep_key):
+            # Commits past LAST_MERGED that no replan kept were never reviewed for this task: drop them.
+            stray = run(["git", "-C", wt, "log", "--oneline", f"{last_merged}..{head}"]).stdout.split("\n")
+            rc, out = tool("discard-changes.sh", wt, last_merged)
+            if rc != 0:
+                raise Done(ERROR, f"ERROR RESET {out}")
+            r.log(f"{t} dropped unreviewed commits past {last_merged} before starting: "
+                  + "; ".join(x for x in stray if x)[:300])
+            head = last_merged
         meta = self.meta(t)
         spec = build("implement.txt", r.run_dir / "specs" / f"{t}-implement.txt",
                      {"TASK_TITLE": meta["TITLE"]},
                      {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
-        r.set(CURRENT_TASK=t, **{f"BASE_SHA_{t}": head, f"IMPL_START_SHA_{t}": head, f"IMPLEMENT_SPEC_{t}": spec,
+        r.set(CURRENT_TASK=t, **{keep_key: None, f"BASE_SHA_{t}": head, f"IMPL_START_SHA_{t}": head,
+                                 f"IMPLEMENT_SPEC_{t}": spec,
                                  f"PAIR_{t}": meta["CREW"], f"ATTEMPT_{t}": 0,
                                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
                                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
@@ -157,8 +182,7 @@ class Loop:
 
     def ask_consult(self, t, kind, pair, spec, conv_id, body, stage=None):
         r = self.r
-        ask = next_free(r.run_dir / "asks", f"{t}-{kind}-{{n}}.md")
-        save_body(body, ask, header=f"task={t} {self.meta(t)['TITLE']}")
+        ask = save_ask(r, f"{t}-{kind}", body, header=f"task={t} {self.meta(t)['TITLE']}")
         r.set(**{f"TASK_ASK_CONV_{t}": conv_id, f"TASK_ASK_KIND_{t}": kind,
                  f"TASK_ASK_PAIR_{t}": pair, f"TASK_ASK_SPEC_{t}": spec,
                  f"TASK_ASK_FILE_{t}": ask, f"TASK_ASK_STAGE_{t}": stage})
@@ -167,6 +191,7 @@ class Loop:
 
     def after_impl(self, t, kind, result):
         r = self.r
+        self.guard_other_repos(t)
         if result[0] == "usage":
             self.prompt_usage(t, kind, result[1])
         if result[0] == "ask":
@@ -263,7 +288,7 @@ class Loop:
         r.set(**{f"REVIEW_SPEC_{t}": spec, f"REVIEW_PAIR_{t}": pair})
         self.set_phase(t, f"reviewing:{stage}")
         r.log(f"{t} stage{stage} reviewer dispatched {pair}")
-        result = self.runner.run(spec, pair=pair, worktree=wt)
+        result = self.runner.run(spec, pair=pair, worktree=wt, access="read")
         self.after_review(t, stage, result)
 
     def _discard_or_error(self, head, t=None):
@@ -274,6 +299,7 @@ class Loop:
 
     def after_review(self, t, stage, result):
         r = self.r
+        self.guard_other_repos(t)
         wt = self.task_impl(t)
         head = r.need(f"WORKER_HEAD_{t}")
         if result[0] == "usage":
@@ -319,10 +345,8 @@ class Loop:
         n = self.r.incr(f"VOIDS_{t}_S{stage}")
         self.r.log(f"{t} stage{stage} reviewer void: {why}")
         if n >= 3:
-            self.prompt(t, "void",
-                        f"Task {t} stage {stage}: three reviewers in a row were void ({why}).\n"
-                        "Reply \"retry\" to start a new reviewer, or \"stop\" to stop the run.",
-                        ["retry", "stop"], back_to=f"review{stage}")
+            self.prompt(t, "void", void_prompt(f"Task {t} stage {stage}", why), ["retry", "stop"],
+                        back_to=f"review{stage}")
         self.start_review(t, stage)
 
     # -- consult answer
@@ -330,15 +354,12 @@ class Loop:
         r = self.r
         if self.phase(t) != "consult":
             raise Done(ERROR, f"ERROR NO_CONSULT_OPEN phase={self.phase(t)}")
-        p = Path(answer_path)
-        if not p.is_file():
-            raise Done(ERROR, f"ERROR MISSING_FILE {p}")
+        ans = read_answer(answer_path)
         kind = r.need(f"TASK_ASK_KIND_{t}")
         pair = r.need(f"TASK_ASK_PAIR_{t}")
         spec = r.need(f"TASK_ASK_SPEC_{t}")
         conv = r.get(f"TASK_ASK_CONV_{t}", "")
         stage = r.get(f"TASK_ASK_STAGE_{t}")
-        ans = p.read_text(encoding="utf-8")
         r.set(**{f"TASK_ASK_CONV_{t}": None, f"TASK_ASK_KIND_{t}": None,
                  f"TASK_ASK_PAIR_{t}": None, f"TASK_ASK_SPEC_{t}": None,
                  f"TASK_ASK_FILE_{t}": None, f"TASK_ASK_STAGE_{t}": None})
@@ -348,18 +369,16 @@ class Loop:
         else:
             in_flight = "committing" if kind == "commit" else ("fixing" if kind == "fix" else "impl")
             self.set_phase(t, in_flight, WAITING_ON=None)
-        wt = self.task_impl(t)
-        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, wt, conv)
-        if result is None:
+        def before_fresh():
             if kind.startswith("review") or kind == "fix":
                 self._discard_or_error(r.need(f"WORKER_HEAD_{t}"), t)
             elif kind == "impl":
                 self._discard_or_error(r.get(f"IMPL_START_SHA_{t}") or r.need(f"BASE_SHA_{t}"), t)
             if not kind.startswith("review"):
                 r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
-            spec_text = Path(spec).read_text(encoding="utf-8")
-            result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
-                                     pair=pair, worktree=wt)
+
+        result = answer_worker(self.runner, ans, pair, self.task_impl(t), conv, spec, before_fresh,
+                               access="read" if kind.startswith("review") else "full")
         if kind.startswith("review"):
             self.after_review(t, review_stage, result)
         else:
@@ -380,11 +399,11 @@ class Loop:
         if rc != 0:
             raise Done(ERROR, f"ERROR MERGE {out}")
         head = out.split("head=")[-1].strip()
+        r.set(**{r.repo_last_merged_key(repo): head, "WAITING_ON": None, f"IMPL_CONVERSATION_ID_{t}": None})
+        self.set_phase(t, "merged")
         q = self.queue()
         if q and q[0] == t:
             self.write_queue(q[1:])
-        r.set(**{r.repo_last_merged_key(repo): head, "WAITING_ON": None, f"IMPL_CONVERSATION_ID_{t}": None})
-        self.set_phase(t, "merged")
         r.log(f"{t} merged {head}" + (f" ({repo})" if repo else ""))
         self.events.append(f"MERGED {t} {head}")
 
@@ -455,8 +474,11 @@ class Loop:
         kind = words[1]
         meta = self.meta(t)
         a = int(r.need(f"ATTEMPT_{t}"))
-        if kind == "ESCALATE" and len(words) == 5:
-            sha, note, pair = words[2:5]
+        if kind == "ESCALATE" and len(words) >= 5:
+            sha, pair = words[2], words[-1]
+            note = rest_path(words[:-1], 3)
+            if note != " ".join(words[3:-1]):
+                return self.reject(t, f"unrecognised answer: {' '.join(words)[:300]}")
             state = ("--state", str(r.path))
             rc, out = tool("validate_meta.py", "tasks", *state, "--tasks-dir", str(r.docs / "tasks"), "--ids", t)
             if rc != 0:
@@ -467,7 +489,7 @@ class Loop:
             if rc != 0:
                 return self.reject(t, out)
             if past:
-                r.set(**{f"ESC_PENDING_{t}": f"{sha} {note} {pair}"})
+                r.set(**{f"ESC_PENDING_{t}": f"{sha}\t{note}\t{pair}"})
                 return self.set_phase(t, f"probe:{a}")
             return self.start_attempt(t, sha, note, pair)
         if kind == "REPLAN" and len(words) >= 4:
@@ -506,12 +528,12 @@ class Loop:
     def do_probe(self, t):
         """Test-launch the pair the flight director chose past the ladder, then start the attempt."""
         r = self.r
-        sha, note, pair = r.need(f"ESC_PENDING_{t}").split()
+        sha, note, pair = r.need(f"ESC_PENDING_{t}").split("\t")
         try:
             Prober(r, self.runner).advance([pair])
         except Done as d:
             if d.code == STOP and d.line.startswith("PROBE_FAILED"):
-                return self.reject(t, f"launch test for {pair} failed; see {d.line.split()[-1]}")
+                return self.reject(t, f"launch test for {pair} failed; see {d.line.split(' ', 2)[-1]}")
             raise
         self.start_attempt(t, sha, note, pair)
 
@@ -549,18 +571,21 @@ class Loop:
         rc, out = tool("discard-changes.sh", self.task_impl(t), sha)
         if rc != 0:
             raise Done(ERROR, f"ERROR RESET {out}")
-        q = self.queue()
-        if q and q[0] == t:
-            q = q[1:]
-        self.write_queue(ids + q)
+        repo = self.task_repo(t)
+        r.set(**{(f"REPLAN_HEAD_{repo_key(repo)}" if repo else "REPLAN_HEAD"): sha})
+        # Queue first, then mark t replaced: a call cut off in between redoes this step, and the queue write
+        # is idempotent (the new ids are already at its head, t is gone).
+        q = [x for x in self.queue() if x != t]
+        if q[:len(ids)] != ids:
+            q = ids + q
+        self.write_queue(q)
         r.set(META_FAILS=0, **{f"PENDING_REPLAN_{t}": None})
         self.set_phase(t, "replaced")
         r.log(f"{t} replanned into {' '.join(ids)} from {sha}")
 
     # -- prompts
     def prompt(self, t, name, text, accepted, back_to):
-        f = next_free(self.r.run_dir / "results", "prompt-{n}.md")
-        f.write_text(text.rstrip("\n") + "\n", encoding="utf-8")
+        f = write_prompt(self.r, text)
         self.set_phase(t, f"prompt:{name}", **{f"PROMPT_FILE_{t}": f, f"PROMPT_ACCEPT_{t}": " ".join(accepted),
                                                 f"PROMPT_BACK_{t}": back_to, "WAITING_ON": "user"})
         raise Done(PROMPT, f"PROMPT {f} {' '.join(accepted)}")
@@ -577,10 +602,8 @@ class Loop:
 
     def prompt_usage(self, t, kind, detail):
         self.r.set(**{f"PROMPT_KIND_{t}": kind})
-        self.prompt(t, "usage-limit",
-                    f"A worker on task {t} hit its model's usage limit: {detail}\n"
-                    "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.",
-                    ["retry", "stop"], back_to="usage")
+        self.prompt(t, "usage-limit", usage_prompt(f"A worker on task {t}", detail), ["retry", "stop"],
+                    back_to="usage")
 
     def reply(self, t, word):
         r = self.r
@@ -630,6 +653,10 @@ class Loop:
         if t and self.phase(t) not in ("merged", "replaced"):
             return t
         q = self.queue()
+        if q and t and q[0] == t and self.phase(t) == "merged":
+            # Merged, but the queue write was interrupted: finish it.
+            q = q[1:]
+            self.write_queue(q)
         if not q:
             return None
         if q[0] != t:
@@ -714,18 +741,13 @@ def main():
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
-    loop = None
-    try:
+    def body(events):
         loop = Loop(a.state)
+        loop.events = events
         loop.advance(a.director_result, a.reply.strip().strip('"').lower() if a.reply else None,
                      a.answer, a.docs_moved)
-        code, line = ERROR, "ERROR NO_STATUS"
-    except Done as d:
-        code, line = d.code, d.line
-    for e in loop.events if loop else []:
-        print(e)
-    print(line)
-    return code
+
+    return drive(a.state, body)
 
 
 if __name__ == "__main__":

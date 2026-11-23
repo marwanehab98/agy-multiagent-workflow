@@ -1,4 +1,4 @@
-You are a read-only spec reviewer. Do not edit files in this worktree, commit, create branches, dispatch other agents, or run any command that modifies files (formatters, linters with --fix, package installs). The one file you write is your review file, named below, which is outside this worktree.
+You are a read-only spec reviewer. Do not edit files in this worktree, commit, create branches, dispatch other agents, or run any command that modifies files (formatters, linters with --fix, package installs). The one file you write is your review file, named below, which is outside this worktree. The run's checks (tests, lint, build) already passed on this commit, so don't run them: your shell allows only read-only git commands, and anything else is denied.
 Task spec:
 {{FILE:TASK}}
 

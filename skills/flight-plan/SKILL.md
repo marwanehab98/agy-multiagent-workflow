@@ -1,6 +1,6 @@
 ---
 name: flight-plan
-description: Use when you have a spec or requirements for a multi-step task, before touching code
+description: Use when the user asks for an implementation plan, or an approved spec or requirements for a multi-step task need breaking into TDD tasks before touching code.
 ---
 
 # Flight Plan
@@ -11,7 +11,7 @@ Write implementation plans for an engineer who has not seen this codebase or thi
 
 **Announce at start:** "I'm using the flight-plan skill to create the implementation plan."
 
-**Context:** If working in an isolated worktree, create or reuse one (e.g., via `git worktree add` or `scripts/worktree.sh`) before execution.
+**Context:** If working in an isolated worktree, create or reuse one (e.g., via `git worktree add`, or the bundled `scripts/worktree.sh`, resolved from the plugin/bundle root: `../../scripts/` from this `SKILL.md` in a plugin or repo layout, `../mission/scripts/` in a flat skills install, never the user's repo) before execution.
 
 **Save plans to:** `docs/plans/YYYY-MM-DD-<feature-name>-flight-plan.md`
 - (User preferences for plan location override this default)

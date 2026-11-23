@@ -11,7 +11,7 @@ Every stage of the workflow is available both as an **independently invocable sk
 | Starting point | Use | What it does |
 | --- | --- | --- |
 | **Fuzzy / half-baked idea** ("should we even build this?") | `wind-tunnel` (standalone) | Runs all 4 steps: deep open-ended questioning, 7-lens stress testing, iterative refinement, and an RFC brief (`concepts_brief.md`) you can feed into `mission` or `mission-brief`. |
-| **Concrete feature or JIRA story** | `mission` | Full end-to-end pipeline from requirements to a reviewed PR: spec drafting, automated stress-test & design review, task planning, per-task TDD + code review, drift check, and branch landing. |
+| **Concrete feature or JIRA story** | `mission` | Full end-to-end pipeline from requirements to a reviewed PR: spec drafting, automated stress-test & design review, task planning, per-task TDD + code review, an optional drift check, and branch landing. |
 | **Existing markdown plan** (or `tasks/` + `flight-manifest.txt`) | `launch-plan` | Skips design/planning and jumps straight into the per-task TDD execution, gate, review, and landing loop. |
 | **Single focused task** (review a doc, fix a bug with TDD, land a branch) | Standalone skill | Call `mission-brief`, `flight-plan`, `flight-readiness`, `cross-check`, `red-green`, `gatecheck`, `spec-drift`, or `touchdown` directly in your session. |
 
@@ -29,17 +29,17 @@ Requirements / JIRA Key
         │
         ▼
   2. Mission Brief & Safety Review  Flight Director clarifies & drafts spec (mission-brief)
-        │                           ──► 7-lens stress test (wind-tunnel Step 2) + 5-stage audit (flight-readiness)
-        │                           ──► You approve the spec
+        │                           ──► 7-lens stress test (wind-tunnel Step 2)
+        │                           ──► You approve the spec (+ 5-stage audit, flight-readiness, if you accept it)
         ▼
   3. Flight Plan                 Flight Director breaks spec into ordered TDD tasks (flight-plan)
         │                        ──► Adversarial plan audit (cross-check) ──► You approve the plan
         ▼
-  4. In-Flight Execution         Isolated git worktree ──► Crew implements (red-green TDD)
+  4. In-Flight Execution         Shared implementation worktree ──► Crew implements (red-green TDD)
         │                        ──► Automated gate (tests/lint) ──► Spec & quality review
         │                        ──► Atomic fast-forward merge into feature branch
         ▼
-  5. Final Check & Touchdown     Full-branch verification + spec-drift check ──► PR, local merge, or keep
+  5. Final Check & Touchdown     Full-branch verification (+ spec-drift if you chose it) ──► PR, local fast-forward merge, or keep
 ```
 
 ### Key Mechanics
@@ -47,7 +47,7 @@ Requirements / JIRA Key
 - **Two-phase Flight Director lifecycle (context vs. freshness):**
   - During **design and planning**, one Flight Director session stays open across turns via CLI session resumption (`--conversation` on `agy`, `--resume` on `claude`), so it remembers your Q&A and design rationale.
   - After **plan approval**, every Flight Director job (answering a Crew question, replanning, handling metadata fixes) starts a **fresh** headless session with no prior chat history—forcing it to answer strictly from the committed spec, plan, and files on disk.
-- **Right-sized design review:** `mission` uses `mission-brief` to inspect your codebase first and draft the spec, then automatically runs `wind-tunnel` Step 2 (7-lens stress test) and `flight-readiness` (5-stage review) on non-trivial designs while skipping heavy passes on small changes.
+- **Right-sized design review:** `mission` uses `mission-brief` to inspect your codebase first and draft the spec. On non-trivial designs it runs `wind-tunnel` Step 2 (7-lens stress test) automatically; small changes skip it. The `flight-readiness` 5-stage review (at spec sign-off) and the `spec-drift` check (at plan approval) are offered to you with a recommendation, not run automatically.
 - **Multi-harness & cross-harness role routing:** You assign a `<harness>:<model>@<effort>` pair to three roles during setup:
   - **Flight Director** (`director`) — designs the spec, writes the task plan, answers questions raised mid-run, and picks per-task reviewers.
   - **Range Safety** (`safety`) — runs fresh-context `wind-tunnel` Step 2, `flight-readiness`, `cross-check`, and `spec-drift` reviews.
@@ -58,9 +58,12 @@ Requirements / JIRA Key
   > [!NOTE]
   > **Consumer subscription Terms of Service:** Having one vendor's CLI programmatically orchestrate another vendor's CLI may violate consumer subscription Terms of Service (e.g., Google AI Pro or Claude Pro/Max). If you are on consumer subscriptions rather than API-key / commercial billing, keep all roles on the same harness as your active session (`antigravity` in `agy`, or `claude` in `claude`).
 
-- **Automatic repo detection & multi-repo workspaces:** [`scripts/workspace.py`](scripts/workspace.py) detects whether you're running inside a single git repository or a parent workspace directory containing multiple (including nested) repositories. In a multi-repo workspace, you choose which repos are in scope, tasks declare their target `REPO`, and each repo gets its own isolated implementation worktree, verification gate, and PR/merge step under `.mission-control/<topic>-impl/`.
+- **Automatic repo detection & multi-repo workspaces:** [`scripts/workspace.py`](scripts/workspace.py) detects whether you're running inside a single git repository or a parent workspace directory containing multiple (including nested) repositories. In a multi-repo workspace, you choose which repos are in scope, tasks declare their target `REPO`, and each repo gets its own implementation worktree, verification gate, and PR/merge step.
 - **Non-default base branches:** Runs never check out branches in your main checkout, so it doesn't need to be clean. You can name a base branch explicitly in your prompt (including local-only or pushed feature branches); if your currently checked-out branch differs from the repo default, setup asks which one to branch from.
-- **Isolated git worktrees & deterministic state:** Run metadata, plans, and state live in a dedicated `<topic>-docs` worktree (or `.mission-control/<topic>-docs` in multi-repo workspaces) inside `.mission/state.json`, while each task runs in its own isolated implementation worktree and only fast-forwards into the feature branch after passing automated gates and both spec and code-quality reviews.
+- **Git worktrees outside your repo & deterministic state:** A run's worktrees live under `${XDG_STATE_HOME:-~/.local/state}/mission-control/worktrees/<repo-or-workspace-name>-<hash>/`, on branches `mission/<topic>-docs` (run metadata, plans, and `.mission/state.json`) and `mission/<topic>-impl`. All tasks share **one** implementation worktree (one per repo in multi-repo workspaces), reset between tasks, so gitignored build outputs persist from task to task. Each task's work only fast-forwards into the feature branch after passing automated gates and both spec and code-quality reviews.
+- **Live progress:** Each run writes `<RUN_DIR>/progress.log`: milestones (task started, gate result, verdict, merge, escalation) and each worker's activity (tool calls, short snippets of what it says, failed tool calls, to-do updates, and its cost and turns when the harness reports them). One full log per worker is in `<RUN_DIR>/logs/`. The Capsule Communicator runs the long scripts in the background where its harness can, and relays the milestones. Only one script runs on a run at a time, and a script that is killed stops its workers; the next call stops any worker left behind and resumes.
+- **Landing checks:** before opening a PR or merging locally, `scripts/base-drift.sh` checks whether the target branch moved during the run (and whether merging it would conflict) and asks you how to proceed.
+- **Worker permissions:** Crew and the Flight Director run with full permissions inside their worktree. Read-only workers (reviewers, design reviewers, probes) get an environment without credential-like variables (`WORKER_ENV_KEEP` keeps named ones), and on Claude Code a `dontAsk` allowlist: reading, writing only their output folder, subagents, skills and read-only git, but no other shell commands, no network and no MCP servers. On Antigravity they run in the terminal sandbox with per-session rules instead of `--dangerously-skip-permissions`: no network, and no writes outside their worktree and output folder, by commands or file tools. Setup refuses a harness version too old for these flags. Every read-only worker's tree is also checked afterwards, and any change voids it.
 - **Lean, behavior-focused TDD:** `red-green` enforces strict RED-GREEN-REFACTOR on public behaviors and realistic failure modes (preferring table-driven tests over per-helper boilerplate), and `quality-review` checks correctness and edge cases without demanding redundant tests.
 - **Rate-limit & compaction safe:** Workers never silently downgrade models on quota/rate limits—instead, the run pauses cleanly with all state saved in `.mission/state.json`, ready to resume in a new session.
 
@@ -86,9 +89,9 @@ Invoke `mission` from a single git repo or from a parent directory containing mu
 
 **What to expect:**
 1. **Role, repo & base-branch setup:** On first run, the Capsule Communicator detects installed CLIs/models and asks you to pick `<harness>:<model>@<effort>` for Flight Director, Range Safety, and Crew, then saves your choices to `~/.config/mission-control/roles.json` (on later runs it asks `same` / `new`). You can also name explicit model/effort picks in your opening prompt to confirm all three in one shot. It then detects your repo(s) and confirms the repo scope (in multi-repo workspaces) and base branch (if you're on a non-default branch).
-2. **Design & plan sign-off:** The Flight Director asks clarifying questions one at a time, runs automated Range Safety reviews, and presents the spec and task plan for your approval before any production code is written.
+2. **Design & plan sign-off:** The Flight Director asks clarifying questions one at a time, runs Range Safety reviews (recommending whether to run the optional ones), and presents the spec and task plan for your approval before any production code is written.
 3. **Hands-off execution:** Each task is implemented by Crew, tested, reviewed, and merged automatically. You are only interrupted if a genuine product decision is needed or a quota limit is hit.
-4. **Landing:** Once all tasks pass final verification and `spec-drift`, `touchdown` asks whether to open a PR, fast-forward merge locally, keep the branch, or discard.
+4. **Landing:** Once all tasks pass final verification (and the drift check, if you chose it), you choose whether to open a PR, fast-forward merge locally, or keep the branch.
 
 ### 2. Execute an existing plan (`launch-plan`)
 
@@ -102,7 +105,7 @@ If your chat session compacts, disconnects, or pauses on a quota/rate limit, sta
 
 > "Continue my `mission` run for `<topic>`."
 
-The Capsule Communicator locates `.mission/state.json`—either in the `<topic>-docs` worktree (single-repo) or via `scripts/workspace.py list-runs` under `.mission-control/<topic>-docs/` (multi-repo)—and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
+The Capsule Communicator locates the run's `.mission/state.json` in its `mission/<topic>-docs` worktree (via `scripts/workspace.py list-runs` in multi-repo workspaces) and resumes from the exact step where it stopped without losing completed tasks. Role picks stay fixed for an in-progress run (to change picks, start a new run).
 
 ### 4. Use individual skills standalone
 
@@ -130,7 +133,7 @@ Every stage works on its own in your current chat session without starting the f
 | `spec-drift` | Compare finished source code against design docs | In-session / drift check |
 | `red-green` | Strict RED-GREEN-REFACTOR test-first workflow (lean, behavior-focused tests) | In-session or worker |
 | `gatecheck` | Require fresh command output before claiming success | In-session or worker |
-| `touchdown` | Verify tests and complete via PR, fast-forward local merge, keep, or discard | In-session or Capsule Communicator final step |
+| `touchdown` | Verify tests and complete via PR, fast-forward local merge, or keep | In-session or Capsule Communicator final step |
 
 ---
 
@@ -162,6 +165,8 @@ Or load directly from a local checkout:
 ```sh
 claude --plugin-dir /path/to/mission-control
 ```
+
+This is enough for the standalone skills, but `mission` and `launch-plan` start headless `claude -p` workers, which don't load a `--plugin-dir` plugin. For those, use the marketplace install above or `install.sh`.
 
 ### Option 3: Direct Skills-Folder Release (`install.sh`)
 

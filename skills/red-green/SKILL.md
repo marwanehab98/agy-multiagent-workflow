@@ -1,6 +1,6 @@
 ---
 name: red-green
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Use when the user asks for TDD, test-first, or red-green development, or a mission or launch-plan worker prompt says to use it. Strict RED-GREEN-REFACTOR before implementation code.
 ---
 
 # Test-Driven Development (TDD)
@@ -15,7 +15,7 @@ Write the test first. Watch it fail. Write minimal code to pass.
 
 ## When to Use
 
-**Always:**
+**Always, once this skill is in use:**
 - New features
 - Bug fixes
 - Refactoring

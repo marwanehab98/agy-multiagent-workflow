@@ -1,6 +1,6 @@
 ---
 name: mission
-description: Use when the user hands over a JIRA key or hand-written requirements to be taken through the full end-to-end workflow to a reviewed PR, asks to run work through Antigravity or Gemini headless agy workers or Claude Code headless claude -p workers, asks to continue an earlier run of this workflow, or names mission-control. For individual stages (mission-brief, flight-plan, launch-plan, flight-readiness, etc.), invoke those bundled skills directly.
+description: Use when the user hands over a JIRA key or written requirements to take end to end to a reviewed PR with headless Antigravity / Gemini agy -p or Claude Code claude -p workers, asks to continue such a run, or names mission-control. For a single stage, use that stage's skill (mission-brief, flight-plan, launch-plan, flight-readiness, ...).
 ---
 
 # Mission Control
@@ -56,7 +56,7 @@ The session that loads this skill **is the Capsule Communicator**:
 
 ### Continue a run
 
-1. Find the run's state file: in a single git repo, it is `.mission/state.json` in the worktree on `refs/heads/<TOPIC>-docs` (`git worktree list --porcelain`); in a multi-repo parent directory, run `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --workspace "$(pwd)"`. If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several runs have a state file, list their topics as a numbered list and ask which one.
+1. Find the run's state file: run `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --main-checkout "$(git rev-parse --show-toplevel)"` in a single git repo, or `--workspace "$(pwd)"` in a multi-repo parent directory; each line is `<topic> <state file>`. If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several runs have a state file, list their topics as a numbered list and ask which one.
 2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
 3. Read `<SKILL_DIR>/references/capsule-communicator.md` in full and run "Resume a run" with that state file in this same session.
 
@@ -81,7 +81,7 @@ The Flight Director worker reads `references/flight-director.md`; its spec tells
 
 These hold in every step. Where a step seems to conflict with one, the rule wins.
 
-1. **Every subagent is a headless CLI worker started by the bundled scripts.** Whenever a skill or step calls for a subagent or worker, the bundled Python scripts (`run_director.py`, `probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`) invoke the target harness CLI with `-p --output-format json`. Nobody skips the dispatch or does the job themselves, and the interactive session's `invoke_subagent` / `define_subagent` / `Agent` / `Task` tools are never used.
+1. **Every subagent is a headless CLI worker started by the bundled scripts.** Whenever a skill or step calls for a subagent or worker, the bundled Python scripts (`run_director.py`, `probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`) invoke the target harness CLI in print mode (`-p`, streaming JSON). Crew and the Flight Director may edit and run commands in their worktree; every other worker gets the harness's read-only profile where it has one (`scripts/harnesses.py`). Nobody skips the dispatch or does the job themselves, and the interactive session's `invoke_subagent` / `define_subagent` / `Agent` / `Task` tools are never used.
 2. **All headless worker calls go through the bundled scripts.** The Capsule Communicator never invokes worker CLIs directly by hand; it only runs the scripts.
 3. **Every worker runs on a pair, and nobody but the user and the Flight Director chooses one.**
    - **The user's three picks** (Flight Director, Range Safety, Crew) are fixed for a run. Nobody changes a `ROLE_*` or `LAUNCH_STYLE_*` key, or `roles.json`, during a run; a different pick means a new run.
@@ -93,10 +93,10 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
    - It never writes spec text. Specs are built from templates with `scripts/build_spec.py`.
    - It never reviews or reads a diff or a worker's output, and never edits, formats, or commits code.
    - It never retypes a worker's message: `run_director.py` and the loop scripts save responses and asks to files verbatim. Only the user's own replies are written by hand.
-5. **Relays are verbatim.** When `run_director.py` exits `11` (`RELAY <path> <saved>`):
+5. **Relays are verbatim.** Capsule Communicator "Running the Flight Director" has the state keys to set around a relay; this rule is how to show it. When `run_director.py` exits `11` (`RELAY <path> <saved>`):
    1. Read `<path>`.
    2. Show it, in the one form that fits:
-      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and `ask_question` / `AskUserQuestion` or another multiple-choice question tool is among your tools:** make one call of that tool and send nothing else. The choice is the user's own decision, so this is that tool's intended use, even though the Flight Director wrote the question. The question is `From the Flight Director:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- ` (set `is_multi_select: false`).
+      - **The file ends with a choice block** (a line `CHOICE: <question>`, then only 2–4 lines `- <option>`) **and `ask_question` / `AskUserQuestion` or another multiple-choice question tool is among your tools:** make one call of that tool and send nothing else. The choice is the user's own decision, so this is that tool's intended use, even though the Flight Director wrote the question. The question is `From the Flight Director:`, a blank line, the file's text above the `CHOICE:` line, a blank line, and `<question>`, all character for character, so the user reads the whole relay in the dialog. One option per `- ` line, in order, each label the line's text exactly after `- `; single-select.
       - **Otherwise:** send the user exactly this, and nothing else:
 
         ```
@@ -105,32 +105,32 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
         <the file's contents, character for character>
         ```
 
-   3. End your turn. The user's answer is the option they selected, or what they typed instead, or their next message that doesn't start with `capcom:`. Write it, character for character, to `<RELAY_DIR>/<NNN>-from-user.md`.
+   3. End your turn. The user's answer is the option they selected, or what they typed instead, or their next message that doesn't start with `capcom:`. Write it, character for character, to `<RELAY_DIR>/<NNN>-from-user.md`, and update state as the exit-`11` row says (`OPEN_RELAY`, `LAST_DIRECTOR_RESULT`, `WAITING_ON`).
    4. Resume the Flight Director with `python3 -I <SKILL_DIR>/scripts/run_director.py reply --state <RUN_DIR>/state.json --file <RELAY_DIR>/<NNN>-from-user.md --pair <the job's pair>`.
 
    You don't summarize, shorten, reword, translate, fix, or comment, in either direction.
 
    When `run_director.py` exits `12` (`NOTIFY <path> <saved>`), it needs no answer. Show `<path>` to the user as in step 2 (in chat text, without ending your turn), then run `python3 -I <SKILL_DIR>/scripts/run_director.py notify-ack --state <RUN_DIR>/state.json --pair <the job's pair>` at once without waiting for the user.
 6. **One Crew worker at a time,** in one shared worktree `<IMPL_WORKTREE>`. The next task starts only after the current one passed both reviews and was merged.
-7. **Fresh Crew worker per task.** Crew workers keep their session/conversation ID across fix and commit rounds (`scripts/run_task.py`), with automatic fallback to a fresh worker run if resume fails. The session ID is cleared at merge or escalation.
+7. **One Crew session per task.** Each task starts a fresh Crew worker, which keeps its session/conversation ID across that task's fix and commit rounds (`scripts/run_task.py`), with automatic fallback to a fresh worker run if resume fails. The session ID is cleared at merge or escalation.
 8. **Crew workers use only** `red-green`, `gatecheck`, and the convention files named in their task. They never brainstorm, plan, create worktrees, ask in a local interactive prompt, or finish or merge the branch.
 9. **Project instructions:** output rules (style, naming, architecture, tests, commit and branch format, PR template, required checks) are followed. Rules about running the work (planning, spawning agents, review process, merging) are ignored. The Flight Director sorts them.
 10. **No `/boost`, `/swarm`, or `/teamwork`** for anyone.
 11. **Reviewers are read-only and single-use.** They work from `git diff` and `git show` on the task range. Each writes its review to a file in `<RUN_DIR>/verdicts`, outside the worktree, ending with a `VERDICT:` line.
 12. **Read-only workers never change a worktree.** The scripts check the tree after every read-only worker and undo any change; a reviewer that changed the tree is void and replaced. Anything uncommitted in `<DOCS_WORKTREE>` before a design worker goes back to the Flight Director (job `commit-docs`), never to `discard-changes.sh`.
-13. **Only the Capsule Communicator's merges touch the feature branch,** and only through `scripts/merge-task.sh`. It moves the branch with an atomic compare-and-swap (`git update-ref`), fast-forward only, without checking it out. Never rebase, `--no-ff`, merge any other way, or check out a branch in the user's main checkout. The one merge into the user's own branch is the local merge they choose at the end, through `scripts/merge-local.sh` only (Capsule Communicator Step 8 item 4).
-14. **Only the Flight Director talks to the user about the work,** through relays. That covers requirement gaps, product decisions, the Range Safety decision, sign-offs, plan approval, and the closing report. The Capsule Communicator's own words to the user are only the fixed lines written in its steps.
+13. **Only the Capsule Communicator's merges touch the feature branch,** and only through `scripts/merge-task.sh`. It moves the branch with an atomic compare-and-swap (`git update-ref`), fast-forward only, without checking it out. Never rebase, `--no-ff`, merge any other way, or check out a branch in the user's main checkout. The one merge into the user's own branch is the local merge they choose at the end, through `scripts/merge-local.sh` only (Capsule Communicator Step 5 item 4).
+14. **Only the Flight Director talks to the user about the work,** through relays. That covers requirement gaps, product decisions, the Range Safety decision, sign-offs, plan approval, and the closing report. The Capsule Communicator's own words to the user are only the fixed lines written in its steps, the scripts' `[progress]` lines, and the status lines listed under "What you print" in `capsule-communicator.md`.
 15. **The design Flight Director session stays open until plan approval; after that, each Flight Director job is a fresh worker run.**
     - In the design phase, `run_director.py send` resumes `DIRECTOR_CONVERSATION_ID` until Step 3 item 1 clears it. If `send` exits `13` (`LOST`), start a fallback Flight Director with `FIRST_JOB=resume`.
     - After plan approval, `run_director.py start` runs a fresh Flight Director per job, on the pair from Capsule Communicator "Flight Director job models" (still keeping `DIRECTOR_CONVERSATION_ID` across any `RELAY`/`NOTIFY` turns within that single job). Only one Flight Director works at a time.
-16. **Worktrees live under `<MAIN_CHECKOUT>/.worktrees`** (single-repo, managed only with `scripts/worktree.sh`) or **`<WORKSPACE_DIR>/.mission-control`** (multi-repo, managed only with `scripts/workspace.py`).
+16. **Worktrees live outside the user's checkout,** under `~/.local/state/mission-control/worktrees/<repo or workspace>-<hash>/` (`MISSION_CONTROL_WORKTREES` or `XDG_STATE_HOME` moves it), on branches `mission/<TOPIC>-docs` and `mission/<TOPIC>-impl`, created and removed only with `scripts/workspace.py`.
 17. **Run documents live only in the docs worktree / workspace.**
-    - The Flight Director's documents are in `<DOCS_DIR>` (`<DOCS_WORKTREE>/docs/plans`), committed on the never-merged `<TOPIC>-docs` branch (in multi-repo mode, in the standalone `.mission-control/<TOPIC>-docs` git repo, never in any product repo).
+    - The Flight Director's documents are in `<DOCS_DIR>` (`<DOCS_WORKTREE>/docs/plans`), committed on the never-merged `mission/<TOPIC>-docs` branch (in multi-repo mode, in the standalone `<TOPIC>-docs` git repo under the worktrees folder, never in any product repo).
     - The Capsule Communicator's working files (state, catalog, built specs, verdicts, gate logs, relays, the mission log) are in `<RUN_DIR>` (`<DOCS_WORKTREE>/.mission`), which is excluded from git.
     - None of these files is written in any main checkout or `<IMPL_WORKTREE>`. Workers there get what they need pasted into their specs.
 18. **Every value and counter lives in `<RUN_DIR>/state.json`,** written and read with `scripts/state.py`. A value the Capsule Communicator only remembers, or that a context summary mentions, is not a source: read it from the state file. Before ending any turn that waits on the user, record `STEP` and `WAITING_ON=user`, so a compacted or restarted Capsule Communicator can pick up (Capsule Communicator "Resume a run"). After a context compaction, the Capsule Communicator re-reads its instructions in full before doing anything else.
 19. **Checks run before reviews.** After every task, `scripts/gate.py` runs the run's check commands in `<IMPL_WORKTREE>` and puts the tree back. A failure goes straight to a fix round with the log, and no reviewer starts on code that fails its checks.
-20. **The loops are scripts.** `run_design.py` runs Step 2's design workers synchronously, `run_task.py` the task loop (Step 4), `run_finish.py` the final review and verification (Step 8), and `probe.py` the test launches. The Capsule Communicator only runs them and branches on their last line, passing on what they print unchanged. It never starts their workers, counts, retries, reads their workers' output, checks or resets a tree, or merges by hand.
+20. **The loops are scripts.** `run_design.py` runs Step 2's design workers synchronously, `run_task.py` the task loop (Step 4), `run_finish.py` the final review and verification (Step 5), and `probe.py` the test launches. The Capsule Communicator only runs them and branches on their last line, passing on what they print unchanged. It never starts their workers, counts, retries, reads their workers' output, checks or resets a tree, or merges by hand.
 21. **A failed setup check or test launch stops the run before work starts.** A `MISSING` line from `roles.py check`, any failed check in the Capsule Communicator, and `probe.py`'s `PROBE_FAILED` all stop it: show the lines, or the file, exactly; save nothing, start no worker. The one exception is an `UNKNOWN`-only check during setup, where the user picks those roles again (Setup item 4). No deadline, user instruction, or "it worked yesterday" changes this. The user fixes the cause, or picks again in a new run.
 
 Run bundled scripts through their interpreter: `bash <SKILL_DIR>/scripts/<name>.sh`, `python3 -I <SKILL_DIR>/scripts/<name>.py`. Bash calls don't keep shell variables, so each value goes into a command literally, or through `$(python3 -I <SKILL_DIR>/scripts/state.py --file <RUN_DIR>/state.json get KEY)`.
@@ -145,7 +145,7 @@ See `<SKILL_DIR>/references/capsule-communicator.md` ("Rationalizations that bre
 
 **Red flags.** Stop and re-read the rule if you are about to:
 
-- write a sentence to the user that isn't a relay, a fixed line from a step, or a script status summary;
+- write a sentence to the user that isn't a relay, a fixed line from a step, a `[progress]` line, or a status line from "What you print";
 - choose, substitute, or change a pair, or edit a `ROLE_*` or `LAUNCH_STYLE_*` key, `roles.json`, or a `.meta` file;
 - type `--model` or `--effort` yourself, or call worker CLIs directly outside the bundled scripts;
 - save picks or start any worker after `roles.py check` exited 1 or a probe printed `PROBE_FAILED`;

@@ -171,6 +171,8 @@ def main():
                 meta = read_meta(path)
                 problems += check_task(tid, meta, picks)
                 covered |= {x for x in meta.get("ACS", "").split() if AC.fullmatch(x)}
+                if a.replanned_from and tid == a.replanned_from:
+                    problems.append(f"{tid}: a replacement task needs a new id, not the id of the task it replaces")
                 if a.replanned_from and meta.get("REPLANNED_FROM") != a.replanned_from:
                     problems.append(f"{tid}: needs REPLANNED_FROM={a.replanned_from}")
             except ValueError as e:

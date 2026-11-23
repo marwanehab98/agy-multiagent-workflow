@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent.parent
+# Run worktrees default to ~/.local/state/mission-control; tests must never write there.
+os.environ.setdefault("MISSION_CONTROL_WORKTREES", tempfile.mkdtemp(prefix="mc-test-worktrees-"))
 RUN_TASK = SKILL / "scripts" / "run_task.py"
 FAKE = SKILL / "tests" / "fake_agy.py"
 CATALOG = SKILL / "tests" / "fixtures" / "catalog.json"

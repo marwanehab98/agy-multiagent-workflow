@@ -23,6 +23,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 LINE = re.compile(r"(GATE|VERIFY)_(\d+)=(.*)")
@@ -68,32 +69,45 @@ def git(wt, *args):
     return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True, errors="replace")
 
 
-def _run_cmd(cmd, cwd, timeout):
-    proc = subprocess.Popen(
-        cmd,
-        shell=True,
-        cwd=cwd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
-        start_new_session=True,
-    )
+_ACTIVE = []
+
+
+def _kill_group(pid, sig=signal.SIGKILL):
     try:
-        out_s, err_s = proc.communicate(timeout=timeout)
-        return proc.returncode, out_s, err_s
-    except subprocess.TimeoutExpired:
+        os.killpg(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _on_signal(signum, _frame):
+    for pid in list(_ACTIVE):
+        _kill_group(pid)
+    sys.exit(128 + signum)
+
+
+def _run_cmd(cmd, cwd, timeout):
+    """Run one check with the shell. Output goes to temp files, not pipes, and the wait is on the process
+    itself, so a background child that keeps the output open (`npm run dev &`) cannot turn a pass into a
+    timeout. Whatever the command started is killed when it ends. Returns (rc or None on timeout, out, err)."""
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as out_f, \
+            tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as err_f:
+        proc = subprocess.Popen(cmd, shell=True, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out_f, stderr=err_f,
+                                start_new_session=True)
+        _ACTIVE.append(proc.pid)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            out_s, err_s = proc.communicate(timeout=5)
+            rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            out_s, err_s = "", ""
-        return None, out_s or "", err_s or ""
+            rc = None
+        finally:
+            _kill_group(proc.pid)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            _ACTIVE.remove(proc.pid)
+        out_f.seek(0)
+        err_f.seek(0)
+        return rc, out_f.read(), err_f.read()
 
 
 def main():
@@ -107,6 +121,8 @@ def main():
     p.add_argument("--repo", default="")
     a = p.parse_args()
     repo = a.repo.strip() or None
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, _on_signal)
 
     cmds = commands(a.flight_manifest, a.prefix, repo=repo)
     if not cmds:

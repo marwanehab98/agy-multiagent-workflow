@@ -61,7 +61,7 @@ class PluginBundleTests(unittest.TestCase):
         self.assertTrue(claude_path.is_file(), ".claude-plugin/plugin.json missing")
         claude_manifest = json.loads(claude_path.read_text(encoding="utf-8"))
         self.assertEqual(claude_manifest["name"], "mission-control")
-        for key in ("version", "license", "repository", "author"):
+        for key in ("version", "description", "license", "repository", "author"):
             self.assertEqual(claude_manifest[key], root_manifest[key], key)
 
     def test_claude_marketplace_manifest_matches_plugin_manifest(self):
@@ -76,7 +76,7 @@ class PluginBundleTests(unittest.TestCase):
         entry = mp["plugins"][0]
         self.assertEqual(entry["name"], claude_manifest["name"])
         self.assertEqual(entry["source"], "./")
-        self.assertTrue(entry.get("description"))
+        self.assertEqual(entry["description"], claude_manifest["description"])
         self.assertNotIn("version", entry, "omit version on entry so plugin.json stays the single source of truth")
 
     def test_all_expected_skills_and_frontmatter(self):
@@ -99,6 +99,13 @@ class PluginBundleTests(unittest.TestCase):
         standards = {p.name for p in (ROOT / "resources" / "document_standards").iterdir() if p.is_file()}
         self.assertEqual(standards, EXPECTED_STANDARDS)
         self.assertTrue((ROOT / "resources" / "execution_instructions.md").is_file())
+        for name in sorted(EXPECTED_AGENTS):
+            fm = (ROOT / "agents" / name).read_text(encoding="utf-8").split("\n---\n", 1)[0]
+            tools = re.search(r"^tools: \[(.*)\]$", fm, re.M)
+            self.assertTrue(tools, f"{name}: no tools allowlist")
+            claude_tools = {t for t in tools.group(1).split(", ") if t[0].isupper()}
+            self.assertEqual(claude_tools, {"Read", "Grep", "Glob"} | ({"Write"} if name == "synthesizer.md" else set()), name)
+            self.assertIn("license:", fm, name)
 
     def test_no_dangling_external_skill_or_doc_references(self):
         hits = []

@@ -38,7 +38,8 @@ def real_runner(cmd):
         r = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=60)
     except (OSError, subprocess.TimeoutExpired) as e:
         return 127, str(e)
-    return r.returncode, r.stdout + (r.stderr if r.returncode else "")
+    # Some CLIs print help to stderr and exit 0 (agy --help): use stderr when stdout is empty.
+    return r.returncode, r.stdout + (r.stderr if r.returncode or not r.stdout.strip() else "")
 
 
 FIXTURE_FILES = {
@@ -46,6 +47,7 @@ FIXTURE_FILES = {
     ("agy", "plugin", "list"): "agy_plugin_list.txt",
     ("agy", "mcp", "list"): "agy_mcp_list.txt",
     ("agy", "--version"): "agy_version.txt",
+    ("agy", "--help"): "agy_help.txt",
     ("claude", "--version"): "claude_version.txt",
     ("claude", "--help"): "claude_help.txt",
     ("claude", "plugin", "list"): "claude_plugin_list.txt",
@@ -89,6 +91,33 @@ def _summarize_tool_args(info, limit=80):
             s = " ".join(val.split())
             return (s[: limit - 3] + "...") if len(s) > limit else s
     return ""
+
+
+# Git subcommands a read-only Claude worker may run (reviewers read the task's diff and history).
+READ_ONLY_GIT = ["diff", "log", "show", "status", "rev-parse", "ls-files", "grep", "blame"]
+
+
+def _one_line(text, limit):
+    s = " ".join(_as_text(text).split())
+    return (s[: limit - 3] + "...") if len(s) > limit else s
+
+
+def _block_text(content):
+    """Plain text of a tool_result's content (a string, or a list of {type: text, text} blocks)."""
+    if isinstance(content, list):
+        return " ".join(_as_text(c.get("text")) if isinstance(c, dict) else _as_text(c) for c in content)
+    return _as_text(content)
+
+
+def _todo_summary(info):
+    """'todo 2/5 done, now: <the in-progress item>' from a TodoWrite call's input."""
+    todos = info.get("todos") if isinstance(info, dict) else None
+    if not isinstance(todos, list) or not todos:
+        return "todo updated"
+    done = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "completed")
+    now = next((t.get("activeForm") or t.get("content") for t in todos
+                if isinstance(t, dict) and t.get("status") == "in_progress"), "")
+    return f"todo {done}/{len(todos)} done" + (f", now: {_one_line(now, 80)}" if now else "")
 
 
 class Adapter:
@@ -146,9 +175,22 @@ class Adapter:
         return found
 
     @classmethod
-    def build_exec_cmd(cls, exe, prompt, args, conversation_id=None, stream=True):
+    def permission_args(cls, access, write_dirs=()):
+        """CLI permission flags for a worker. access is "full" (crew, flight director: edits and commands
+        in their worktree) or "read" (reviewers, design workers, probes), which may also write files only under
+        write_dirs (its output file). Each harness defines its read-only profile; check-tree.sh also voids any
+        worktree change afterwards."""
+        raise NotImplementedError
+
+    def read_sandbox(self):
+        """Whether this harness version has the flags permission_args uses (recorded in the catalog as
+        read_sandbox; roles.py and validate_meta.py refuse a harness without them)."""
+        raise NotImplementedError
+
+    @classmethod
+    def build_exec_cmd(cls, exe, prompt, args, conversation_id=None, stream=True, access="full", write_dirs=()):
         fmt_args = cls.stream_output_args if stream else cls.json_output_args
-        cmd = [exe, "-p", prompt, *fmt_args, "--dangerously-skip-permissions", *args]
+        cmd = [exe, "-p", prompt, *fmt_args, *cls.permission_args(access, write_dirs), *args]
         if conversation_id:
             cmd += [cls.resume_flag, conversation_id]
         return cmd
@@ -175,6 +217,33 @@ class AntigravityAdapter(Adapter):
     models_cmd = ("models",)
     exe_state_key = "AGY"
     resume_flag = "--conversation"
+
+    def read_sandbox(self):
+        rc, out = self.run("--help")
+        return rc == 0 and all(f in out for f in ("--sandbox", "--settings", "--add-dir"))
+
+    @classmethod
+    def permission_args(cls, access, write_dirs=()):
+        """Read-only workers: the terminal sandbox instead of --dangerously-skip-permissions (which by design also
+        approves sandbox bypasses, antigravity-cli#36). Commands run without prompts inside the sandbox: no
+        network, no writes outside the workspace and write_dirs. File tools may write only in the workspace and
+        write_dirs (allowNonWorkspaceAccess=false plus --add-dir); reading stays open, for skill files. Headless
+        agy soft-denies anything else, which ends the worker's run. Verified live 2026-11-23 with targets
+        under $HOME (/tmp stays writable in the sandbox)."""
+        if access != "read":
+            return ["--dangerously-skip-permissions"]
+        dirs = [str(Path(d).resolve()) for d in write_dirs]
+        settings = {
+            "toolPermission": "proceed-in-sandbox",
+            "enableTerminalSandbox": True,
+            "allowNonWorkspaceAccess": False,
+            "permissions": {
+                "allow": ["read_file(*)", *[f"write_file({d})" for d in dirs]],
+                "deny": ["read_url(*)", "execute_url(*)"],
+            },
+        }
+        add_dirs = [arg for d in dirs for arg in ("--add-dir", d)]
+        return ["--sandbox", *add_dirs, "--settings", json.dumps(settings, separators=(",", ":"))]
 
     def models(self):
         rc, raw = self.run(*self.models_cmd)
@@ -240,6 +309,11 @@ class AntigravityAdapter(Adapter):
         resp = _as_text(data.get("response"))
         err = _as_text(data.get("error"))
         ok = (status == "SUCCESS" and returncode == 0)
+        denied = data.get("denied_actions") if isinstance(data.get("denied_actions"), list) else []
+        if ok and denied and not resp.strip():
+            # Headless agy ends the run, with no response, at the first action it could not get approved.
+            names = ", ".join(_as_text(d.get("action") if isinstance(d, dict) else d) for d in denied)
+            ok, err = False, f"the worker stopped at an action its permissions deny ({names}); no response"
         detail = "" if ok else (err or resp or raw_err or f"{exe} exited {returncode} (status={status})").strip()
         return {
             "ok": ok,
@@ -286,6 +360,30 @@ class ClaudeAdapter(Adapter):
     exe_state_key = "CLAUDE"
     resume_flag = "--resume"
     stream_output_args = ["--output-format", "stream-json", "--verbose"]
+    # Read-only workers get no general shell and no network: reading, writing only under write_dirs (their
+    # output file), subagents and skills for the review swarms, and read-only git. Anything else is denied
+    # without a prompt (dontAsk). check-tree.sh still voids any change to the worktree.
+    # Verified live: `git -C <repo> diff` (multi-repo reviewers) and `git diff | head` match; a redirect into a
+    # file (`git diff > f`), `git push` and `cd x && ...` are denied.
+    READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "LS", "NotebookRead", "TodoWrite", "Task", "Agent", "Skill",
+                       *[f"Bash(git {c} *)" for c in READ_ONLY_GIT],
+                       *[f"Bash(git -C * {c} *)" for c in READ_ONLY_GIT],
+                       "Bash(head *)", "Bash(tail *)", "Bash(wc *)"]
+
+    def read_sandbox(self):
+        rc, out = self.run("--help")
+        return rc == 0 and all(f in out for f in ("--permission-mode", "--allowedTools", "--strict-mcp-config"))
+
+    @classmethod
+    def permission_args(cls, access, write_dirs=()):
+        if access == "read":
+            # "//" marks an absolute path in a permission rule; Edit rules cover every file-editing tool.
+            writes = [f"{tool}(/{Path(d).resolve()}/**)" for d in write_dirs for tool in ("Edit", "Write")]
+            # One comma-joined value: --allowedTools is variadic and must not swallow later arguments.
+            # --strict-mcp-config with no --mcp-config: no MCP servers (none of them is read-only by contract).
+            return ["--permission-mode", "dontAsk", "--allowedTools", ",".join(cls.READ_ONLY_TOOLS + writes),
+                    "--strict-mcp-config"]
+        return ["--dangerously-skip-permissions"]
 
     def models(self):
         rc, raw = self.run(*self.models_cmd)
@@ -427,19 +525,30 @@ class ClaudeAdapter(Adapter):
         if ev_type == "system" and data.get("subtype") == "init":
             sid = _as_text(data.get("session_id")).strip()
             return (f"init session={sid}" if sid else "init"), None
+        msg = data.get("message") if isinstance(data.get("message"), dict) else {}
+        content = msg.get("content") if isinstance(msg.get("content"), list) else []
+        blocks = [b for b in content if isinstance(b, dict)]
         if ev_type == "assistant":
-            msg = data.get("message") if isinstance(data.get("message"), dict) else {}
-            content = msg.get("content") if isinstance(msg.get("content"), list) else []
-            tools = []
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    name = _as_text(block.get("name")).strip() or "tool"
-                    hint = _summarize_tool_args(block.get("input"))
-                    tools.append(f"{name} ({hint})" if hint else name)
-            if tools:
-                return f"tool: {', '.join(tools)}", None
-            if any(isinstance(b, dict) and b.get("type") == "text" for b in content):
-                return "assistant response", None
+            parts = []
+            texts = [_as_text(b.get("text")) for b in blocks if b.get("type") == "text"]
+            said = _one_line(" ".join(texts), 160)
+            if said:
+                parts.append(f"says: {said}")
+            for block in blocks:
+                if block.get("type") != "tool_use":
+                    continue
+                name = _as_text(block.get("name")).strip() or "tool"
+                if name == "TodoWrite":
+                    parts.append(_todo_summary(block.get("input")))
+                    continue
+                hint = _summarize_tool_args(block.get("input"))
+                parts.append(f"tool: {name} ({hint})" if hint else f"tool: {name}")
+            return (" | ".join(p for p in parts if p) or None), None
+        if ev_type == "user":
+            errors = [_one_line(_block_text(b.get("content")), 160) for b in blocks
+                      if b.get("type") == "tool_result" and b.get("is_error")]
+            if errors:
+                return f"tool error: {errors[0]}", None
         return None, None
 
 
@@ -476,6 +585,7 @@ def detect(runner, home, env=None):
             "binary": found["binary"], "version": found["version"],
             "styles": list(a.styles), "models": models, "skills": a.skills(), "plugins": a.plugins(),
             "mcp": a.mcp(), "broken": None if models else (a.raw_models()[:400] or "no output"),
+            "read_sandbox": a.read_sandbox(),
             "skill_dirs": [str(d) for d in a.user_skill_dirs()],
             "plugin_cmd": f"{a.binary} plugin list", "mcp_cmd": f"{a.binary} mcp list",
         }

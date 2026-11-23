@@ -319,6 +319,10 @@ class MixedCrossHarnessTests(MultiHarnessBase):
         self.assertEqual(self.claude_calls()[0]["model"], "opus")
         self.assertEqual(self.claude_calls()[0]["effort"], "high")
         self.assertEqual(self.calls()[0]["model"], "g-high")
+        # Test launches are read-only workers: the agy sandbox profile, never the skip-permissions flag.
+        for c in self.calls():
+            self.assertTrue(c["sandbox"])
+            self.assertFalse(c["skip_permissions"])
 
     def test_run_task_mixed_agy_crew_and_claude_reviewers(self):
         meta = self.docs / "tasks" / "01.meta"
@@ -333,6 +337,15 @@ class MixedCrossHarnessTests(MultiHarnessBase):
         self.assertEqual(len(self.calls()), 1)
         self.assertEqual(len(self.claude_calls()), 2)
         self.assertEqual(self.claude_calls()[0]["model"], "sonnet")
+        # Crew edits and commits: full access. Reviewers are read-only: no skip flag, a dontAsk allowlist
+        # with read-only git and no general shell.
+        self.assertTrue(self.calls()[0]["skip_permissions"])
+        for c in self.claude_calls():
+            self.assertFalse(c["skip_permissions"])
+            self.assertEqual(c["permission_mode"], "dontAsk")
+            self.assertIn("Bash(git diff *)", c["allowed_tools"].split(","))
+            self.assertNotIn("Bash", c["allowed_tools"].split(","))
+            self.assertNotIn("Write", c["allowed_tools"].split(","))
         self.assertEqual(self.claude_calls()[1]["model"], "opus")
 
     def test_run_design_with_claude_safety_resolves_claude_skills_and_dispatches(self):

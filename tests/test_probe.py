@@ -41,7 +41,9 @@ class ProbeTest(Base):
         calls = self.calls()
         self.assertEqual(len(calls), 3)
         self.assertTrue(all(c["prompt"].startswith("This is a launch test.") for c in calls))
-        self.assertTrue(all("--dangerously-skip-permissions" in c["argv"] for c in calls))
+        # Test launches are read-only workers: the sandbox profile, never the skip-permissions flag.
+        self.assertTrue(all("--sandbox" in c["argv"] and "--dangerously-skip-permissions" not in c["argv"]
+                            for c in calls))
 
     def test_slug_rejected_falls_back_to_flag(self):
         self.rules([RULE("big-high", "default")] + G_FLAG)

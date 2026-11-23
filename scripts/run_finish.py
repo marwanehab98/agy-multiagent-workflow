@@ -1,4 +1,4 @@
-"""Run the capsule communicator's Step 8 items 1-3 (starting-state check, final review, final-fix rounds,
+"""Run the capsule communicator's Step 5 items 1-3 (starting-state check, final review, final-fix rounds,
 verification, drift check) synchronously via headless CLI workers.
 
 Usage:
@@ -10,7 +10,7 @@ Usage:
 
 The last line of stdout is the status.
 Exit 0   VERIFIED <log>                    the VERIFY commands passed (or the user accepted a failing
-                                           run); go to Step 8 item 4 with <log> as the verify log
+                                           run); go to Step 5 item 4 with <log> as the verify log
 Exit 20  DIRECTOR_JOB <job> <input>        send that flight director job with INPUT=<input>. Jobs:
                                            final-review <verdict file>, verification-failed <log>,
                                            fix-meta <validate output>, drift-done <findings|failed: file>
@@ -19,7 +19,7 @@ Exit 21  RUN_QUEUE <F id>                  queue.txt now holds only that id: run
 Exit 22  CONSULT <ask_file>                a worker exited with ASK:; run flight director job `consult` with
                                            INPUT=<ask_file>, then call advance --answer <answer_file>
 Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass the reply back
-Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 8 item 7
+Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 5 item 7
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 """
@@ -29,9 +29,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, AgyRunner, Done, Run, build, bundled_skills_dir,  # noqa: E402
-                    check_repo_trees, discard_repo_trees, first_words, next_free, pick_verdict, repo_key, save_body,
-                    tool, verdict_line)
+from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, AgyRunner, Done, Run, answer_worker, build,  # noqa: E402
+                    bundled_skills_dir, check_repo_trees, discard_repo_trees, drive, first_words, next_free,
+                    pick_verdict, read_answer, repo_key, save_ask, save_body, tool, usage_prompt, verdict_line,
+                    void_prompt, write_atomic, write_prompt)
 from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 from pairs import parse_pair  # noqa: E402
 
@@ -68,15 +69,13 @@ class Finish:
         raise Done(ESCALATE, line)
 
     def prompt(self, name, text, accepted):
-        f = next_free(self.r.run_dir / "results", "prompt-{n}.md")
-        f.write_text(text.rstrip("\n") + "\n", encoding="utf-8")
+        f = write_prompt(self.r, text)
         self.set_phase(f"prompt:{name}", FIN_PROMPT_FILE=f, FIN_PROMPT_ACCEPT=" ".join(accepted), WAITING_ON="user")
         raise Done(PROMPT, f"PROMPT {f} {' '.join(accepted)}")
 
     def ask_consult(self, kind, pair, spec, conv_id, body):
         r = self.r
-        ask = next_free(r.run_dir / "asks", f"finish-{kind}-{{n}}.md")
-        save_body(body, ask, header=f"finish phase ({kind})")
+        ask = save_ask(r, f"finish-{kind}", body, header=f"finish phase ({kind})")
         r.set(FIN_ASK_CONV=conv_id, FIN_ASK_KIND=kind, FIN_ASK_PAIR=pair, FIN_ASK_SPEC=spec, FIN_ASK_FILE=ask)
         self.set_phase("consult", WAITING_ON="director")
         raise Done(CONSULT, f"CONSULT {ask}")
@@ -127,7 +126,7 @@ class Finish:
         pair = r.need("ROLE_DIRECTOR")
         self.set_phase("reviewing", FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair)
         r.log(f"final review {n} dispatched {pair}")
-        result = self.runner.run(spec, pair=pair, worktree=r.impl)
+        result = self.runner.run(spec, pair=pair, worktree=r.impl, access="read")
         self.settle_review(result)
 
     def settle_review(self, result):
@@ -135,9 +134,7 @@ class Finish:
         head = None if r.is_multi_repo else r.need("FIN_HEAD")
         if result[0] == "usage":
             self._discard_or_error(head)
-            self.prompt("usage-limit",
-                        f"The final reviewer hit its model's usage limit: {result[1]}\n"
-                        "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.", ["retry", "stop"])
+            self.prompt("usage-limit", usage_prompt("The final reviewer", result[1]), ["retry", "stop"])
         if result[0] == "stopped":
             self._discard_or_error(head)
             return self.void("stopped without a verdict")
@@ -175,9 +172,7 @@ class Finish:
         n = r.incr("VOIDS_FINAL")
         r.log(f"final reviewer void: {why}")
         if n >= 3:
-            self.prompt("void", f"Three final reviewers in a row were void ({why}).\n"
-                                "Reply \"retry\" to start a new reviewer, or \"stop\" to stop the run.",
-                        ["retry", "stop"])
+            self.prompt("void", void_prompt("The final review", why), ["retry", "stop"])
         self.set_phase("review")
 
     # -- item 3: verification
@@ -244,7 +239,7 @@ class Finish:
         pair = r.need("ROLE_SAFETY")
         self.set_phase("drifting", FIN_OUT=out, FIN_SPEC=spec, FIN_PAIR=pair)
         r.log(f"drift check dispatched {pair}")
-        result = self.runner.run(spec, pair=pair, worktree=r.impl)
+        result = self.runner.run(spec, pair=pair, worktree=r.impl, access="read")
         self.settle_drift(result)
 
     def settle_drift(self, result):
@@ -259,10 +254,7 @@ class Finish:
         if result[0] == "ask":
             return self.ask_consult("drift", r.need("FIN_PAIR"), r.need("FIN_SPEC"), result[1], result[2])
         if result[0] == "usage":
-            self.prompt("drift-usage-limit",
-                        f"The drift check hit its model's usage limit: {result[1]}\n"
-                        "Reply \"retry\" once the limit has reset, or \"stop\" to stop the run.",
-                        ["retry", "stop"])
+            self.prompt("drift-usage-limit", usage_prompt("The drift check", result[1]), ["retry", "stop"])
         out = Path(r.need("FIN_OUT"))
         ok = result[0] == "done" and result[1] == "succeeded" and out.is_file() and out.read_text(encoding="utf-8").strip()
         if ok:
@@ -283,22 +275,16 @@ class Finish:
         r = self.r
         if self.phase() != "consult":
             raise Done(ERROR, f"ERROR NO_CONSULT_OPEN phase={self.phase()}")
-        p = Path(answer_path)
-        if not p.is_file():
-            raise Done(ERROR, f"ERROR MISSING_FILE {p}")
+        ans = read_answer(answer_path)
         kind = r.need("FIN_ASK_KIND")
         pair = r.need("FIN_ASK_PAIR")
         spec = r.need("FIN_ASK_SPEC")
         conv = r.get("FIN_ASK_CONV", "")
-        ans = p.read_text(encoding="utf-8")
         r.set(FIN_ASK_CONV=None, FIN_ASK_KIND=None, FIN_ASK_PAIR=None, FIN_ASK_SPEC=None, FIN_ASK_FILE=None)
         self.set_phase("drifting" if kind == "drift" else "reviewing", WAITING_ON=None)
-        result = self.runner.try_resume(f"Flight Director answer:\n\n{ans}", pair, r.impl, conv)
-        if result is None:
-            self._discard_or_error(None if r.is_multi_repo else (r.need("LAST_MERGED") if kind == "drift" else r.need("FIN_HEAD")))
-            spec_text = Path(spec).read_text(encoding="utf-8")
-            result = self.runner.run(f"{spec_text}\n\nFlight Director answer to your question:\n{ans}",
-                                     pair=pair, worktree=r.impl)
+        head = None if r.is_multi_repo else (r.need("LAST_MERGED") if kind == "drift" else r.need("FIN_HEAD"))
+        result = answer_worker(self.runner, ans, pair, r.impl, conv, spec,
+                               lambda: self._discard_or_error(head), access="read")
         if kind == "drift":
             self.settle_drift(result)
         else:
@@ -377,7 +363,7 @@ class Finish:
 
     def run_queue(self, fid):
         r = self.r
-        (r.run_dir / "queue.txt").write_text(f"{fid}\n", encoding="utf-8")
+        write_atomic(r.run_dir / "queue.txt", f"{fid}\n")
         r.log(f"final fix {fid} queued")
         self.set_phase("review", WAITING_ON=None)  # the next advance, after QUEUE_EMPTY, starts a new review
         raise Done(RUN_QUEUE, f"RUN_QUEUE {fid}")
@@ -457,14 +443,8 @@ def main():
         a = p.parse_args()
     except SystemExit as e:
         return 64 if e.code else 0
-    try:
-        Finish(a.state).advance(a.director_result, a.reply.strip().strip('"').lower() if a.reply else None,
-                                a.answer, a.docs_moved)
-        code, line = ERROR, "ERROR NO_STATUS"
-    except Done as d:
-        code, line = d.code, d.line
-    print(line)
-    return code
+    return drive(a.state, lambda events: Finish(a.state).advance(
+        a.director_result, a.reply.strip().strip('"').lower() if a.reply else None, a.answer, a.docs_moved))
 
 
 if __name__ == "__main__":
