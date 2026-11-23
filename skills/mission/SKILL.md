@@ -119,7 +119,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 11. **Reviewers are read-only and single-use.** They work from `git diff` and `git show` on the task range. Each writes its review to a file in `<RUN_DIR>/verdicts`, outside the worktree, ending with a `VERDICT:` line.
 12. **Read-only workers never change a worktree.** The scripts check the tree after every read-only worker and undo any change; a reviewer that changed the tree is void and replaced. Anything uncommitted in `<DOCS_WORKTREE>` before a design worker goes back to the Flight Director (job `commit-docs`), never to `discard-changes.sh`.
 13. **Only the Capsule Communicator's merges touch the feature branch,** and only through `scripts/merge-task.sh`. It moves the branch with an atomic compare-and-swap (`git update-ref`), fast-forward only, without checking it out. Never rebase, `--no-ff`, merge any other way, or check out a branch in the user's main checkout. The one merge into the user's own branch is the local merge they choose at the end, through `scripts/merge-local.sh` only (Capsule Communicator Step 5 item 4).
-14. **Only the Flight Director talks to the user about the work,** through relays. That covers requirement gaps, product decisions, the Range Safety decision, sign-offs, plan approval, and the closing report. The Capsule Communicator's own words to the user are only the fixed lines written in its steps, the scripts' `[progress]` lines, and the status lines listed under "What you print" in `capsule-communicator.md`.
+14. **Only the Flight Director talks to the user about the work,** through relays. That covers requirement gaps, product decisions, the Range Safety decision, sign-offs, plan approval, and the closing report. The Capsule Communicator's own words to the user are only the fixed lines written in its steps, the note lines `WATCH` prints, and the status lines listed under "What you print" in `capsule-communicator.md`.
 15. **The design Flight Director session stays open until plan approval; after that, each Flight Director job is a fresh worker run.**
     - In the design phase, `run_director.py send` resumes `DIRECTOR_CONVERSATION_ID` until Step 3 item 1 clears it. If `send` exits `13` (`LOST`), start a fallback Flight Director with `FIRST_JOB=resume`.
     - After plan approval, `run_director.py start` runs a fresh Flight Director per job, on the pair from Capsule Communicator "Flight Director job models" (still keeping `DIRECTOR_CONVERSATION_ID` across any `RELAY`/`NOTIFY` turns within that single job). Only one Flight Director works at a time.
@@ -145,7 +145,7 @@ See `<SKILL_DIR>/references/capsule-communicator.md` ("Rationalizations that bre
 
 **Red flags.** Stop and re-read the rule if you are about to:
 
-- write a sentence to the user that isn't a relay, a fixed line from a step, a `[progress]` line, or a status line from "What you print";
+- write a sentence to the user that isn't a relay, a fixed line from a step, a note line from `WATCH`, or a status line from "What you print";
 - choose, substitute, or change a pair, or edit a `ROLE_*` or `LAUNCH_STYLE_*` key, `roles.json`, or a `.meta` file;
 - type `--model` or `--effort` yourself, or call worker CLIs directly outside the bundled scripts;
 - save picks or start any worker after `roles.py check` exited 1 or a probe printed `PROBE_FAILED`;

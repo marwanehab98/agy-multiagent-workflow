@@ -433,6 +433,22 @@ def reap_orphan_worker(state_path):
     return note
 
 
+def _record_call(run_dir, call=None):
+    """Record the call holding the driver lock in <RUN_DIR>/.call for watch.py: a new call (id, pid, where
+    progress.log ends now), or, given the call, mark it ended. Never fails the call."""
+    try:
+        if call is None:
+            log = Path(run_dir) / "progress.log"
+            call = {"id": f"{os.getpid()}-{time.time_ns()}", "pid": os.getpid(),
+                    "offset": log.stat().st_size if log.exists() else 0, "ended": False}
+        else:
+            call = {**call, "ended": True}
+        write_atomic(Path(run_dir) / ".call", json.dumps(call))
+    except OSError:
+        pass
+    return call
+
+
 def drive(state_path, body):
     """Run one `advance` (or director command): hold the run's driver lock so two calls never overlap, stop
     every child on SIGINT/SIGTERM/SIGHUP, stop an orphaned worker first, and turn any exception into a status
@@ -451,8 +467,12 @@ def drive(state_path, body):
         with _FileLock(lock, blocking=False,
                        busy_line="ERROR RUN_BUSY another mission-control script is running on this run ({holder}); "
                                  "wait for it to finish"):
-            reap_orphan_worker(state_path)
-            res = body(events)
+            call = _record_call(lock.parent)
+            try:
+                reap_orphan_worker(state_path)
+                res = body(events)
+            finally:
+                _record_call(lock.parent, call)
         code, line = res if res else (ERROR, "ERROR NO_STATUS")
     except Done as d:
         code, line = d.code, d.line
