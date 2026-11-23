@@ -11,6 +11,8 @@ Usage:
   python3 -I probe.py --state <file> advance --set pair --pair <harness:model@effort>
   python3 -I probe.py --state <file> advance            # continue the stored PROBE_SET
   python3 -I probe.py --state <file> advance --docs-moved
+  python3 -I probe.py --state <file> advance --set resume --if-changed   # skip when harness versions are unchanged
+                                                                         # and every pair has a launch style
 
 Sets: step1 = ROLE_DIRECTOR, ROLE_SAFETY, ROLE_CREW and the crew model at CREW_TOP;
 step3 = every REVIEW_1/REVIEW_2 in the queue's .meta files plus GROUND_CREW_PAIR; pair = one pair;
@@ -21,6 +23,8 @@ Exit 0   PROBED                            every pair in the set has a working l
 Exit 40  PROBE_FAILED <pair> <file>        every style failed; <file> holds each style's failure text
 Exit 21  FIX_META <file>                   step3 only: a flight-director-chosen pair failed; <file> holds
                                            validate_meta.py-style PROBLEM lines for the fix-meta job
+Exit 31  USAGE_LIMIT <pair> <detail>       a test launch hit its model's usage limit; nothing is recorded for the
+                                           pair, so the same call tries it again once the limit has reset
 Exit 2   ERROR <what>                      bad state or missing catalog (OLD_FORMAT_RUN for an old state file)
 Exit 64  bad usage
 """
@@ -36,6 +40,7 @@ from harnesses import launch_args  # noqa: E402
 from pairs import Pair, parse_pair, pair_key  # noqa: E402
 
 PROBED = 0
+USAGE_LIMIT = 31  # as run_director.py: a usage limit says nothing about the pair, so it is not a failed launch
 
 
 class Prober:
@@ -77,6 +82,9 @@ class Prober:
             args = launch_args(self.catalog, pair, style)
             result = self.runner.run(spec, pair=pair, args=args, worktree=self.wt, access="read")
             self.finish_attempt(pair)
+            if result[0] == "usage":
+                self.r.log(f"probe {pair}: launch style {style} hit a usage limit")
+                raise Done(USAGE_LIMIT, f"USAGE_LIMIT {pair} {' '.join(str(result[1]).split())[:500]}")
             if result[0] == "done" and result[1] == "succeeded":
                 self.r.set(**{f"LAUNCH_STYLE_{key}": style, f"PROBE_RECHECK_{key}": None})
                 self.r.log(f"probe {pair}: launch style {style} works")
@@ -199,7 +207,9 @@ def step3_problems(r, failed_line):
     _, pair, results = failed_line.split(" ", 2)
     queue = r.run_dir / "queue.txt"
     ids = queue.read_text(encoding="utf-8").split() if queue.exists() else []
-    lines = [l for l in launch_problems(r, ids, failed_line).splitlines() if l.startswith("PROBLEM ") and ":" in l.split()[1]]
+    # Only the per-task lines ("PROBLEM <task>: ..."), not the fallback that names the pair (which has a colon too).
+    lines = [l for l in launch_problems(r, ids, failed_line).splitlines()
+             if l.startswith("PROBLEM ") and l.split()[1].endswith(":")]
     if r.get("GROUND_CREW_PAIR") == pair:
         lines.append(f"PROBLEM pair '{pair}': GROUND_CREW_PAIR failed its test launch; see {results}")
     out = next_free(r.run_dir, "validate-{n}.txt")

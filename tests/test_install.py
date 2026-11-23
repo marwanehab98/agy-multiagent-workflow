@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from helpers import removed_after
+
 REPO = Path(__file__).resolve().parent.parent
 INSTALL = REPO / "install.sh"
 FIXTURES = REPO / "tests" / "fixtures" / "harness"
@@ -18,7 +20,7 @@ def sh(*cmd, cwd=None, env=None):
 @unittest.skipUnless((REPO / ".git").exists(), "install.sh releases from a git checkout; skipped in install.sh's own clean copy")
 class InstallTests(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="install-"))
+        self.d = Path(removed_after(self, tempfile.mkdtemp(prefix="install-")))
         self.target = self.d / "skills" / "mission-control"
         self.backups = self.d / "backups"
         self.head = sh("git", "-C", str(REPO), "rev-parse", "HEAD").stdout.strip()

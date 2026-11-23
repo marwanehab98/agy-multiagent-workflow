@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -237,8 +238,107 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         self.assertEqual(runner.run("p1", pair="claude:opus@high", worktree=self.impl)[0], "usage")
         self.assertEqual(runner.run("p2", pair="claude:opus@high", worktree=self.impl)[0], "usage")
 
+    # Stream events a crashed worker printed before it died: they quote token counts and tool output.
+    INNOCUOUS = "\n".join(json.dumps(e) for e in (
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Checking the quota code."}],
+                                          "usage": {"input_tokens": 429, "output_tokens": 12}}},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "content": "rate limit: 429 per quota window; "
+                                                  "session not found handling in api.py"}]}},
+    ))
+
+    def test_a_crash_is_not_a_usage_limit_because_the_stream_mentions_429(self):
+        self.claude_behave(
+            {"do": "response", "raw_stdout": self.INNOCUOUS + "\nfatal: worker crashed", "rc": 1},
+            {"do": "response", "raw_stdout": self.INNOCUOUS + "\n" + json.dumps(
+                {"type": "error", "error": {"code": 429, "message": "Too many requests"}}), "rc": 1},
+            {"do": "response", "raw_stdout": self.INNOCUOUS, "raw_stderr": "Error: quota exceeded for this project",
+             "rc": 1},
+        )
+        runner = self._runner()
+        self.assertEqual(runner.run("p1", pair="claude:opus@high", worktree=self.impl)[0], "stopped")
+        self.assertEqual(runner.run("p2", pair="claude:opus@high", worktree=self.impl)[0], "usage")
+        self.assertEqual(runner.run("p3", pair="claude:opus@high", worktree=self.impl)[0], "usage")
+
+    def test_a_crash_is_not_a_failed_resume_because_the_stream_mentions_a_session(self):
+        self.claude_behave(
+            {"do": "response", "raw_stdout": self.INNOCUOUS + "\nfatal: worker crashed", "rc": 1},
+            {"do": "response", "raw_stdout": self.INNOCUOUS, "raw_stderr": "No conversation found with session ID: s1",
+             "rc": 1},
+        )
+        runner = self._runner()
+        res = runner.try_resume("hi", "claude:opus@high", self.impl, "s1")
+        self.assertEqual(res[0], "stopped")
+        self.assertIsNone(runner.try_resume("hi", "claude:opus@high", self.impl, "s1"))
+
+    def test_a_result_is_used_when_the_cli_does_not_exit(self):
+        s = self.st()
+        s["WORKER_TIMEOUT"] = "60"
+        self.state.write_text(json.dumps(s))
+        self.claude_behave({"do": "response", "text": "finished\n", "session_id": "s_hang", "sleep_after": 60})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 1):
+            start = time.monotonic()
+            res = self._runner().run("p", pair="claude:opus@high", worktree=self.impl)
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_hang"))
+        self.assertLess(time.monotonic() - start, 15)
+
+    def test_a_json_result_is_used_when_the_cli_does_not_exit_without_streaming(self):
+        # WORKER_STREAM=0 (or the json fallback): the one result object, pretty or not, with or without a newline.
+        s = self.st()
+        s.update({"WORKER_TIMEOUT": "60", "WORKER_STREAM": "0"})
+        self.state.write_text(json.dumps(s))
+        self.claude_behave({"do": "response", "text": "c1\n", "session_id": "s1", "sleep_after": 60, "pretty": True},
+                           {"do": "response", "text": "c2\n", "session_id": "s2", "sleep_after": 60,
+                            "no_final_newline": True})
+        self.behave({"do": "response", "text": "a1\n", "conv_id": "conv_a", "sleep_after": 60,
+                     "no_final_newline": True})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 1):
+            for pair, want in (("claude:opus@high", ("done", "succeeded", "c1\n", "s1")),
+                               ("claude:opus@high", ("done", "succeeded", "c2\n", "s2")),
+                               ("antigravity:gemini-4-hydrogen@high", ("done", "succeeded", "a1\n", "conv_a"))):
+                start = time.monotonic()
+                self.assertEqual(self._runner().run("p", pair=pair, worktree=self.impl), want)
+                self.assertLess(time.monotonic() - start, 15)
+        self.assertTrue(all(c["output_format"] == "json" for c in self.claude_calls() + self.calls()))
+
+    def test_a_result_held_when_the_timeout_fires_is_used(self):
+        s = self.st()
+        s["WORKER_TIMEOUT"] = "3"
+        self.state.write_text(json.dumps(s))
+        self.claude_behave({"do": "response", "text": "finished\n", "session_id": "s_late", "sleep_after": 60})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 100):
+            res = self._runner().run("p", pair="claude:opus@high", worktree=self.impl)
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_late"))
+
 
 class ClaudeDirectorAndTaskFallbackTests(MultiHarnessBase):
+    def test_only_the_flight_director_keeps_mcp(self):
+        spec = self.tmp / "director.txt"
+        spec.write_text("Start job.\n")
+        self.claude_behave({"do": "response", "text": "RESULT: COMMITTED\n", "session_id": "d1"})
+        self.behave({"do": "response", "text": "RESULT: COMMITTED\n", "conv_id": "d2"})
+        for pair in ("claude:opus@high", "antigravity:gemini-4-hydrogen@high"):
+            rc, last = self.director("start", "--state", str(self.state), "--spec", str(spec), "--pair", pair)
+            self.assertEqual(rc, 0, last)
+        director_claude, director_agy = self.claude_calls()[0]["argv"], self.calls()[0]["argv"]
+        self.assertIn("--dangerously-skip-permissions", director_claude)
+        self.assertNotIn("--strict-mcp-config", director_claude)
+        self.assertNotIn("--settings", director_agy)
+        # A crew worker on each harness: full access, no MCP.
+        (self.docs / "tasks" / "01.meta").write_text(
+            "TITLE=Task 01\nTIER=standard\nSPEC_TYPE=checklist\nACS=AC-1\n"
+            "CREW=claude:sonnet@high\nREVIEW_1=claude:sonnet@high\nREVIEW_2=claude:sonnet@high\n")
+        self.claude_behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        crew = self.claude_calls()[1]["argv"]
+        self.assertIn("--dangerously-skip-permissions", crew)
+        self.assertIn("--strict-mcp-config", crew)
+        runner = AgyRunner(Run(self.state))
+        with unittest.mock.patch.dict(os.environ, self._env()):
+            runner.run("work", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl)
+        crew_agy = self.calls()[-1]["argv"]
+        self.assertIn("--dangerously-skip-permissions", crew_agy)
+        self.assertEqual(json.loads(crew_agy[crew_agy.index("--settings") + 1]), {"permissions": {"deny": ["mcp(*)"]}})
+
     def test_director_lost_13_and_usage_limit_31(self):
         spec = self.tmp / "director.txt"
         spec.write_text("Start job.\n")
@@ -344,6 +444,7 @@ class MixedCrossHarnessTests(MultiHarnessBase):
             self.assertFalse(c["skip_permissions"])
             self.assertEqual(c["permission_mode"], "dontAsk")
             self.assertIn("Bash(git diff *)", c["allowed_tools"].split(","))
+            self.assertIn(f"Bash(git -C {self.impl} diff *)", c["allowed_tools"].split(","))
             self.assertNotIn("Bash", c["allowed_tools"].split(","))
             self.assertNotIn("Write", c["allowed_tools"].split(","))
         self.assertEqual(self.claude_calls()[1]["model"], "opus")

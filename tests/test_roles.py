@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from helpers import removed_after
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "roles.py"
 CATALOG = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 CATALOG_MULTI = Path(__file__).resolve().parent / "fixtures" / "catalog_multi.json"
@@ -14,7 +16,7 @@ GOOD = dict(director="antigravity:big@max", safety="antigravity:g@high", crew="a
 
 class RolesTests(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="roles-"))
+        self.d = Path(removed_after(self, tempfile.mkdtemp(prefix="roles-")))
         self.catalog = self.d / "catalog.json"
         self.catalog.write_text(CATALOG.read_text())
         self.roles_file = self.d / "cfg" / "roles.json"
@@ -177,9 +179,18 @@ class RolesTests(unittest.TestCase):
                          ("antigravity:big@max", "antigravity:g@high", "antigravity:g@high"))
         self.assertEqual((s["CREW_TOP"], s["CATALOG"], s["KEEP"]), ("xhigh", str(self.catalog), "1"))
 
+    def test_safety_needs_spec_drift_in_a_full_run_only(self):
+        # The drift check (run_finish.py) runs on the Range Safety pair.
+        self.edit_catalog(lambda c: c["harnesses"]["antigravity"]["skills"].pop("spec-drift"))
+        rc, out = self.roles("check")
+        self.assertEqual(rc, 1)
+        self.assertIn("MISSING safety antigravity:g@high spec-drift in antigravity", out)
+        self.assertEqual(self.roles("check", "--mode", "launch-plan")[0], 0)
+
     def test_execute_plan_mode_requires_execution_skills_only(self):
         def strip_design(c):
-            for s in ("mission", "mission-brief", "flight-plan", "wind-tunnel", "flight-readiness", "cross-check"):
+            for s in ("mission", "mission-brief", "flight-plan", "wind-tunnel", "flight-readiness", "cross-check",
+                      "spec-drift"):
                 c["harnesses"]["antigravity"]["skills"].pop(s, None)
         self.edit_catalog(strip_design)
         self.assertEqual(self.roles("check")[0], 1)

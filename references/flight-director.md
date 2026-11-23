@@ -113,7 +113,7 @@ You write these in `DOCS_DIR` and commit them. The Capsule Communicator pastes t
 
     ```
     TITLE=<short title>
-    REPO=<repo name>   # required in multi-repo mode (one repo per task); omit in single-repo mode
+    REPO=<repo name>
     TIER=standard|complex
     SPEC_TYPE=checklist|judgment
     ACS=<the AC ids this task delivers, e.g. AC-2 AC-5, or none>
@@ -122,7 +122,7 @@ You write these in `DOCS_DIR` and commit them. The Capsule Communicator pastes t
     REVIEW_2=<pair>
     ```
 
-    A task made by `REPLAN` also has `REPLANNED_FROM=<the original id>`.
+    `REPO` is required in multi-repo mode (one repo per task); omit it in single-repo mode. Never put a comment on a value line: everything after `=` is the value. A task made by `REPLAN` also has `REPLANNED_FROM=<the original id>`.
 
     `validate_meta.py` checks that every `AC-<n>` in the design is in some task's `ACS` and that no `ACS` names an AC the design lacks. New tasks from a `REPLAN` must cover every AC of the task they replace. A final-fix task may have `ACS=none`.
   - `<id>-summary.md`: one paragraph on what the task implements.

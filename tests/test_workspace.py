@@ -113,6 +113,7 @@ class TestWorkspace(unittest.TestCase):
             "FEATURE_BRANCH=feat/auth\n"
             "VERIFY_my_api_1=test -f README.md\n"
             "VERIFY_web_app_1=test -f README.md\n"
+            "BASELINE_SKIP_my_api=VERIFY_my_api_1\n"
         )
         state = run_dir / "state.json"
         state.write_text(json.dumps({
@@ -154,6 +155,11 @@ class TestWorkspace(unittest.TestCase):
         st = json.loads(state.read_text())
         self.assertEqual(st["FEATURE_BRANCH_my_api"], "feat/auth")
         self.assertEqual(st["PR_TARGET_web_app"], "main")
+        # Every repo gets BASELINE_SKIP_<k>, empty when the manifest names none, for gate.py --skip as it is.
+        self.assertEqual((st["BASELINE_SKIP_my_api"], st["BASELINE_SKIP_web_app"]), ("VERIFY_my_api_1", ""))
+        out = subprocess.run([sys.executable, "-I", str(SKILL / "scripts" / "state.py"), "--file", str(state), "get",
+                              "BASELINE_SKIP_web_app"], capture_output=True, text=True)
+        self.assertEqual((out.returncode, out.stdout), (0, "\n"))
         self.assertTrue((Path(st["IMPL_WT_my_api"]) / "README.md").is_file())
         self.assertTrue((Path(st["IMPL_WT_web_app"]) / "README.md").is_file())
 
@@ -189,7 +195,7 @@ class TestWorkspace(unittest.TestCase):
         state = run_dir / "state.json"
         state.write_text(json.dumps({"TOPIC": "auth", "REPOS": "none", "MAIN_CHECKOUT": str(repo),
                                      "START_SHA": sha, "FEATURE_BRANCH": "feat/auth", "RUN_DIR": str(run_dir),
-                                     "DOCS_WORKTREE": str(docs_wt)}))
+                                     "DOCS_WORKTREE": str(docs_wt), "BASE_BRANCH": "main"}))
         # An existing run is found; a new one gets the next free topic.
         r = py(WORKSPACE, "check-topic", "--main-checkout", str(repo), "--topic", "auth")
         self.assertEqual((r.returncode, r.stdout.strip()), (10, f"EXISTING {docs_wt}"))
@@ -206,6 +212,7 @@ class TestWorkspace(unittest.TestCase):
         impl = Path(st["IMPL_WORKTREE"])
         self.assertEqual(impl, self.root(repo) / "auth-impl")
         self.assertEqual((st["INITIAL_BASE_SHA"], st["LAST_MERGED"]), (sha, sha))
+        self.assertEqual(st["PR_TARGET"], "main")  # no PR_TARGET in the manifest: the base branch
         self.assertEqual(g("rev-parse", "feat/auth"), sha)
         self.assertEqual(g("branch", "--show-current"), "main")  # the main checkout is never switched
 
@@ -305,6 +312,62 @@ class TestWorkspace(unittest.TestCase):
         self.assertTrue(states["live"].exists())
         self.assertNotEqual(subprocess.run(["git", "-C", str(repos["done"]), "show-ref", "--verify", "-q",
                                             "refs/heads/mission/done-docs"]).returncode, 0)
+
+    def test_init_impl_keeps_a_pr_target_from_the_manifest(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", "t", "--start-sha", sha)
+        run_dir = Path(dict(l.split(" ", 1) for l in r.stdout.strip().splitlines())["RUN_DIR"])
+        state = run_dir / "state.json"
+        state.write_text(json.dumps({"TOPIC": "t", "REPOS": "none", "MAIN_CHECKOUT": str(repo), "START_SHA": sha,
+                                     "FEATURE_BRANCH": "feat/t", "RUN_DIR": str(run_dir), "BASE_BRANCH": "main",
+                                     "PR_TARGET": "release"}))
+        self.assertEqual(py(WORKSPACE, "init-impl", "--state", str(state)).returncode, 0)
+        self.assertEqual(json.loads(state.read_text())["PR_TARGET"], "release")
+
+    def test_excludes_are_one_marked_block_removed_with_the_last_run(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        exclude = repo / ".git" / "info" / "exclude"
+        # The user's own lines, and one line an older version wrote unmarked.
+        exclude.write_text("# mine\n*.log\nnode_modules/\n")
+        runs = {}
+        for topic in ("a", "b"):
+            r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", topic, "--start-sha", sha)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            kv = dict(l.split(" ", 1) for l in r.stdout.strip().splitlines())
+            st = Path(kv["RUN_DIR"]) / "state.json"
+            st.write_text(json.dumps({"TOPIC": topic, "REPOS": "none", "MAIN_CHECKOUT": str(repo), "START_SHA": sha,
+                                      "RUN_DIR": kv["RUN_DIR"], "DOCS_WORKTREE": kv["DOCS_WORKTREE"]}))
+            runs[topic] = st
+        lines = exclude.read_text().splitlines()
+        self.assertEqual(lines[:3], ["# mine", "*.log", "node_modules/"])
+        self.assertEqual(lines.count("node_modules/"), 1)  # not added again inside the block
+        self.assertEqual(lines.count(".mission/"), 1)  # the second run added nothing
+        self.assertEqual(lines[3], "# >>> mission-control: run worktree ignores (removed with the repo's last "
+                                   "mission-control worktree)")
+        self.assertEqual(lines[-1], "# <<< mission-control")
+        # The block stays while another run's worktree is left, and goes with the last one.
+        self.assertEqual(py(WORKSPACE, "remove-docs", "--state", str(runs["a"])).returncode, 0)
+        self.assertIn(".mission/", exclude.read_text())
+        self.assertEqual(py(WORKSPACE, "remove-docs", "--state", str(runs["b"])).returncode, 0)
+        self.assertEqual(exclude.read_text(), "# mine\n*.log\nnode_modules/\n")
+
+    def test_prune_never_removes_a_run_whose_state_is_unreadable(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        docs = {}
+        for topic in ("broken", "missing"):
+            r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", topic, "--start-sha", sha)
+            docs[topic] = Path(dict(l.split(" ", 1) for l in r.stdout.strip().splitlines())["DOCS_WORKTREE"])
+        (docs["broken"] / ".mission" / "state.json").write_text("{not json")
+        for args in ((), ("--apply",)):
+            r = py(WORKSPACE, "prune", "--main-checkout", str(repo), *args)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            for topic, d in docs.items():
+                self.assertIn(f"UNREADABLE {topic} {d} (state.json missing or unreadable; not removed)", r.stdout)
+                self.assertTrue(d.exists())
+            self.assertNotIn("REMOVED", r.stdout)
 
     def test_validate_meta_requires_repo_in_multi_repo(self):
         ws = self.tmp / "val"

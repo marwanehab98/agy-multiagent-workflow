@@ -51,6 +51,10 @@ class RunDirectorTests(Base):
         self.assertIn("RESULT: COMMITTED", saved.read_text())
         self.assertEqual(self.calls()[1]["conversation"], "dir_1")
         self.assertIn("Approach A", self.calls()[1]["prompt"])
+        # Every turn is tagged as the Flight Director's, in its log name and so in the cost report.
+        logs = sorted(p.name for p in (self.run_dir / "logs").glob("*.log"))
+        self.assertTrue(all(n.startswith("director-") for n in logs), logs)
+        self.assertIn("director-reply-1.log", logs)
 
     def test_notify_and_notify_ack(self):
         notify = self.run_dir / "notify-001.md"

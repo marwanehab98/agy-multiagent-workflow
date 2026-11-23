@@ -37,7 +37,8 @@ Rules the loop enforces:
   An escalation attempt resets all three.
 - A reviewer that changes the worktree, or stops/fails without settling, is void and replaced; the third
   void in a row prompts retry or stop. A missing VERDICT line gets one new reviewer; a second counts as FIX.
-- A usage limit pauses the task with a retry/stop prompt instead of counting as a failure.
+- A usage limit (a worker's or a test launch's) pauses the task with a retry/pause/stop prompt instead of counting
+  as a failure.
 - The escalation pair must be the ladder's next rung (validate_meta.py pair) and its reset sha must lie
   between the task's base and the worktree's HEAD; two rejected answers prompt the user.
 - REPLAN is checked the same way and validated (with fix-meta) before the queue changes.
@@ -54,7 +55,7 @@ from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERRO
                     repo_key, rest_path, run, save_ask, save_body, tool, usage_prompt, verdict_line, void_prompt,
                     write_atomic, write_prompt)
 from pairs import ladder, parse_pair  # noqa: E402
-from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
+from probe import USAGE_LIMIT, Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 
 
 # ---------------------------------------------------------------- the loop
@@ -172,7 +173,10 @@ class Loop:
         spec = build("implement.txt", r.run_dir / "specs" / f"{t}-implement.txt",
                      {"TASK_TITLE": meta["TITLE"]},
                      {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
+        # BASE_SHA is where this task's own work starts; its reviews start at LAST_MERGED, so commits a REPLAN kept
+        # (head past LAST_MERGED) are reviewed with the first replacement task instead of only in the final review.
         r.set(CURRENT_TASK=t, **{keep_key: None, f"BASE_SHA_{t}": head, f"IMPL_START_SHA_{t}": head,
+                                 f"REVIEW_BASE_SHA_{t}": last_merged,
                                  f"IMPLEMENT_SPEC_{t}": spec,
                                  f"PAIR_{t}": meta["CREW"], f"ATTEMPT_{t}": 0,
                                  f"REVIEW_STAGE_{t}": 1, f"GATE_FAILED_{t}": "no",
@@ -264,13 +268,17 @@ class Loop:
         r.incr(f"TOTAL_FIX_ROUNDS_{t}")
         meta = self.meta(t)
         spec = build("fix.txt", next_free(r.run_dir / "specs", f"{t}-fix-{{n}}.txt"),
-                     {"TASK_TITLE": meta["TITLE"], "BASE_SHA": r.need(f"BASE_SHA_{t}"),
+                     {"TASK_TITLE": meta["TITLE"], "BASE_SHA": self.review_base(t),
                       "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}")},
                      {"FINDINGS": findings, "DECISIONS": r.task_file(t, "-decisions.md"),
                       "IMPLEMENT_SPEC": r.need(f"IMPLEMENT_SPEC_{t}")})
         self.start_impl(t, spec, "fix", f"Fix: {meta['TITLE']}", reuse=True)
 
     # -- reviewers
+    def review_base(self, t):
+        """Where task t's review range starts (BASE_SHA for a run started before REVIEW_BASE_SHA existed)."""
+        return self.r.get(f"REVIEW_BASE_SHA_{t}") or self.r.need(f"BASE_SHA_{t}")
+
     def start_review(self, t, stage):
         r = self.r
         repo = self.task_repo(t)
@@ -278,7 +286,7 @@ class Loop:
         meta = self.meta(t)
         review = next_free(r.run_dir / "verdicts", f"{t}-s{stage}-{{n}}.md")
         r.set(**{f"REVIEW_OUT_{t}": review})
-        common = {"BASE_SHA": r.need(f"BASE_SHA_{t}"), "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}"),
+        common = {"BASE_SHA": self.review_base(t), "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}"),
                   "OUTPUT_FILE": review}
         out = next_free(r.run_dir / "specs", f"{t}-s{stage}-{{n}}.txt")
         if stage == 1:
@@ -537,6 +545,7 @@ class Loop:
         except Done as d:
             if d.code == STOP and d.line.startswith("PROBE_FAILED"):
                 return self.reject(t, f"launch test for {pair} failed; see {d.line.split(' ', 2)[-1]}")
+            self.probe_usage(t, d)
             raise
         self.start_attempt(t, sha, note, pair)
 
@@ -570,6 +579,7 @@ class Loop:
                 out_file = next_free(r.run_dir, "validate-{n}.txt")
                 out_file.write_text(launch_problems(r, ids, d.line), encoding="utf-8")
                 self.fix_meta(t, out_file)
+            self.probe_usage(t, d)
             raise
         rc, out = tool("discard-changes.sh", self.task_impl(t), sha)
         if rc != 0:
@@ -602,6 +612,14 @@ class Loop:
                     "(b) Tell me \"rebuild\" and I'll reset the implementation worktree to the new branch head "
                     "and redo the current task from scratch, with fresh reviews.",
                     ["retry", "rebuild"], back_to=back_to)
+
+    def probe_usage(self, t, done):
+        """A test launch hit a usage limit: the same usage prompt as a worker's; "retry" redoes the probe phase."""
+        if done.code == USAGE_LIMIT:
+            _, pair, detail = (done.line + " ").split(" ", 2)
+            self.r.set(**{f"PROMPT_KIND_{t}": "probe"})
+            self.prompt(t, "usage-limit", usage_prompt(f"The test launch of {pair} for task {t}", detail.strip()),
+                        USAGE_REPLIES, back_to=self.phase(t))
 
     def prompt_usage(self, t, kind, detail):
         self.r.set(**{f"PROMPT_KIND_{t}": kind})
@@ -640,6 +658,8 @@ class Loop:
             return self.start_review(t, stage)
         if name == "usage-limit":
             kind = r.need(f"PROMPT_KIND_{t}")
+            if kind == "probe":
+                return self.set_phase(t, back)
             if kind.startswith("review"):
                 return self.start_review(t, int(kind[-1]))
             if kind != "commit":

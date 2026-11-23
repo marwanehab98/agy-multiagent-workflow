@@ -3,7 +3,7 @@ back exactly at <head>, so build or test output never voids a later review.
 
 Usage:
   python3 -I gate.py --flight-manifest <DOCS_DIR>/flight-manifest.txt --worktree <path> --head <sha>
-      --log <file> [--prefix GATE|VERIFY] [--skip "<name> <name>..."]
+      --log <file> [--prefix GATE|VERIFY] [--skip "<name> <name>..."] [--repo <key>]
 
 --prefix GATE (the default) runs GATE_1, GATE_2, ... and falls back to VERIFY_1, ...
 when flight-manifest has no GATE_ lines. --prefix VERIFY runs only VERIFY_ lines.
@@ -11,6 +11,7 @@ when flight-manifest has no GATE_ lines. --prefix VERIFY runs only VERIFY_ lines
 overwrites an earlier log. --skip names checks (e.g. "VERIFY_1 VERIFY_2", from flight-manifest'
 BASELINE_SKIP) that are logged as skipped and not run, when they are among the chosen checks;
 a name no GATE_ or VERIFY_ line has is bad usage, so one --skip serves both baseline runs.
+--repo <key> (multi-repo) runs that repo's GATE_<key>_n / VERIFY_<key>_n lines instead.
 Each command runs with the shell, from the worktree root. All commands run even after
 one fails, so the log shows every failure at once.
 Exit 0: every command passed and the worktree is clean at <head>.

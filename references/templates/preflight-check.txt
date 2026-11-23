@@ -14,6 +14,6 @@ you could reasonably decide yourself. Skip nitpicks about wording.
 
 If nothing important is left, say "nothing important left".
 
-Write your ranked questions (or "nothing important left") to {{OUTPUT_FILE}}. That is the only file you may create or change. Do not commit, and do not dispatch other agents.
+Write your ranked questions (or "nothing important left") to {{OUTPUT_FILE}} with your file-writing tool (not a shell redirect). That is the only file you may create or change. Do not commit, and do not dispatch other agents.
 If you cannot read the document, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 When finished, end your response with "written {{OUTPUT_FILE}}".

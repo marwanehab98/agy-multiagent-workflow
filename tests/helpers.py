@@ -1,6 +1,8 @@
 """Shared fixtures for the script tests: a scratch git repo, a fake agy, and a driver for the advance scripts."""
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -8,8 +10,17 @@ import unittest
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent.parent
-# Run worktrees default to ~/.local/state/mission-control; tests must never write there.
-os.environ.setdefault("MISSION_CONTROL_WORKTREES", tempfile.mkdtemp(prefix="mc-test-worktrees-"))
+# Run worktrees default to ~/.local/state/mission-control; tests must never write there. A folder made here is
+# removed at exit; one given in the environment (tests/run_all.sh) belongs to whoever gave it.
+if not os.environ.get("MISSION_CONTROL_WORKTREES"):
+    os.environ["MISSION_CONTROL_WORKTREES"] = tempfile.mkdtemp(prefix="mc-test-worktrees-")
+    atexit.register(shutil.rmtree, os.environ["MISSION_CONTROL_WORKTREES"], ignore_errors=True)
+
+
+def removed_after(test, path):
+    """Register a temp folder for removal when the test ends (after tearDown); returns the path."""
+    test.addCleanup(shutil.rmtree, path, ignore_errors=True)
+    return path
 RUN_TASK = SKILL / "scripts" / "run_task.py"
 FAKE = SKILL / "tests" / "fake_agy.py"
 CATALOG = SKILL / "tests" / "fixtures" / "catalog.json"
@@ -32,7 +43,7 @@ class Base(unittest.TestCase):
     SCRIPT = RUN_TASK  # the advance script that adv() runs; subclasses override it
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="runtask-"))
+        self.tmp = Path(removed_after(self, tempfile.mkdtemp(prefix="runtask-")))
         t = self.tmp
         self.main = t / "repo"
         self.main.mkdir()

@@ -1,4 +1,5 @@
 """Plumbing shared by the run_*.py scripts: status codes, state file, headless CLI worker runner, helpers."""
+import codecs
 import collections
 import datetime
 import fcntl
@@ -23,14 +24,36 @@ QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, PAUSED, ERROR = 0,
 
 VERDICTS = ("VERDICT: PASS", "VERDICT: FIX")
 
+# A bare 429 or "quota" turns up in ordinary text (token counts, code under review), so both need a word of error
+# context next to them, in either order ("quota reached", "out of quota", "got 429 from the API", "Error: 429").
+_429_CTX = r"(?:rate|limit|too many|resource|api|request|response|status|code|error|http)"
 USAGE_RE = re.compile(
-    r"(?i)(usageLimitReached|usage\s*limit|rate[_\s]*limit|quota|resource_exhausted|\b429\b|"
+    r"(?i)(usageLimitReached|usage\s*limit|rate[_\s]*limit|resource_exhausted|"
+    r"quota\s+(?:exceeded|exhausted|reached|limit)|"
+    r"(?:exceeded|exhausted|insufficient|reached|out\s+of|over)\s+(?:\w+\s+){0,2}quota|"
+    rf"\b{_429_CTX}[^\n]{{0,12}}?\b429\b|\b429\b[^\n]{{0,12}}?\b{_429_CTX}|"
     r"5-hour limit|overloaded_error|hit your limit|out of extra usage|credit balance is too low)"
 )
 RESUME_ERR_RE = re.compile(
     r"(?i)((conversation|session).*(not found|invalid|expired|does not exist|unknown|missing)|"
     r"no conversation found with session id|cannot resume|unknown (conversation|session))"
 )
+
+
+def error_text(stdout_lines, stderr_text):
+    """The parts of a worker's output that can report an error, for classifying a run without a result: all of
+    stderr, stdout lines that are not JSON objects, and JSON objects that are errors. Ordinary stream events
+    (assistant text, tool calls and results) are left out: they quote code, logs and token counts."""
+    parts = [stderr_text]
+    for line in stdout_lines:
+        s = line.strip()
+        try:
+            obj = json.loads(s) if s.startswith("{") else None
+        except json.JSONDecodeError:
+            obj = None
+        if not isinstance(obj, dict) or "error" in obj or obj.get("type") == "error" or obj.get("is_error") is True:
+            parts.append(s)
+    return "\n".join(x for x in parts if x).strip()
 
 
 def last_line(path):
@@ -276,7 +299,7 @@ class Run:
     def repo_convention_paths(self, repo=None):
         if repo:
             return self.get(f"CONVENTION_PATHS_{repo_key(repo)}") or self.get("CONVENTION_PATHS", "none")
-        return self.need("CONVENTION_PATHS")
+        return self.get("CONVENTION_PATHS", "none")  # optional in the flight manifest
 
     def touched_repos(self):
         """Repos that have at least one merged commit since INITIAL_BASE_SHA_<k>."""
@@ -536,6 +559,10 @@ _PROVIDER_ENV = [
 ]
 
 
+# Harness settings whose names match the secret pattern (TOKEN) but hold no secret.
+_NOT_SECRET_ENV = {"MAX_THINKING_TOKENS", "MAX_MCP_OUTPUT_TOKENS"}
+
+
 def worker_env(access, environ=None):
     env = dict(os.environ if environ is None else environ)
     if access != "read":
@@ -543,13 +570,16 @@ def worker_env(access, environ=None):
     keep = set(env.get("WORKER_ENV_KEEP", "").split())
     providers = [pat for switch, pat in _PROVIDER_ENV if str(env.get(switch, "")).strip().lower() not in ("", "0", "false")]
     return {k: v for k, v in env.items()
-            if k in keep or _HARNESS_ENV.match(k) or any(p.match(k) for p in providers)
+            if k in keep or k in _NOT_SECRET_ENV or _HARNESS_ENV.match(k) or any(p.match(k) for p in providers)
             or not _SECRET_ENV.search(k)}
 
 
 MAX_INLINE_PROMPT_BYTES = 65536
 DEFAULT_AGY_TIMEOUT = 1800
 DEFAULT_HEARTBEAT = 30
+# Seconds a worker may run on after its result before it is stopped and the result used (a CLI that never exits
+# would otherwise hold a finished result until WORKER_TIMEOUT and lose it).
+ENVELOPE_GRACE = 10
 STREAM_UNSUPPORTED_RE = re.compile(
     r"(?i)(unknown|invalid|unrecognized|unsupported|unexpected).*(stream-json|--verbose|output-format)"
 )
@@ -639,6 +669,21 @@ def _as_pair(pair):
     return pair if isinstance(pair, Pair) else parse_pair(pair)
 
 
+def _drain_chunks(stream, tag, out_q):
+    """Without stream-json: pass stdout on as it arrives, not by line, so a result printed without a final newline
+    by a CLI that then does not exit is still seen before the timeout."""
+    dec = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    try:
+        while data := stream.buffer.read1(65536):
+            out_q.put((tag, dec.decode(data)))
+    finally:
+        try:
+            stream.close()
+        except OSError:
+            pass
+        out_q.put(("eof", tag))
+
+
 def _drain_stream(stream, tag, out_q):
     try:
         for line in stream:
@@ -713,20 +758,31 @@ class AgyRunner:
 
     def _turn_stats(self, adapter, conv_id, resumed, stats):
         """For a harness that reports a resumed conversation's running totals, log this turn's share: subtract the
-        totals recorded after the conversation's previous turn (state key USAGE_SO_FAR_<conversation>)."""
+        totals recorded after the conversation's previous turn (<RUN_DIR>/logs/usage-so-far.json, by conversation;
+        kept out of state.json, which every set rewrites whole; a missing or corrupt file counts as empty)."""
         if not adapter.cumulative_usage or not conv_id or not self.r.get("RUN_DIR"):
             return
-        key = "USAGE_SO_FAR_" + re.sub(r"[^A-Za-z0-9_]", "_", conv_id)
+        path = Path(self.r.get("RUN_DIR")) / "logs" / "usage-so-far.json"
+        try:
+            totals = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            totals = {}
+        totals = totals if isinstance(totals, dict) else {}
         now = {"tokens": stats.get("tokens"), "turns": stats.get("turns"),
                "secs": int(stats["model_time"][:-1]) if str(stats.get("model_time", "")).endswith("s") else None}
-        prev = dict(zip(("tokens", "turns", "secs"), (int(x) if x.isdigit() else None
-                                                       for x in self.r.get(key, "").split(",")))) if resumed else {}
+        saved = str(totals.get(conv_id, "")).split(",") if resumed else []
+        prev = dict(zip(("tokens", "turns", "secs"), (int(x) if x.isdigit() else None for x in saved)))
         for k, field in (("tokens", "tokens"), ("turns", "turns")):
             if isinstance(now[k], int) and isinstance(prev.get(k), int) and now[k] >= prev[k]:
                 stats[field] = now[k] - prev[k]
         if isinstance(now["secs"], int) and isinstance(prev.get("secs"), int) and now["secs"] >= prev["secs"]:
             stats["model_time"] = f"{now['secs'] - prev['secs']}s"
-        self.r.set(**{key: ",".join("" if now[k] is None else str(now[k]) for k in ("tokens", "turns", "secs"))})
+        totals[conv_id] = ",".join("" if now[k] is None else str(now[k]) for k in ("tokens", "turns", "secs"))
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_atomic(path, json.dumps(totals))
+        except OSError:
+            pass
 
     def _forget_worker(self, entry):
         if entry is None:
@@ -765,6 +821,7 @@ class AgyRunner:
         access="full",
         write_extra=(),
         pair_text="",
+        mcp=False,
     ):
         """Invoke a headless worker and return (kind, detail_or_outcome, body, conversation_id).
 
@@ -780,8 +837,12 @@ class AgyRunner:
         stream = self._stream_enabled() if _stream_override is None else bool(_stream_override)
         cli_prompt = self._prepare_prompt(prompt_text, spec_path=spec_path)
         write_dirs = ([str(Path(self.r.get("RUN_DIR")).resolve())] if self.r.get("RUN_DIR") else []) + list(write_extra)
+        # Repos a read-only worker may name with `git -C`: its worktree, and in multi-repo runs every repo worktree.
+        repo_wts = [self.r.get(f"{kind}_{repo_key(n)}") for n in self.r.repos for kind in ("IMPL_WT", "DOCS_WT")]
+        git_dirs = [worktree] + [d for d in repo_wts if d]
         cmd = adapter.build_exec_cmd(exe, cli_prompt, args, conversation_id=conversation_id, stream=stream,
-                                     access=access, write_dirs=write_dirs)
+                                     access=access, write_dirs=write_dirs, git_dirs=git_dirs,
+                                     workdir=worktree, mcp=mcp)
         timeout = self._timeout()
         heartbeat = self._heartbeat_interval()
         tag = label or (spec_path.stem if spec_path else harness)
@@ -827,13 +888,15 @@ class AgyRunner:
                             to_stderr=True, milestone=True)
 
         q = queue.Queue()
-        t_out = threading.Thread(target=_drain_stream, args=(proc.stdout, "out", q), daemon=True)
+        t_out = threading.Thread(target=_drain_stream if stream else _drain_chunks, args=(proc.stdout, "out", q),
+                                 daemon=True)
         t_err = threading.Thread(target=_drain_stream, args=(proc.stderr, "err", q), daemon=True)
         t_out.start()
         t_err.start()
 
         stream_acc = {}  # per-run parser state (agy streams a message in pieces)
         stdout_lines = collections.deque(maxlen=2000)  # bounded: a long stream's events are not all needed
+        # (without stream-json, pieces as they arrived)
         stderr_lines = []
         stream_envelope = None
         open_streams = {"out", "err"}
@@ -841,6 +904,8 @@ class AgyRunner:
         last_heartbeat = start
         timed_out = False
         exited_at = None
+        envelope_at = None
+        stopped_after_result = False  # we stop a worker that holds its result open; its exit code is ours
 
         while open_streams:
             now = time.monotonic()
@@ -849,7 +914,12 @@ class AgyRunner:
             if exited_at is not None and now - exited_at > 3:
                 # The worker exited but something it started still holds its output open; stop waiting.
                 break
+            if envelope_at is not None and exited_at is None and now - envelope_at >= ENVELOPE_GRACE:
+                stopped_after_result = True
+                break
             waits = [1.0]
+            if envelope_at is not None:
+                waits.append(max(0.05, envelope_at + ENVELOPE_GRACE - now))
             if timeout is not None:
                 rem = (start + timeout) - now
                 if rem <= 0:
@@ -891,10 +961,16 @@ class AgyRunner:
                     except json.JSONDecodeError:
                         obj = None
                 stdout_lines.append(payload)  # error lines may be JSON too ({"error": {"code": 429, ...}})
+                if not stream and stream_envelope is None and stripped.endswith("}"):
+                    # The one JSON result may be complete now: hold it, so a CLI that does not exit cannot lose it.
+                    env_obj = _parse_json_envelope("".join(stdout_lines), adapter)
+                    if env_obj is not None:
+                        stream_envelope, envelope_at = env_obj, time.monotonic()
                 if isinstance(obj, dict):
                     summary, env_obj = adapter.parse_stream_event(obj, stream_acc)
                     if env_obj is not None:
                         stream_envelope = env_obj
+                        envelope_at = envelope_at or time.monotonic()
                     if summary:
                         now = time.monotonic()
                         last_activity = now
@@ -913,6 +989,9 @@ class AgyRunner:
                         to_stderr=False,
                     )
 
+        if timed_out and stream_envelope is not None:
+            # The result came in before the limit: use it rather than report a timeout.
+            timed_out, stopped_after_result = False, proc.poll() is None
         if timed_out:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -928,7 +1007,7 @@ class AgyRunner:
             return ("stopped", f"{exe} timed out after {timeout}s", "", conversation_id or "")
 
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=0 if stopped_after_result else 5)
         except subprocess.TimeoutExpired:
             pass
         # Nothing the worker started may outlive it (dev servers, watchers holding its output open).
@@ -946,6 +1025,7 @@ class AgyRunner:
 
         if not isinstance(data, dict):
             combined = "\n".join(x for x in (raw_out, raw_err) if x).strip()
+            errors = error_text("".join(stdout_lines).splitlines(), raw_err)
             if stream and _stream_override is None and STREAM_UNSUPPORTED_RE.search(combined):
                 finish_log("stream-json unsupported; retrying with --output-format json")
                 return self.exec_prompt(
@@ -960,18 +1040,20 @@ class AgyRunner:
                     access=access,
                     write_extra=write_extra,
                     pair_text=pair_text,
+                    mcp=mcp,
                 )
-            if USAGE_RE.search(combined):
+            if USAGE_RE.search(errors):
                 finish_log("usage limit")
-                return ("usage", combined[:800], "", "")
-            if conversation_id and RESUME_ERR_RE.search(combined):
+                return ("usage", errors[:800], "", "")
+            if conversation_id and RESUME_ERR_RE.search(errors):
                 finish_log("resume failed")
-                return ("resume_failed", combined[:800], "", "")
+                return ("resume_failed", errors[:800], "", "")
             finish_log(f"stopped rc={proc.returncode}")
             return ("stopped", f"{exe} exited {proc.returncode}: {combined[:800]}", "", "")
 
         stats.update(envelope_stats(data))
-        env = adapter.extract_envelope(data, proc.returncode, exe, conversation_id=conversation_id, raw_err=raw_err)
+        rc = 0 if stopped_after_result else proc.returncode
+        env = adapter.extract_envelope(data, rc, exe, conversation_id=conversation_id, raw_err=raw_err)
         self._turn_stats(adapter, env["conv_id"], bool(conversation_id) and env["returned_id"] in ("", conversation_id),
                          stats)
         conv_id = env["conv_id"]
@@ -1007,16 +1089,19 @@ class AgyRunner:
         finish_log("done (succeeded)")
         return ("done", "succeeded", resp, conv_id)
 
-    def run(self, spec, pair=None, args=None, worktree=None, harness=None, label=None, access="full", write_extra=()):
+    def run(self, spec, pair=None, args=None, worktree=None, harness=None, label=None, access="full", write_extra=(),
+            mcp=False):
         """access: "full" for workers that edit and commit (crew, flight director), "read" for the rest, which
-        may write only under RUN_DIR and write_extra."""
+        may write only under RUN_DIR and write_extra. mcp: keep the user's MCP servers (the flight director only)."""
         prompt_text, spec_path = _read_spec_or_text(spec)
         target_harness = harness or (_as_pair(pair).harness if pair else "antigravity")
         launch = list(args) if args is not None else self.launch(pair)
         return self.exec_prompt(prompt_text, launch, worktree, spec_path=spec_path, harness=target_harness, label=label,
-                                access=access, write_extra=write_extra, pair_text=str(_as_pair(pair)) if pair else "")
+                                access=access, write_extra=write_extra, pair_text=str(_as_pair(pair)) if pair else "",
+                                mcp=mcp)
 
-    def try_resume(self, spec_or_text, pair, worktree, conversation_id, label=None, access="full", write_extra=()):
+    def try_resume(self, spec_or_text, pair, worktree, conversation_id, label=None, access="full", write_extra=(),
+                   mcp=False):
         if not conversation_id:
             return None
         prompt_text, spec_path = _read_spec_or_text(spec_or_text)
@@ -1024,7 +1109,7 @@ class AgyRunner:
         res = self.exec_prompt(prompt_text, self.launch(pair), worktree, conversation_id=conversation_id,
                                spec_path=spec_path, harness=target_harness,
                                label=label or (None if spec_path else f"{target_harness}-resume"), access=access,
-                               write_extra=write_extra, pair_text=str(_as_pair(pair)))
+                               write_extra=write_extra, pair_text=str(_as_pair(pair)), mcp=mcp)
         if res[0] == "resume_failed":
             return None
         return res
@@ -1081,6 +1166,7 @@ def answer_worker(runner, answer, pair, worktree, conversation_id, spec, before_
     """Give a worker that asked a question (ASK:) the Flight Director's answer: resume its session, or, when
     that fails, run before_fresh() (put the tree back) and start a fresh worker on its spec plus the answer.
     launch: access / write_extra for the worker. Returns the worker result."""
+    launch.setdefault("label", Path(spec).stem)  # the asking worker's role, for its log name and the cost report
     result = runner.try_resume(f"Flight Director answer:\n\n{answer}", pair, worktree, conversation_id, **launch)
     if result is None:
         if before_fresh:

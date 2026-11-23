@@ -2,7 +2,7 @@ Run the Range Safety drift report: check that the code in this worktree still ma
 - The design files: {{DESIGN_FILE}} and {{DECISIONS_LOG}}. The decisions log amends the design; where they differ, the decisions log wins. Check no other document, and check only the code these documents cover: code outside their scope is not drift.
 - The source tree: this worktree, at the run's finished feature branch.
 - The findings file: {{OUTPUT_FILE}}, in place of the skill's dated report file.
-Write every finding to {{OUTPUT_FILE}}, each with its kind (missing feature, incomplete model, logic shortcut, architectural divergence, or other), a severity on this run's scale (Critical, Important, Minor), the design line it concerns, and the file:line in the code. If you find no drift, write "No drift found." to that file.
+Write every finding to {{OUTPUT_FILE}} with your file-writing tool (not a shell redirect), each with its kind (missing feature, incomplete model, logic shortcut, architectural divergence, or other), a severity on this run's scale (Critical, Important, Minor), the design line it concerns, and the file:line in the code. If you find no drift, write "No drift found." to that file.
 You are read-only: do not edit, create, or delete any file in this worktree, commit, or run anything that changes files (formatters, installs). The one file you write is the findings file named above, which is outside this worktree.
 If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 When finished, end your response with the count per severity and the path {{OUTPUT_FILE}}.

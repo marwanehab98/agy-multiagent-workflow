@@ -2,7 +2,8 @@
 
 Usage:
   python3 -I roles.py menu --catalog C [--harness H [--model M]]
-  python3 -I roles.py check --catalog C --jira yes|no --director P --safety P --crew P [--session-harness H]
+  python3 -I roles.py check --catalog C --jira yes|no --director P --safety P --crew P [--mode full|launch-plan]
+      [--session-harness H]
   python3 -I roles.py remembered --roles F --catalog C
   python3 -I roles.py save --roles F --director P --safety P --crew P
   python3 -I roles.py to-state --roles F --state S --catalog C
@@ -34,7 +35,7 @@ ROLES = ("director", "safety", "crew")
 SESSION_REQUIRES = ["mission", "gatecheck", "touchdown"]
 REQUIRES = {
     "director": ["mission-brief", "flight-plan"],
-    "safety": ["wind-tunnel", "flight-readiness", "cross-check"],
+    "safety": ["wind-tunnel", "flight-readiness", "cross-check", "spec-drift"],  # spec-drift: run_finish's drift check
     "crew": ["red-green", "gatecheck"],
 }
 EXECUTE_SESSION_REQUIRES = ["launch-plan", "gatecheck", "touchdown"]

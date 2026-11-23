@@ -19,14 +19,15 @@ from pathlib import Path
 
 LINE = re.compile(r"\[worker \+\d+s\] (?P<tag>\S+): (?P<what>done|stopped|timed out|launch failed|usage limit|resume failed)"
                   r"(?P<rest>.*)$")
+# First match wins: the fixed prefixes before the task patterns, which accept any task id (01, F1, 01a).
 ROLES = [
-    (r"^\d+[A-Za-z0-9_-]*-(implement|fix-\d+|commit-\d+|attempt\d+)$", "Crew"),
-    (r"^\d+[A-Za-z0-9_-]*-s[12]-\d+$", "Task reviewers"),
     (r"^director-", "Flight Director"),
     (r"^(preflight-check|safety|lens|plan-review)-\d+$", "Range Safety and design reviews"),
     (r"^final-review-\d+$", "Final review"),
     (r"^drift-\d+$", "Drift check"),
     (r"^probe-", "Test launches"),
+    (r"^[A-Za-z0-9][A-Za-z0-9_-]*-(implement|fix-\d+|commit-\d+|attempt\d+)$", "Crew"),
+    (r"^[A-Za-z0-9][A-Za-z0-9_-]*-s[12]-\d+$", "Task reviewers"),
     (r"-resume(-\d+)?$", "Resumed workers"),
 ]
 

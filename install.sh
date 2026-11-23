@@ -50,7 +50,8 @@ labels=(); targets=()
 if [ -n "$target" ]; then
   labels+=(custom); targets+=("$target")
 else
-  table=$(python3 -I "$repo/scripts/harnesses.py" install-dirs "${dirs_args[@]}")
+  # ${a[@]+"${a[@]}"}: an empty array is an unbound variable under set -u in bash before 4.4 (macOS bash 3.2).
+  table=$(python3 -I "$repo/scripts/harnesses.py" install-dirs ${dirs_args[@]+"${dirs_args[@]}"})
   if [ ${#harnesses[@]} -eq 0 ]; then
     while IFS=$'\t' read -r h dir found; do
       if [ -e "$dir/mission" ] || [ -e "$dir/$name" ]; then

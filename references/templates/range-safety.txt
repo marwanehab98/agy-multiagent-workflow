@@ -2,7 +2,7 @@ Run the Range Safety design review on {{DESIGN_FILE}}. The skill is a file, not 
 - TargetFile: {{DESIGN_FILE}}
 - ReviewContext: an empty list (linked files inside this repository are added by the skill itself)
 - Step: uninterrupted (the Consolidated report flow; do not show the preset gate)
-Write every finding to {{OUTPUT_FILE}}, each with its stage, its severity mapped to this run's scale (Blocker = Critical, Major = Important, Nit = Minor), the section it concerns, and the evidence.
-Do not edit any other file in this repository except the skill's own report files. Do not resolve findings, invoke other skills, or apply fixes. Do not commit.
+Write every finding to {{OUTPUT_FILE}} with your file-writing tool (not a shell redirect), each with its stage, its severity mapped to this run's scale (Blocker = Critical, Major = Important, Nit = Minor), the section it concerns, and the evidence.
+Do not create or edit any file in this repository other than {{OUTPUT_FILE}}: put what the skill would write to its own report files into {{OUTPUT_FILE}} instead. Do not resolve findings, invoke other skills, or apply fixes. Do not commit.
 If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 When finished, end your response with the count per severity and the path {{OUTPUT_FILE}}.

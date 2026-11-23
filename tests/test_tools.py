@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from helpers import removed_after
+
 SKILL = Path(__file__).resolve().parent.parent
 GATE = SKILL / "scripts" / "gate.py"
 MERGE_LOCAL = SKILL / "scripts" / "merge-local.sh"
@@ -23,7 +25,7 @@ def py(script, *args, env=None):
 
 class GateTests(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="gate-"))
+        self.d = Path(removed_after(self, tempfile.mkdtemp(prefix="gate-")))
         self.wt = self.d / "wt"
         self.wt.mkdir()
         sh("git", "-C", str(self.wt), "init", "-q", "-b", "main")
@@ -120,7 +122,7 @@ class MergeLocalTests(unittest.TestCase):
     """The user's "merge locally" choice at the end of a run: fast-forward only, never losing their work."""
 
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="mergelocal-"))
+        self.d = Path(removed_after(self, tempfile.mkdtemp(prefix="mergelocal-")))
         self.main = self.d / "main"
         self.main.mkdir()
         g = self.g

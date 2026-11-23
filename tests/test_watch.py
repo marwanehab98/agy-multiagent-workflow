@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import common  # noqa: E402
 import watch  # noqa: E402
+from helpers import removed_after  # noqa: E402
 
 LINES = [
     "21:35:32 [worker] start 02-implement (claude pid=1) log=/x/02-implement-1.log",
@@ -30,7 +31,7 @@ NOTES = [LINES[0], LINES[2], LINES[4], LINES[6], LINES[7]]
 
 class Watch(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp())
+        self.d = Path(removed_after(self, tempfile.mkdtemp()))
         self.log = self.d / "progress.log"
         self.log.write_text("09:00:00 [progress] an earlier call\n")
         self.sleeper = subprocess.Popen(["sleep", "60"])
@@ -124,7 +125,7 @@ class Watch(unittest.TestCase):
 
 class CallRecord(unittest.TestCase):
     def test_drive_records_the_call_and_marks_it_ended(self):
-        d = Path(tempfile.mkdtemp())
+        d = Path(removed_after(self, tempfile.mkdtemp()))
         state = d / "state.json"
         state.write_text(json.dumps({"RUN_DIR": str(d)}))
         (d / "progress.log").write_text("x\n")

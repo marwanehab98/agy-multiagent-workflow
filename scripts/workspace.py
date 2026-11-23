@@ -7,7 +7,7 @@ linters, file watchers and IDEs working in the checkout never see a second copy 
 mission/<topic>-docs and mission/<topic>-impl.
 
 Usage:
-  python3 -I workspace.py detect --dir <cwd>
+  python3 -I workspace.py detect --dir <cwd> [--max-depth <n>]
   python3 -I workspace.py worktrees-root --anchor <main checkout or workspace dir>
   python3 -I workspace.py check-topic --main-checkout <repo> --topic <topic> [--force-new]
   python3 -I workspace.py check-topic --workspace <dir> --topic <topic> --repo <name>=<path> [...] [--force-new]
@@ -23,10 +23,13 @@ init-impl reads FEATURE_BRANCH(_<k>) from FLIGHT_MANIFEST (multi-repo) or state 
 again after a failure: a feature branch already at the start commit and a worktree already on the impl branch
 are reused, and anything a failed call created is removed. remove-docs deletes the docs branch too (it holds only
 the run's documents) and prints its last commit, so `git branch <name> <sha>` brings it back.
+init-docs adds the run's ignore patterns to each repo's .git/info/exclude as one marked block; remove-impl and
+remove-docs take the block out again once no mission-control worktree of that repo is left.
 
-prune lists finished runs (PHASE=done) and orphaned ones (their repo or workspace no longer exists) under the
-worktrees folder, for one checkout, one workspace, or every one (--all). With --apply it removes them: a finished
-run as remove-impl + remove-docs do, an orphaned one by deleting its folder. Runs in progress are never touched.
+prune lists finished runs (DONE: PHASE=done) and orphaned ones (ORPHANED: their repo or workspace no longer exists)
+under the worktrees folder, for one checkout, one workspace, or every one (--all). With --apply it removes them: a
+finished run as remove-impl + remove-docs do, an orphaned one by deleting its folder. Runs in progress (KEEP) and
+runs whose state.json is missing or unreadable (UNREADABLE) are never touched.
 
 Exit 0: ok.  Exit 10: EXISTING run found (check-topic).  Exit 1: git/workspace failure.  Exit 64: bad usage.
 """
@@ -52,6 +55,9 @@ EXCLUDES = [
     ".DS_Store",
 ]
 BRANCH_PREFIX = "mission/"
+# The run's lines in a repo's .git/info/exclude sit between these, so the last run's cleanup can take them out again.
+EXCLUDE_BEGIN = "# >>> mission-control: run worktree ignores (removed with the repo's last mission-control worktree)"
+EXCLUDE_END = "# <<< mission-control"
 
 
 def docs_branch(topic):
@@ -100,15 +106,41 @@ def _branch_exists(repo_path, branch):
 
 
 def _append_excludes(git_common_dir, lines):
+    """Add the lines the exclude file lacks (older versions wrote them unmarked) inside the mission-control block."""
     exclude = Path(git_common_dir) / "info" / "exclude"
     exclude.parent.mkdir(parents=True, exist_ok=True)
-    existing = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.exists() else set()
-    new = [l for l in lines if l not in existing]
-    if new:
-        with exclude.open("a", encoding="utf-8") as f:
-            if existing and not exclude.read_text(encoding="utf-8").endswith("\n"):
-                f.write("\n")
-            f.write("\n".join(new) + "\n")
+    old = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+    new = [l for l in dict.fromkeys(lines) if l not in old]
+    if not new:
+        return
+    if EXCLUDE_BEGIN in old and EXCLUDE_END in old[old.index(EXCLUDE_BEGIN):]:
+        end = old.index(EXCLUDE_END, old.index(EXCLUDE_BEGIN))
+        text = old[:end] + new + old[end:]
+    else:
+        text = old + [EXCLUDE_BEGIN] + new + [EXCLUDE_END]
+    exclude.write_text("\n".join(text) + "\n", encoding="utf-8")
+
+
+def _remove_excludes(repo_path):
+    """Drop the mission-control block from the repo's exclude file once no mission-control worktree of the repo is
+    left (none on a mission/ branch, none under the worktrees folder). Lines outside the block are never touched."""
+    out = git(str(repo_path), "worktree", "list", "--porcelain")
+    common_dir = git(str(repo_path), "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if out is None or not common_dir:
+        return
+    base = worktrees_base().resolve()
+    for line in out.splitlines():
+        if line.startswith(f"branch refs/heads/{BRANCH_PREFIX}") or (
+                line.startswith("worktree ") and Path(line[len("worktree "):]).resolve().is_relative_to(base)):
+            return
+    exclude = Path(common_dir) / "info" / "exclude"
+    old = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+    if EXCLUDE_BEGIN not in old or EXCLUDE_END not in old[old.index(EXCLUDE_BEGIN):]:
+        return
+    start = old.index(EXCLUDE_BEGIN)
+    end = old.index(EXCLUDE_END, start)
+    rest = old[:start] + old[end + 1:]
+    exclude.write_text("\n".join(rest) + ("\n" if rest else ""), encoding="utf-8")
 
 
 def _exclude_in(repo_path, extra=()):
@@ -448,7 +480,9 @@ def cmd_init_impl(args):
                 r.set(FEATURE_BRANCH_CREATED=None)
             print(f"ERROR {err}", file=sys.stderr)
             return 1
-        r.set(IMPL_WORKTREE=wt_path, INITIAL_BASE_SHA=start_sha, LAST_MERGED=start_sha)
+        # PR_TARGET is optional in the flight manifest and defaults to the base branch, as per repo below.
+        pt = r.get("PR_TARGET") or r.get("BASE_BRANCH")
+        r.set(IMPL_WORKTREE=wt_path, INITIAL_BASE_SHA=start_sha, LAST_MERGED=start_sha, PR_TARGET=pt)
         print(f"IMPL_WORKTREE {wt_path}")
         return 0
 
@@ -493,8 +527,8 @@ def cmd_init_impl(args):
         updates[f"LAST_MERGED_{k}"] = start_sha
         if f"CONVENTION_PATHS_{k}" in rv:
             updates[f"CONVENTION_PATHS_{k}"] = rv[f"CONVENTION_PATHS_{k}"]
-        if f"BASELINE_SKIP_{k}" in rv:
-            updates[f"BASELINE_SKIP_{k}"] = rv[f"BASELINE_SKIP_{k}"]
+        # Always set (empty when the manifest has none): step 3 passes it to gate.py --skip as it is.
+        updates[f"BASELINE_SKIP_{k}"] = rv.get(f"BASELINE_SKIP_{k}", "")
 
     r.set(**updates)
     print(f"IMPL_WORKTREE {impl_root}")
@@ -521,6 +555,8 @@ def cmd_remove_impl(args):
             rc, out = tool("worktree.sh", "remove", r.need("MAIN_CHECKOUT"), wt,
                            "--delete-branch", "--merged-into", r.need("FEATURE_BRANCH"))
             print(out)
+            if rc == 0:
+                _remove_excludes(r.need("MAIN_CHECKOUT"))
             return 0 if rc == 0 else 1
         return 0
     impl_root = Path(r.need("IMPL_WORKTREE")).resolve()
@@ -536,6 +572,7 @@ def cmd_remove_impl(args):
             failed = True
         else:
             _prune_empty_parents(Path(wt).resolve().parent, impl_root)
+            _remove_excludes(r.need(f"REPO_PATH_{k}"))
     if not failed and impl_root.exists():
         try:
             impl_root.rmdir()
@@ -571,6 +608,7 @@ def cmd_remove_docs(args):
                 print(f"ERROR removing docs worktree: {(res.stdout + res.stderr).strip()}", file=sys.stderr)
                 return 1
         ok = _delete_branch(main, name)
+        _remove_excludes(main)
         return 0 if ok else 1
     failed = False
     for name in r.repos:
@@ -583,6 +621,8 @@ def cmd_remove_docs(args):
         if rc != 0:
             print(f"ERROR removing {name} docs worktree: {out}", file=sys.stderr)
             failed = True
+        else:
+            _remove_excludes(r.need(f"REPO_PATH_{k}"))
     docs_root = Path(r.need("DOCS_WORKTREE"))
     if not failed and docs_root.exists():
         shutil.rmtree(docs_root)
@@ -615,15 +655,17 @@ def cmd_list_runs(args):
 
 
 def _runs_under(root):
-    """(docs folder, state dict) for every run with a state file directly under root."""
+    """(docs folder, state dict) for every run folder directly under root; the state is None when state.json is
+    missing or unreadable (nothing then says whether the run is finished or its repo gone)."""
     found = []
     if root.is_dir():
         for d in sorted(p for p in root.iterdir() if p.is_dir() and p.name.endswith("-docs")):
             st = d / ".mission" / "state.json"
             try:
-                found.append((d, json.loads(st.read_text(encoding="utf-8"))))
+                s = json.loads(st.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                found.append((d, {}))
+                s = None
+            found.append((d, s if isinstance(s, dict) else None))
     return found
 
 
@@ -640,6 +682,9 @@ def cmd_prune(args):
     failed = False
     for root in roots:
         for docs, s in _runs_under(root):
+            if s is None:
+                print(f"UNREADABLE {docs.name[:-5]} {docs} (state.json missing or unreadable; not removed)")
+                continue
             anchor = s.get("WORKSPACE_DIR") if s.get("REPOS", "none") not in ("", "none") else s.get("MAIN_CHECKOUT")
             topic = s.get("TOPIC", docs.name[:-5])
             if not anchor or not Path(anchor).exists():

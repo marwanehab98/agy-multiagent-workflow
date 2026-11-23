@@ -3,6 +3,7 @@
 set -u
 SK=$(cd "$(dirname "$0")/../scripts" && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/amwtest.XXXX"); cd "$T"
+trap 'cd /; rm -rf "$T"' EXIT  # also when a check aborts the script
 export MISSION_CONTROL_WORKTREES="$T/wt-root"
 pass=0; fail=0
 ok()  { echo "PASS $1"; pass=$((pass+1)); }

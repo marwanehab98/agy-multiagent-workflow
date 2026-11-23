@@ -9,7 +9,7 @@ Usage:
 
 `detect` runs harness CLI commands and writes a catalog:
   {"detected_at": iso, "harnesses": {name: {binary, version, styles, models,
-   skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str,
+   skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str, read_sandbox: bool,
    skill_dirs: [folder], plugin_cmd: str, mcp_cmd: str}}}
 skill_dirs, plugin_cmd and mcp_cmd say where a missing requirement belongs (roles.py check prints them).
 A harness whose binary is missing is left out; one whose model list parses empty is
@@ -94,8 +94,10 @@ def _summarize_tool_args(info, limit=80):
     return ""
 
 
-# Git subcommands a read-only Claude worker may run (reviewers read the task's diff and history).
-READ_ONLY_GIT = ["diff", "log", "show", "status", "rev-parse", "ls-files", "grep", "blame"]
+# Git subcommands a read-only Claude worker may run (reviewers read the task's diff and history). Not grep: its
+# -O<pager> runs a program even bundled behind other flags (`git grep -nO<cmd>`, verified live), which no rule
+# pattern can single out; the Grep tool searches the tree.
+READ_ONLY_GIT = ["diff", "log", "show", "status", "rev-parse", "ls-files", "blame"]
 
 
 def _one_line(text, limit):
@@ -119,6 +121,25 @@ def _todo_summary(info):
     now = next((t.get("activeForm") or t.get("content") for t in todos
                 if isinstance(t, dict) and t.get("status") == "in_progress"), "")
     return f"todo {done}/{len(todos)} done" + (f", now: {_one_line(now, 80)}" if now else "")
+
+
+def _git_dir_spellings(d, workdir):
+    """How a worker may name git dir d after `git -C`: as given and resolved, and, when d is the worker's folder or
+    lies under it, relative to that folder (`.`, `api`, `./api`). A relative d is taken from workdir, never from
+    this process's cwd."""
+    base = Path(workdir).resolve() if workdir else None
+    p = Path(d)
+    if not p.is_absolute():
+        if base is None:
+            return []
+        p = base / p
+    full = p.resolve()
+    forms = [str(d)] if Path(d).is_absolute() else []
+    forms.append(str(full))
+    if base is not None and full.is_relative_to(base):
+        rel = full.relative_to(base).as_posix()
+        forms += ["."] if rel == "." else [rel, f"./{rel}"]
+    return forms
 
 
 class Adapter:
@@ -178,11 +199,12 @@ class Adapter:
         return found
 
     @classmethod
-    def permission_args(cls, access, write_dirs=()):
+    def permission_args(cls, access, write_dirs=(), git_dirs=(), workdir=None, mcp=False):
         """CLI permission flags for a worker. access is "full" (crew, flight director: edits and commands
-        in their worktree) or "read" (reviewers, design workers, probes), which may also write files only under
-        write_dirs (its output file). Each harness defines its read-only profile; check-tree.sh also voids any
-        worktree change afterwards."""
+        in their worktree; mcp=True keeps the user's MCP servers, for the flight director only) or "read"
+        (reviewers, design workers, probes), which may also write files only under write_dirs (its output file) and run read-only git in git_dirs (its worktree and the run's repo worktrees;
+        workdir is the folder it runs in, for the relative spellings of those under it).
+        Each harness defines its read-only profile; check-tree.sh also voids any worktree change afterwards."""
         raise NotImplementedError
 
     def read_sandbox(self):
@@ -191,9 +213,10 @@ class Adapter:
         raise NotImplementedError
 
     @classmethod
-    def build_exec_cmd(cls, exe, prompt, args, conversation_id=None, stream=True, access="full", write_dirs=()):
+    def build_exec_cmd(cls, exe, prompt, args, conversation_id=None, stream=True, access="full", write_dirs=(),
+                       git_dirs=(), workdir=None, mcp=False):
         fmt_args = cls.stream_output_args if stream else cls.json_output_args
-        cmd = [exe, "-p", prompt, *fmt_args, *cls.permission_args(access, write_dirs), *args]
+        cmd = [exe, "-p", prompt, *fmt_args, *cls.permission_args(access, write_dirs, git_dirs, workdir, mcp), *args]
         if conversation_id:
             cmd += [cls.resume_flag, conversation_id]
         return cmd
@@ -225,18 +248,27 @@ class AntigravityAdapter(Adapter):
 
     def read_sandbox(self):
         rc, out = self.run("--help")
-        return rc == 0 and all(f in out for f in ("--sandbox", "--settings", "--add-dir"))
+        return rc == 0 and all(f in out for f in ("--sandbox", "--settings"))
 
     @classmethod
-    def permission_args(cls, access, write_dirs=()):
+    def permission_args(cls, access, write_dirs=(), git_dirs=(), workdir=None, mcp=False):
         """Read-only workers: the terminal sandbox instead of --dangerously-skip-permissions (which by design also
         approves sandbox bypasses, antigravity-cli#36). Commands run without prompts inside the sandbox: no
-        network, no writes outside the workspace and write_dirs. File tools may write only in the workspace and
-        write_dirs (allowNonWorkspaceAccess=false plus --add-dir); reading stays open, for skill files. Headless
-        agy soft-denies anything else, which ends the worker's run. Verified live 2026-11-23 with targets
-        under $HOME (/tmp stays writable in the sandbox)."""
+        network, no writes outside the workspace. File tools may write only in the workspace and write_dirs
+        (allowNonWorkspaceAccess=false plus a write_file allow rule per dir); reading stays open, for skill files.
+        Headless agy soft-denies anything else, which ends the worker's run. Verified live 2026-11-23 with targets
+        under $HOME (/tmp stays writable in the sandbox).
+        No --add-dir for write_dirs: when the added folder lies in a worktree of the same repository (RUN_DIR in the
+        docs worktree), the shell starts there instead of in the worker's worktree. Without it the shell starts in
+        the worker's own folder, and both the file tool and the shell can still write the output folder (the
+        write_file rule covers both; verified live 2026-11-24).
+        agy has no flag that keeps MCP servers from starting; a session-only deny rule (`mcp(*)`, which the
+        changelog says holds even under --dangerously-skip-permissions) refuses every MCP tool call instead.
+        Not yet verified live."""
         if access != "read":
-            return ["--dangerously-skip-permissions"]
+            no_mcp = {"permissions": {"deny": ["mcp(*)"]}}
+            return ["--dangerously-skip-permissions"] + ([] if mcp else
+                                                          ["--settings", json.dumps(no_mcp, separators=(",", ":"))])
         dirs = [str(Path(d).resolve()) for d in write_dirs]
         settings = {
             "toolPermission": "proceed-in-sandbox",
@@ -244,11 +276,10 @@ class AntigravityAdapter(Adapter):
             "allowNonWorkspaceAccess": False,
             "permissions": {
                 "allow": ["read_file(*)", *[f"write_file({d})" for d in dirs]],
-                "deny": ["read_url(*)", "execute_url(*)"],
+                "deny": ["read_url(*)", "execute_url(*)", "mcp(*)"],
             },
         }
-        add_dirs = [arg for d in dirs for arg in ("--add-dir", d)]
-        return ["--sandbox", *add_dirs, "--settings", json.dumps(settings, separators=(",", ":"))]
+        return ["--sandbox", "--settings", json.dumps(settings, separators=(",", ":"))]
 
     def models(self):
         rc, raw = self.run(*self.models_cmd)
@@ -382,27 +413,37 @@ class ClaudeAdapter(Adapter):
     # Read-only workers get no general shell and no network: reading, writing only under write_dirs (their
     # output file), subagents and skills for the review swarms, and read-only git. Anything else is denied
     # without a prompt (dontAsk). check-tree.sh still voids any change to the worktree.
-    # Verified live: `git -C <repo> diff` (multi-repo reviewers) and `git diff | head` match; a redirect into a
-    # file (`git diff > f`), `git push` and `cd x && ...` are denied.
+    # Verified live: `git diff | head` matches; a redirect into a file (`git diff > f`), `git push`, `$(...)` and
+    # `cd x && ...` are denied. A `*` in a rule spans words, so `git -C` is allowed only with the worker's own repo
+    # paths (permission_args): `git -C * diff *` also let `git -C . update-ref -m diff ...` run (live, 2.1.331). The
+    # allowed subcommands' own options that write files or run programs are denied (READ_ONLY_DENY; deny beats allow).
     READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "LS", "NotebookRead", "TodoWrite", "Task", "Agent", "Skill",
                        *[f"Bash(git {c} *)" for c in READ_ONLY_GIT],
-                       *[f"Bash(git -C * {c} *)" for c in READ_ONLY_GIT],
                        "Bash(head *)", "Bash(tail *)", "Bash(wc *)"]
+    # Config on the command line (-c, --config-env: diff.external, core.pager ... run commands); --output writes a
+    # file (diff, log, show; git takes no shorter spelling); --ext-diff and --textconv run configured programs;
+    # git grep -O / --open-files-in-pager (or any prefix down to --op) runs its argument as the pager.
+    READ_ONLY_DENY = ["Bash(git -c *)", "Bash(git -C * -c *)", "Bash(git *--config-env*)",
+                      "Bash(git * --out*)", "Bash(git * --ext*)", "Bash(git * --textc*)",
+                      "Bash(git * -O*)", "Bash(git * --op*)"]
 
     def read_sandbox(self):
         rc, out = self.run("--help")
         return rc == 0 and all(f in out for f in ("--permission-mode", "--allowedTools", "--strict-mcp-config"))
 
     @classmethod
-    def permission_args(cls, access, write_dirs=()):
+    def permission_args(cls, access, write_dirs=(), git_dirs=(), workdir=None, mcp=False):
         if access == "read":
             # "//" marks an absolute path in a permission rule; Edit rules cover every file-editing tool.
             writes = [f"{tool}(/{Path(d).resolve()}/**)" for d in write_dirs for tool in ("Edit", "Write")]
+            paths = dict.fromkeys(p for d in git_dirs for p in _git_dir_spellings(d, workdir))
+            dash_c = [f"Bash(git -C {p} {c} *)" for p in paths for c in READ_ONLY_GIT]
             # One comma-joined value: --allowedTools is variadic and must not swallow later arguments.
             # --strict-mcp-config with no --mcp-config: no MCP servers (none of them is read-only by contract).
-            return ["--permission-mode", "dontAsk", "--allowedTools", ",".join(cls.READ_ONLY_TOOLS + writes),
-                    "--strict-mcp-config"]
-        return ["--dangerously-skip-permissions"]
+            return ["--permission-mode", "dontAsk", "--allowedTools", ",".join(cls.READ_ONLY_TOOLS + dash_c + writes),
+                    "--disallowedTools", ",".join(cls.READ_ONLY_DENY), "--strict-mcp-config"]
+        # Crew need no MCP server (only the flight director's JIRA jobs do): --strict-mcp-config starts none.
+        return ["--dangerously-skip-permissions"] + ([] if mcp else ["--strict-mcp-config"])
 
     def models(self):
         rc, raw = self.run(*self.models_cmd)
@@ -420,17 +461,24 @@ class ClaudeAdapter(Adapter):
                     parsed = cand
                     break
             efforts = parsed or ["low", "medium", "high"]
-        return [
+        models = [
             {"model": "opus", "label": "Claude Opus", "efforts": list(efforts)},
             {"model": "sonnet", "label": "Claude Sonnet", "efforts": list(efforts)},
             {"model": "haiku", "label": "Claude Haiku", "efforts": ["default"]},
         ]
+        # --help names the current aliases ("e.g. 'fable', 'opus', or 'sonnet'"); add any new one after the base three
+        # (catalog order is only menu order). A quoted name with a digit or dash is a full model id, not an alias.
+        m_model = re.search(r"(?m)^\s*--model\b[^\n]*(?:\n(?!\s*-)[^\n]*)*", raw)
+        for alias in re.findall(r"'([a-z]+)'", m_model.group(0) if m_model else ""):
+            if all(m["model"] != alias for m in models):
+                models.append({"model": alias, "label": f"Claude {alias.capitalize()}", "efforts": list(efforts)})
+        return models
 
     def _parse_plugins(self):
         rc, raw = self.run("plugin", "list")
         if rc != 0:
-            return [], []
-        ids, paths = [], []
+            return [], [], {}
+        ids, paths, versions = [], [], {}
         for block in re.split(r"(?m)^\s*❯\s+", raw)[1:]:
             lines = block.splitlines()
             pid = lines[0].strip() if lines else ""
@@ -438,12 +486,15 @@ class ClaudeAdapter(Adapter):
                 continue
             status = ""
             path = ""
+            version = ""
             for line in lines[1:]:
                 s = line.strip()
                 if s.startswith("Status:"):
                     status = s.partition(":")[2].strip().lower()
                 elif s.startswith("Path:"):
                     path = s.partition(":")[2].strip()
+                elif s.startswith("Version:"):
+                    version = s.partition(":")[2].strip()
             if (
                 re.search(r"\b(enabled|loaded)\b", status)
                 and not re.search(r"\b(disabled|unloaded|not\s+(?:enabled|loaded))\b", status)
@@ -452,7 +503,9 @@ class ClaudeAdapter(Adapter):
                     ids.append(pid)
                 if path and path not in paths:
                     paths.append(path)
-        return ids, paths
+                if version and version not in versions.setdefault(pid, []):
+                    versions[pid].append(version)
+        return ids, paths, versions
 
     def plugins(self):
         return self._parse_plugins()[0]
@@ -466,7 +519,8 @@ class ClaudeAdapter(Adapter):
             return {}
         out = {}
         for line in raw.splitlines():
-            m = re.match(r"^([^:\n]+?):\s+\S+.*\s+-\s+(.+)$", line.strip())
+            # The name runs to the first colon followed by whitespace (plugin servers: plugin:<plugin>:<name>).
+            m = re.match(r"^([^\n]+?):\s+\S+.*\s+-\s+(.+)$", line.strip())
             if m:
                 status = m.group(2).lower()
                 out[m.group(1).strip()] = (
@@ -481,19 +535,22 @@ class ClaudeAdapter(Adapter):
     def skill_roots(self):
         roots = list(self.user_skill_dirs())
         cache_root = self.home / ".claude" / "plugins" / "cache"
-        for pid in self.plugins():
+        ids, _, versions = self._parse_plugins()
+        for pid in ids:
             if "@" not in pid:
                 continue
             plugin, _, marketplace = pid.partition("@")
             plugin_cache = cache_root / marketplace / plugin
             if plugin_cache.is_dir():
-                for skill_dir in sorted(
-                    plugin_cache.glob("*/skills"),
+                # Only the installed version: the cache keeps older ones, whose removed skills must not count.
+                installed = [plugin_cache / v / "skills" for v in versions.get(pid, [])]
+                installed = [d for d in installed if d.is_dir()]
+                newest = sorted(
+                    (d for d in plugin_cache.glob("*/skills") if d.is_dir()),
                     key=lambda p: (tuple(int(x) for x in re.findall(r"\d+", p.parent.name)), p.parent.name),
                     reverse=True,
-                ):
-                    if skill_dir.is_dir():
-                        roots.append(skill_dir)
+                )[:1]
+                roots.extend(installed or newest)
         for p in self._plugin_paths():
             sdir = Path(p) / "skills"
             if sdir.is_dir():

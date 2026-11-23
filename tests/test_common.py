@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import common  # noqa: E402
 import harnesses  # noqa: E402
 from common import ERROR, Done, Run, result_words, rest_path  # noqa: E402
+from helpers import removed_after  # noqa: E402
 
 
 class ResultWords(unittest.TestCase):
@@ -42,9 +43,25 @@ class ResultWords(unittest.TestCase):
             self.assertEqual(rest_path(["RESULT:", "RELAY", "/nope"], 2), "/nope")
 
 
+class UsageLimitText(unittest.TestCase):
+    def test_provider_usage_messages_match(self):
+        for text in ("Quota reached for model X", "You have reached your daily quota", "out of quota",
+                     "quota limit", "over quota", "got 429 from the API", "429: rate limited",
+                     "Error: 429", '{"error": {"code": 429}}', "quota exceeded", "exceeded your current quota",
+                     "429 Too Many Requests", "usageLimitReached"):
+            with self.subTest(text=text):
+                self.assertTrue(common.USAGE_RE.search(text))
+
+    def test_ordinary_mentions_do_not_match(self):
+        for text in ('"input_tokens": 429', "the function returns 429 items", "Checking the quota code.",
+                     "the quota field in config"):
+            with self.subTest(text=text):
+                self.assertIsNone(common.USAGE_RE.search(text))
+
+
 class StateAndLock(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp())
+        self.d = Path(removed_after(self, tempfile.mkdtemp()))
         self.state = self.d / "state.json"
         self.state.write_text(json.dumps({"RUN_DIR": str(self.d), "A": "1"}))
 
@@ -56,6 +73,12 @@ class StateAndLock(unittest.TestCase):
         r.set(C="3")
         s = json.loads(self.state.read_text())
         self.assertEqual((s["A"], s["B"], s["C"]), ("1", "2", "3"))
+
+    def test_convention_paths_default_to_none(self):
+        # CONVENTION_PATHS is optional in the flight manifest, in a single-repo run as in a multi-repo one.
+        self.assertEqual(Run(self.state).repo_convention_paths(), "none")
+        Run(self.state).set(CONVENTION_PATHS="CONTRIBUTING.md")
+        self.assertEqual(Run(self.state).repo_convention_paths(), "CONTRIBUTING.md")
 
     def test_second_driver_is_refused(self):
         lock = self.state.parent / ".driver.lock"
@@ -110,12 +133,15 @@ class StateAndLock(unittest.TestCase):
 class WorkerPermissions(unittest.TestCase):
     ENV = {"PATH": "/bin", "HOME": "/h", "GITHUB_TOKEN": "x", "AWS_SECRET_ACCESS_KEY": "x", "AWS_PROFILE": "p",
            "ANTHROPIC_API_KEY": "k", "CLAUDE_CODE_OAUTH_TOKEN": "t", "GEMINI_API_KEY": "g", "MY_PASSWORD": "x",
-           "WORKER_ENV_KEEP": "AWS_PROFILE"}
+           "WORKER_ENV_KEEP": "AWS_PROFILE", "MAX_THINKING_TOKENS": "8000", "MAX_MCP_OUTPUT_TOKENS": "9000",
+           "MY_TOKENS": "x"}
 
     def test_read_workers_lose_secrets_but_keep_harness_sign_in(self):
         env = common.worker_env("read", self.ENV)
+        # The two harness limits named *TOKENS* are settings, not secrets; the pattern still drops MY_TOKENS.
         self.assertEqual(sorted(env), sorted(["PATH", "HOME", "AWS_PROFILE", "ANTHROPIC_API_KEY",
-                                              "CLAUDE_CODE_OAUTH_TOKEN", "GEMINI_API_KEY", "WORKER_ENV_KEEP"]))
+                                              "CLAUDE_CODE_OAUTH_TOKEN", "GEMINI_API_KEY", "WORKER_ENV_KEEP",
+                                              "MAX_THINKING_TOKENS", "MAX_MCP_OUTPUT_TOKENS"]))
         self.assertEqual(common.worker_env("full", self.ENV), self.ENV)
 
     def test_cloud_provider_credentials_stay_when_the_harness_uses_them(self):
@@ -128,7 +154,8 @@ class WorkerPermissions(unittest.TestCase):
         self.assertIn("GOOGLE_APPLICATION_CREDENTIALS", vertex)
 
     def test_claude_read_profile(self):
-        args = harnesses.ClaudeAdapter.permission_args("read", ["/tmp/run"])
+        repo = str(Path("/tmp/repo").resolve())
+        args = harnesses.ClaudeAdapter.permission_args("read", ["/tmp/run"], [repo])
         self.assertNotIn("--dangerously-skip-permissions", args)
         self.assertEqual(args[args.index("--permission-mode") + 1], "dontAsk")
         tools = args[args.index("--allowedTools") + 1].split(",")
@@ -137,9 +164,41 @@ class WorkerPermissions(unittest.TestCase):
         self.assertNotIn("Edit", tools)
         self.assertNotIn("Bash", tools)
         self.assertIn(f"Write(/{Path('/tmp/run').resolve()}/**)", tools)
-        self.assertIn("Bash(git -C * diff *)", tools)  # multi-repo reviewers diff each repo by path
+        # `git -C` only on the worker's repos: a wildcard path let other subcommands through (live, 2.1.331).
+        self.assertIn(f"Bash(git -C {repo} diff *)", tools)
+        self.assertFalse([t for t in tools if t.startswith("Bash(git -C *")], tools)
+        self.assertFalse([t for t in tools if "grep" in t and t.startswith("Bash(")], tools)
+        # Options that write files or run programs are denied, one comma-joined value like --allowedTools.
+        deny = args[args.index("--disallowedTools") + 1].split(",")
+        for rule in ("Bash(git -c *)", "Bash(git -C * -c *)", "Bash(git *--config-env*)", "Bash(git * --out*)",
+                     "Bash(git * --ext*)", "Bash(git * --textc*)", "Bash(git * -O*)", "Bash(git * --op*)"):
+            self.assertIn(rule, deny)
         self.assertIn("--strict-mcp-config", args)
-        self.assertEqual(harnesses.ClaudeAdapter.permission_args("full"), ["--dangerously-skip-permissions"])
+        # Crew: full access with no MCP servers; the flight director (mcp=True) keeps the user's servers.
+        self.assertEqual(harnesses.ClaudeAdapter.permission_args("full"),
+                         ["--dangerously-skip-permissions", "--strict-mcp-config"])
+        self.assertEqual(harnesses.ClaudeAdapter.permission_args("full", ["/tmp/run"], [repo]),
+                         ["--dangerously-skip-permissions", "--strict-mcp-config"])
+        self.assertEqual(harnesses.ClaudeAdapter.permission_args("full", mcp=True), ["--dangerously-skip-permissions"])
+        self.assertEqual(harnesses.ClaudeAdapter.permission_args("read", ["/tmp/run"], [repo], mcp=True), args)
+
+    def test_claude_read_profile_names_repo_folders_relative_to_the_worker(self):
+        # A multi-repo final reviewer runs in the folder holding the repo worktrees and is told `git -C <repo>`.
+        root = Path(removed_after(self, tempfile.mkdtemp())).resolve()
+        outside = Path(removed_after(self, tempfile.mkdtemp())).resolve() / "docs-api"
+        dirs = [str(root), str(root / "api"), str(root / "web"), str(outside)]
+        args = harnesses.ClaudeAdapter.permission_args("read", [], dirs, workdir=str(root))
+        tools = args[args.index("--allowedTools") + 1].split(",")
+        got = [t for t in tools if t.startswith("Bash(git -C ") and t.endswith(" diff *)")]
+        self.assertEqual(got, [f"Bash(git -C {p} diff *)" for p in (
+            root, ".", root / "api", "api", "./api", root / "web", "web", "./web", outside)])
+        # Each rule is a fixed path followed by one allowed subcommand: no wildcard before the subcommand.
+        self.assertFalse([t for t in tools if t.startswith("Bash(git -C") and "*" in t[:-3]], tools)
+        # A relative git dir is read from the worker's folder, never from this process's cwd.
+        rel = harnesses.ClaudeAdapter.permission_args("read", [], ["api"], workdir=str(root))
+        self.assertIn(f"Bash(git -C {root / 'api'} log *)", rel[rel.index("--allowedTools") + 1].split(","))
+        self.assertEqual(args[args.index("--disallowedTools") + 1],
+                         ",".join(harnesses.ClaudeAdapter.READ_ONLY_DENY))  # the deny list does not change
 
     def test_antigravity_read_profile(self):
         run = str(Path("/run").resolve())
@@ -147,13 +206,22 @@ class WorkerPermissions(unittest.TestCase):
         # The skip flag would also approve sandbox bypasses (antigravity-cli#36), so never both.
         self.assertNotIn("--dangerously-skip-permissions", args)
         self.assertIn("--sandbox", args)
-        self.assertEqual(args[args.index("--add-dir") + 1], run)
+        # No --add-dir: it moved the shell into RUN_DIR (live, 2026-11-24); the write_file rule lets the file tool
+        # write the output.
+        self.assertEqual(args[:2], ["--sandbox", "--settings"])
+        self.assertEqual(len(args), 3)
         settings = json.loads(args[args.index("--settings") + 1])
         self.assertEqual(settings["toolPermission"], "proceed-in-sandbox")
         self.assertIs(settings["allowNonWorkspaceAccess"], False)
         self.assertIn(f"write_file({run})", settings["permissions"]["allow"])
         self.assertIn("read_url(*)", settings["permissions"]["deny"])
-        self.assertEqual(harnesses.AntigravityAdapter.permission_args("full"), ["--dangerously-skip-permissions"])
+        self.assertIn("mcp(*)", settings["permissions"]["deny"])
+        # Crew: a session-only rule denies every MCP tool call; the flight director (mcp=True) keeps them.
+        self.assertEqual(harnesses.AntigravityAdapter.permission_args("full"),
+                         ["--dangerously-skip-permissions", "--settings", '{"permissions":{"deny":["mcp(*)"]}}'])
+        self.assertEqual(harnesses.AntigravityAdapter.permission_args("full", mcp=True),
+                         ["--dangerously-skip-permissions"])
+        self.assertEqual(harnesses.AntigravityAdapter.permission_args("read", ["/run"], mcp=True), args)
 
     def test_a_harness_without_the_read_only_flags_is_refused(self):
         import roles
@@ -192,7 +260,7 @@ class Envelopes(unittest.TestCase):
 class Costs(unittest.TestCase):
     def test_summary_by_role_and_pair(self):
         import costs
-        d = Path(tempfile.mkdtemp())
+        d = Path(removed_after(self, tempfile.mkdtemp()))
         log = d / "progress.log"
         log.write_text("\n".join([
             "10:00:00 [worker +5s] 01-implement: done (succeeded) pair=claude:haiku@default cost=$0.10 turns=3",
@@ -212,7 +280,7 @@ class Costs(unittest.TestCase):
 class TurnStats(unittest.TestCase):
     def test_resumed_agy_turn_reports_only_its_share(self):
         # Live run 2026-11-23: first turn 185176 tokens / 379s; the resumed turn reported 199092 / 427s, turns=2.
-        d = Path(tempfile.mkdtemp())
+        d = Path(removed_after(self, tempfile.mkdtemp()))
         st = d / "state.json"
         st.write_text(json.dumps({"RUN_DIR": str(d)}))
         runner = common.AgyRunner(Run(st))
@@ -225,10 +293,55 @@ class TurnStats(unittest.TestCase):
         claude = {"turns": 2, "model_time": "4s", "tokens": 900}
         runner._turn_stats(harnesses.ClaudeAdapter, "c-1", True, claude)  # Claude reports per invocation
         self.assertEqual(claude["tokens"], 900)
+        # The running totals live beside the worker logs, not in state.json.
+        self.assertFalse([k for k in json.loads(st.read_text()) if k.startswith("USAGE_SO_FAR")])
+        self.assertEqual(json.loads((d / "logs" / "usage-so-far.json").read_text()), {"c-1": "199092,2,427"})
+
+    def test_corrupt_running_totals_count_as_none(self):
+        d = Path(removed_after(self, tempfile.mkdtemp()))
+        st = d / "state.json"
+        st.write_text(json.dumps({"RUN_DIR": str(d)}))
+        (d / "logs").mkdir()
+        (d / "logs" / "usage-so-far.json").write_text("{not json")
+        stats = {"turns": 2, "model_time": "427s", "tokens": 199092}
+        common.AgyRunner(Run(st))._turn_stats(harnesses.AntigravityAdapter, "c-1", True, stats)
+        self.assertEqual(stats["tokens"], 199092)
+        self.assertEqual(json.loads((d / "logs" / "usage-so-far.json").read_text()), {"c-1": "199092,2,427"})
+
+    def test_roles_of_final_fix_tasks_and_labelled_workers(self):
+        import costs
+        for tag, want in [("F1-implement", "Crew"), ("F1-fix-2", "Crew"), ("01a-attempt2", "Crew"),
+                          ("F1-s1-1", "Task reviewers"), ("01-s2-3", "Task reviewers"),
+                          ("director-start", "Flight Director"), ("director-reply", "Flight Director"),
+                          ("director-notify-ack", "Flight Director"), ("director-fix-meta-1", "Flight Director"),
+                          ("safety-1", "Range Safety and design reviews"),
+                          ("lens-2", "Range Safety and design reviews"),
+                          ("plan-review-1", "Range Safety and design reviews"),
+                          ("preflight-check-1", "Range Safety and design reviews"),
+                          ("final-review-2", "Final review"), ("drift-1", "Drift check"),
+                          ("probe-claude_x_high-0", "Test launches"), ("claude-resume", "Resumed workers")]:
+            with self.subTest(tag=tag):
+                self.assertEqual(costs.role(tag), want)
+
+    def test_director_turns_and_answered_workers_get_role_labels(self):
+        calls = []
+
+        class Runner:
+            def try_resume(self, text, pair, wt, conv, **launch):
+                calls.append(launch.get("label"))
+
+            def run(self, text, **launch):
+                calls.append(launch.get("label"))
+                return ("done", "succeeded", "", "")
+
+        spec = Path(removed_after(self, tempfile.mkdtemp())) / "F1-implement.txt"
+        spec.write_text("do it\n")
+        common.answer_worker(Runner(), "answer", "claude:x@high", "/wt", "c1", spec)
+        self.assertEqual(calls, ["F1-implement", "F1-implement"])
 
     def test_token_only_summary(self):
         import costs
-        log = Path(tempfile.mkdtemp()) / "progress.log"
+        log = Path(removed_after(self, tempfile.mkdtemp())) / "progress.log"
         log.write_text("1 [worker +5s] 01-implement: done (succeeded) pair=antigravity:g@high turns=1 tokens=40000\n")
         text = costs.summarize(log)
         self.assertIn("Total: 40,000 tokens across 1 worker runs (the harness reports tokens, not cost).", text)

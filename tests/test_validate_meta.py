@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from helpers import removed_after
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "validate_meta.py"
 CATALOG = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 DEFAULT = dict(TITLE="t", TIER="standard", SPEC_TYPE="checklist", ACS="AC-1",
@@ -13,7 +15,7 @@ DEFAULT = dict(TITLE="t", TIER="standard", SPEC_TYPE="checklist", ACS="AC-1",
 
 class ValidateMetaTests(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="vmeta-"))
+        self.d = Path(removed_after(self, tempfile.mkdtemp(prefix="vmeta-")))
         self.tasks = self.d / "tasks"
         self.tasks.mkdir()
         self.state_path = self.d / "state.json"

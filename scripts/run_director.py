@@ -112,10 +112,14 @@ def run_cmd(ns):
     wt = r.need("DOCS_WORKTREE")
     if ns.op in ("start", "send") and not Path(ns.spec).is_file():
         return RC_ERROR, f"ERROR MISSING_FILE {ns.spec}"
+    # A director- tag names the worker log and puts the turn under Flight Director in the cost report.
+    stem = Path(ns.spec).stem if ns.op in ("start", "send") else ns.op
+    label = stem if stem.startswith("director-") else f"director-{stem}"
+    # Only the flight director keeps the user's MCP servers (JIRA jobs); every other worker runs without them.
     if ns.op == "start":
         keep = bool(ns.keep_open)
         r.set(DIRECTOR_KEEP_OPEN="yes" if keep else "no", LAST_DIRECTOR_RESULT=None)
-        res = runner.run(ns.spec, pair=ns.pair, worktree=wt)
+        res = runner.run(ns.spec, pair=ns.pair, worktree=wt, label=label, mcp=True)
         return _handle_response(r, res, keep)
 
     conv_id = r.get("DIRECTOR_CONVERSATION_ID")
@@ -126,7 +130,7 @@ def run_cmd(ns):
 
     if ns.op == "send":
         r.set(LAST_DIRECTOR_RESULT=None)
-        res = runner.try_resume(ns.spec, ns.pair, wt, conv_id)
+        res = runner.try_resume(ns.spec, ns.pair, wt, conv_id, label=label, mcp=True)
         return _handle_response(r, res, keep)
     if ns.op == "reply":
         p = Path(ns.file)
@@ -134,12 +138,12 @@ def run_cmd(ns):
             return RC_ERROR, f"ERROR MISSING_FILE {p}"
         r.set(LAST_DIRECTOR_RESULT=None)
         prompt = "User reply (verbatim):\n\n" + p.read_text(encoding="utf-8")
-        res = runner.try_resume(prompt, ns.pair, wt, conv_id)
+        res = runner.try_resume(prompt, ns.pair, wt, conv_id, label=label, mcp=True)
         return _handle_response(r, res, keep)
     if ns.op == "notify-ack":
         r.set(LAST_DIRECTOR_RESULT=None)
         prompt = "SHOWN. Continue your current job and end with a RESULT: line."
-        res = runner.try_resume(prompt, ns.pair, wt, conv_id)
+        res = runner.try_resume(prompt, ns.pair, wt, conv_id, label=label, mcp=True)
         return _handle_response(r, res, keep)
     return 64, "bad usage"
 

@@ -11,6 +11,7 @@ sys.path.insert(0, str(SKILL / "scripts"))
 import harnesses  # noqa: E402
 from harnesses import detect, launch_args, top_effort  # noqa: E402
 from pairs import ladder, pair_key, parse_pair  # noqa: E402
+from helpers import removed_after  # noqa: E402
 
 FIXTURES = SKILL / "tests" / "fixtures" / "harness"
 FAKE_HOME = FIXTURES / "home"
@@ -59,7 +60,7 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(m["gemini-pro-orchestrator-g1-pro"], ["default"])
 
     def test_install_dirs_lists_antigravity_and_claude_skills_folders(self):
-        home = Path(tempfile.mkdtemp(prefix="home-"))
+        home = Path(removed_after(self, tempfile.mkdtemp(prefix="home-")))
         r = subprocess.run([sys.executable, "-I", str(SCRIPT), "install-dirs", "--fixtures", str(FIXTURES),
                             "--home", str(home)], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -208,6 +209,7 @@ class ClaudeAdapterTests(unittest.TestCase):
                 old_cache / "tdd",
                 new_cache / "brainstorming",
                 new_cache / "tdd",
+                new_cache / "newer-only",
             ):
                 d.mkdir(parents=True)
                 (d / "SKILL.md").write_text("---\nname: test\n---\n")
@@ -217,8 +219,46 @@ class ClaudeAdapterTests(unittest.TestCase):
                     return base(cmd)
                 c = detect(live_like_runner, home, env={})["harnesses"]["claude"]
             self.assertEqual(c["skills"]["brainstorming"], str(user_dir))
-            self.assertEqual(c["skills"]["tdd"], str(new_cache / "tdd"))
+            # `claude plugin list` says 7.0.2 is installed: a newer cached copy is not read.
+            self.assertEqual(c["skills"]["tdd"], str(old_cache / "tdd"))
+            self.assertNotIn("newer-only", c["skills"])
             self.assertEqual(c["skills"]["mission"], str(SKILL / "skills" / "mission"))
+
+    def test_claude_skill_roots_without_a_version_use_only_the_newest_cache(self):
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            cache = home / ".claude" / "plugins" / "cache" / "official"
+            for d in (cache / "p" / "1.9.0" / "skills" / "removed", cache / "p" / "1.10.0" / "skills" / "kept"):
+                d.mkdir(parents=True)
+                (d / "SKILL.md").write_text("---\nname: test\n---\n")
+            base = fixture_runner()
+            def runner(cmd):
+                if tuple(cmd) == ("claude", "plugin", "list"):
+                    return 0, "Installed plugins:\n\n  \u276f p@official\n    Status: \u2714 enabled\n"
+                return base(cmd)
+            runner.fixtures = True
+            skills = harnesses.ClaudeAdapter(runner, home, env={}).skills()
+            self.assertEqual(skills["kept"], str(cache / "p" / "1.10.0" / "skills" / "kept"))
+            self.assertNotIn("removed", skills)
+
+    def test_claude_models_add_new_aliases_from_help(self):
+        base = fixture_runner()
+        def runner_with(help_text):
+            def runner(cmd):
+                return (0, help_text) if tuple(cmd) == ("claude", "--help") else base(cmd)
+            runner.fixtures = True
+            return runner
+        effort = "  --effort <level>      Effort level (low, medium, high, xhigh, max)\n"
+        named = ("  --model <model>       Model for the current session. Use an alias for the latest model (e.g.\n"
+                 "                        'fable', 'opus', or 'sonnet') or a model's full name (e.g.\n"
+                 "                        'claude-sonnet-4-6').\n  -n, --name <name>  Name\n")
+        models = harnesses.ClaudeAdapter(runner_with(effort + named), FAKE_HOME, env={}).models()
+        self.assertEqual([m["model"] for m in models], ["opus", "sonnet", "haiku", "fable"])
+        self.assertEqual(models[3], {"model": "fable", "label": "Claude Fable",
+                                     "efforts": ["low", "medium", "high", "xhigh", "max"]})
+        plain = "  --model <model>       Model for the current session ('opus' or 'sonnet').\n"
+        self.assertEqual([m["model"] for m in harnesses.ClaudeAdapter(runner_with(effort + plain), FAKE_HOME,
+                                                                      env={}).models()], ["opus", "sonnet", "haiku"])
 
     def test_claude_launch_args_and_top_effort(self):
         cat = detect_fixture()
@@ -244,6 +284,8 @@ class ClaudeAdapterTests(unittest.TestCase):
                     "srv-ok: https://example.com/1 - ✔ Connected\n"
                     "srv-dis: https://example.com/2 - ✗ Disconnected\n"
                     "srv-not: https://example.com/3 - ! Not connected\n"
+                    "plugin:engineering:atlassian: https://mcp.atlassian.com/v1/sse (SSE) - ! Needs authentication\n"
+                    "plugin:x:docs: https://example.com/4 - \u2714 Connected\n"
                 )
             return base(cmd)
         adapter = harnesses.ClaudeAdapter(runner, FAKE_HOME, env={})
@@ -251,6 +293,8 @@ class ClaudeAdapterTests(unittest.TestCase):
             "srv-ok": True,
             "srv-dis": False,
             "srv-not": False,
+            "plugin:engineering:atlassian": False,
+            "plugin:x:docs": True,
         })
 
         def failing_runner(cmd):

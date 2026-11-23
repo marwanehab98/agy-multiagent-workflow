@@ -93,6 +93,36 @@ class ProbeTest(Base):
         self.behave("ok")
         self.expect_probe(0, "PROBED", "--set", "step3")
 
+    def test_a_failed_ground_crew_pair_is_one_problem_line(self):
+        w = json.loads(self.world.read_text())
+        w["reject_rules"] = [RULE("big-high", "default"), RULE("big", "high")]
+        self.world.write_text(json.dumps(w))
+        s = self.st()
+        s["GROUND_CREW_PAIR"] = "antigravity:big@high"  # no task reviews with it
+        self.state.write_text(json.dumps(s))
+        self.behave("ok")
+        last = self.expect_probe(21, "FIX_META", "--set", "step3")
+        lines = Path(last.split()[1]).read_text().splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertTrue(lines[0].startswith("PROBLEM pair 'antigravity:big@high': GROUND_CREW_PAIR failed"), lines)
+
+    def test_a_usage_limit_is_not_a_failed_launch(self):
+        self.behave("usage")
+        last = self.expect_probe(31, "USAGE_LIMIT", "--set", "step1")
+        self.assertTrue(last.startswith("USAGE_LIMIT antigravity:big@high "), last)
+        self.assertIn("usageLimitReached", last)
+        self.assertIsNone(self.st("LAUNCH_STYLE_antigravity_big_high"))
+        self.assertFalse((self.run_dir / "results" / "probe-antigravity_big_high.md").exists())
+        self.assertEqual(len(self.calls()), 1)  # the flag style is not tried: the limit is not the style's fault
+        self.behave("ok", "ok", "ok")
+        self.expect_probe(0, "PROBED")  # once the limit has reset, the same call carries on
+        # In step 3 a usage limit is not sent back to the flight director as fix-meta either.
+        s = self.st()
+        s["GROUND_CREW_PAIR"] = "antigravity:small@low"
+        self.state.write_text(json.dumps(s))
+        self.behave("usage")
+        self.expect_probe(31, "USAGE_LIMIT", "--set", "step3")
+
     def test_probe_that_edits_docs_is_discarded(self):
         self.behave("ok-edit", "ok", "ok")
         self.expect_probe(0, "PROBED", "--set", "step1")

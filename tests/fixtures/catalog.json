@@ -52,7 +52,8 @@
     "wind-tunnel": "/skills/wind-tunnel",
     "flight-readiness": "/skills/flight-readiness",
     "cross-check": "/skills/cross-check",
-    "red-green": "/skills/red-green"
+    "red-green": "/skills/red-green",
+    "spec-drift": "/skills/spec-drift"
    },
    "plugins": [],
    "mcp": {

@@ -115,7 +115,7 @@ class Finish:
         if r.is_multi_repo:
             repos = r.touched_repos() or r.repos
             review_range = ("; ".join(f"{repo}: {r.repo_initial_base(repo)}..{r.repo_last_merged(repo)}" for repo in repos)
-                            + " (run git -C <repo> diff <base>..<head> in each repo directory)")
+                            + " (each repo is the folder of that name here: run git -C <repo> diff <base>..<head>)")
             conventions = "; ".join(f"{repo}: {r.repo_convention_paths(repo)}" for repo in repos)
             head = "multi"
         else:

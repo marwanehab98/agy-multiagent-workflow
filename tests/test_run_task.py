@@ -773,6 +773,32 @@ class Replan(Base):
         self.assertTrue(any(l.startswith("MERGED 01a ") for l in lines))
         self.assertTrue(any(l.startswith("MERGED 02 ") for l in lines))
 
+    def test_replan_probe_usage_limit_prompts_then_retries(self):
+        self.replan_to("01a")
+        self.behave("usage")
+        last, _ = self.expect(30, "PROMPT", "--director-result", self.result_file(f"RESULT: REPLAN {self.base} 01a"))
+        self.assertTrue(last.endswith("retry pause stop"), last)
+        self.assertIn("test launch of antigravity:small@low", Path(last.split()[1]).read_text())
+        self.assertEqual(self.st("META_FAILS"), None)
+        self.behave("ok", "commit", "pass", "pass", "commit", "pass", "pass")
+        _, lines = self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+        self.assertTrue(any(l.startswith("MERGED 01a ") for l in lines))
+
+    def test_kept_commits_of_a_replan_are_in_the_first_new_tasks_review_range(self):
+        (self.run_dir / "queue.txt").write_text("01 02\n")
+        self.behave("commit", "fix", "fail")  # 01 commits, stage 1 asks for a fix, the fix round fails
+        self.expect(20, "ESCALATE")
+        kept = self.impl_head()
+        self.assertNotEqual(kept, self.base)
+        self.task("01a", "AC-1", "REPLANNED_FROM=01")
+        self.behave("commit", "pass", "pass", "commit", "pass", "pass")
+        _, lines = self.expect(0, "QUEUE_EMPTY", "--director-result", self.result_file(f"RESULT: REPLAN {kept} 01a"))
+        self.assertTrue(any(l.startswith("MERGED 01a ") for l in lines))
+        review = [c["prompt"] for c in self.calls()[3:] if "Review range:" in c["prompt"]][0]
+        # The reviewers see the kept commit too, not only 01a's own work on top of it.
+        self.assertIn(f"Review range: {self.base}..", review)
+        self.assertEqual(self.st("BASE_SHA_01a"), kept)  # where 01a's own work started
+
     def test_replan_probe_failure_goes_to_fix_meta(self):
         self.replan_to("01a")
         self.behave("fail", "fail")

@@ -9,7 +9,8 @@ Usage:
   python3 -I state.py --file <file> unset KEY [KEY]...
   python3 -I state.py --file <file> show               # prints every KEY=value, sorted
 
-Exit 0: done.  Exit 1: `get` of a missing key (prints MISSING KEY).  Exit 64: bad usage.
+Exit 0: done.  Exit 1: `get` of a missing key (prints MISSING KEY), or a bad key name.  Exit 64: `set` without
+KEY=value, or `get`/`incr` without exactly one key.  Exit 2: an unknown command or a missing --file (argparse).
 Writes are atomic (temp file + rename), so a crash never leaves a half-written file, and locked, so
 they merge with a run_*.py script writing at the same time.
 """

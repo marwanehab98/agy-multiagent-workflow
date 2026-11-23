@@ -10,15 +10,15 @@ Use this when the user asks to continue a run or after a context compaction in t
    - **No `BASE_BRANCH` in it:** `STATE set BASE_BRANCH=<DEFAULT_BRANCH>`.
    - **No `REPOS` in it:** `STATE set REPOS=none`.
 2. **Check and re-probe the picks.** The run keeps its `ROLE_*` picks; never change one.
-   1. Run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`, then `roles.py check` as in Step 1 item 7, with `--catalog <CATALOG>`, `--mode <RUN_MODE>` (default `full` when `RUN_MODE` is unset), and the three `ROLE_*` values. Stop on exit 1.
-   2. Run `PROBE --set resume --if-changed`. (Skips re-probing when harness versions in `<CATALOG>` are unchanged and every pair in the resume set already has a recorded `LAUNCH_STYLE_*`; re-probes automatically if harness versions changed or any pair is new.) On `PROBE_FAILED`, do as in Step 1 item 8.
+   1. Run `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`, where `<CATALOG>` is the state's `CATALOG` (`<RUN_DIR>/catalog.json`, the file the run's workers read), then `roles.py check` as in Step 1 item 7, with `--catalog <CATALOG>`, `--mode <RUN_MODE>` (default `full` when `RUN_MODE` is unset), and the three `ROLE_*` values. Stop on exit 1.
+   2. Run `PROBE --set resume --if-changed`. (Skips re-probing when harness versions in `<CATALOG>` are unchanged and every pair in the resume set already has a recorded `LAUNCH_STYLE_*`; re-probes automatically if harness versions changed or any pair is new.) On `PROBE_FAILED`, do as in Step 1 item 8. On `USAGE_LIMIT <pair> <detail>` (31), show the usage-limit prompt of Step 3 item 7; "retry" runs this `PROBE` again, "pause" and "stop" are handled as there.
 3. Pick up at the first of these that holds:
    - **`OPEN_USAGE_PROMPT` is `yes`:** re-show the Flight Director usage-limit prompt (as in the exit-`31` row) and wait. On "retry", unset `OPEN_USAGE_PROMPT` and re-run `DIRECTOR <LAST_DIRECTOR_OP>` with `LAST_DIRECTOR_ARG` (using `LAST_JOB` and "Flight Director job models" for `<the job's pair>`, and adding `--keep-open` if `PHASE=design` and `LAST_DIRECTOR_OP=start`), then handle its exit code and route any returned `RESULT <saved>` via the `LAST_JOB` / `STEP` routing rules below.
    - **`OPEN_RELAY` is set:** show `<OPEN_RELAY>` to the user again as in Rule 5, and wait. When the user replies, write their answer to `<RELAY_DIR>/<NNN>-from-user.md`, unset `OPEN_RELAY LAST_DIRECTOR_RESULT`, and run `DIRECTOR reply` using `LAST_JOB` and "Flight Director job models" for `<the job's pair>`; once `DIRECTOR reply` returns `0` (`RESULT <saved>`), route it by `LAST_JOB` and `STEP`:
      - `LAST_JOB=user-message` (expecting `RESULT: NOTED`): continue at `STEP` passing `--docs-moved` on the next `DESIGN`, `TASKLOOP`, `FINISH`, or `PROBE` call;
      - `2 design`: branch per Step 2;
      - `3 setup`: continue Step 3 from the failing item (`baseline-failed` -> item 4; `fix-meta` -> item 6);
-     - `run_design ...`: pass `--result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `DESIGN` and branch per Step 2;
+     - `run_design ...`: branch on `<saved>` as Step 2 does (only `RESULT: NEED ...` and `RESULT: COMMITTED` go to `DESIGN --result <saved>`; `RESULT: PLAN_APPROVED` goes to Step 3), or pass `--answer <answer_file>` to `DESIGN` when `LAST_JOB=consult`;
      - `run_task ...`: pass `--director-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `TASKLOOP` and branch per Step 4;
      - `run_finish ...`: pass `--director-result <saved>` (or `--answer <answer_file>` when `LAST_JOB=consult`) to `FINISH` and branch per Step 5;
      - `5 <n>`: continue Step 5 at item `<n>` with `<saved>`.
