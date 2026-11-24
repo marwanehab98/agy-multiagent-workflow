@@ -59,3 +59,10 @@ Part of mission-control. Checked against the official Antigravity CLI headless m
 - Because headless invocations run one turn to completion per invocation, workers do not pause mid-turn on an external mailbox:
   - **Flight Director -> Capsule Communicator:** ends the turn with `RESULT: RELAY <path>` or `RESULT: NOTIFY <path>` as line 1 of its response; `scripts/run_director.py` returns the relay/notify path to the Capsule Communicator, and resumes `DIRECTOR_CONVERSATION_ID` with the user's answer via `--conversation` (`agy`) or `--resume` (`claude`).
   - **Other workers -> Capsule Communicator:** if blocked on an ambiguity, respond with `ASK: <question>` on line 1; the loop script exits `22` (`CONSULT <ask_file>`) and resumes the worker (or falls back to a fresh worker run with the answer appended) once the Flight Director answers.
+
+## Interactive session background commands (Antigravity Capsule Communicator)
+
+- Confirmed live in an interactive Antigravity session (2026-11-24) for `run_command` behavior when running as the Capsule Communicator:
+  - **`WaitMsBeforeAsync` cap:** `run_command` limits synchronous foreground waiting to `500`–`10000` ms (10 seconds maximum); any command still running past that window is moved to a background task. Commands intended to run in the background (long loop scripts, `DIRECTOR`, and `WATCH`) use `WaitMsBeforeAsync=500`.
+  - **Reactive wakeup on completion:** When the agent ends its turn after launching background commands, Antigravity automatically resumes it and delivers each task's exit code and output via a system message when the task finishes—the same completion-driven model as Claude Code's `run_in_background`, so the background `WATCH` protocol in `references/capsule-communicator.md` works on both harnesses without a foreground polling mode.
+  - **`NotificationTimeoutSeconds`:** Leave unset on `WATCH` and long script calls; setting a short value triggers "still running" wake-ups before `WATCH` has news or reaches its own `--wait` interval.
