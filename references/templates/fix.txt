@@ -1,6 +1,6 @@
 This is a fix round for task: {{TASK_TITLE}}
 The work so far is in the review range {{BASE_SHA}}..{{WORKER_HEAD}}. Read it with git log and git show before changing anything. Commit your fixes on top; never rewrite or reset history.
-The findings below are one of two kinds. A verification log: make every command in it that exited non-zero pass. A review: fix every Stage 1 item and every Critical and Important finding, and leave Minor findings alone.
+The findings below are one of two kinds. A verification log: make every command in it that exited non-zero pass. A review: fix every Stage 1 item and every Critical and Important finding, and leave Minor findings alone. When the task or its design decisions rule tests out (no test runner, tests out of scope), that holds in this round too: follow the task's own verification steps, write no tests, and never build a scratch test harness or check script, even for a finding that asks for tests.
 
 Findings:
 {{FILE:FINDINGS}}

@@ -26,6 +26,8 @@ Write the test first. Watch it fail. Write minimal code to pass.
 - Generated code
 - Configuration files
 
+**Not when your task rules tests out:** when the task or its design decisions rule tests out (no test runner, tests out of scope), that decision overrides this skill: follow the task's own verification steps, write no tests, and never build a scratch test harness or check script in their place.
+
 Thinking "skip TDD just this once"? Stop. That's rationalization.
 
 ## The Iron Law

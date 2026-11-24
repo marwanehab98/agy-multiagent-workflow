@@ -400,13 +400,15 @@ def _fresh_tree(wt, sha):
 
 
 def _undo_docs(created):
-    """Remove the docs worktrees and branches a failed init-docs call created, newest first."""
+    """Remove the docs worktrees and branches a failed init-docs call created, newest first, and the exclude block the
+    call added to each repo (_remove_excludes keeps it while another mission-control worktree of the repo is left)."""
     for repo_path, wt_path, branch in reversed(created):
         run(["git", "-C", str(repo_path), "worktree", "remove", "--force", str(wt_path)])
         if Path(wt_path).exists():  # `worktree remove` refused (e.g. git cannot read its index): delete it by hand
             shutil.rmtree(wt_path, ignore_errors=True)
             run(["git", "-C", str(repo_path), "worktree", "prune"])
         run(["git", "-C", str(repo_path), "branch", "-D", branch])
+        _remove_excludes(repo_path)
 
 
 def _init_docs_multi(args):

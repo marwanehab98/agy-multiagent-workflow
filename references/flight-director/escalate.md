@@ -4,9 +4,9 @@ Part of mission-control. Read `<SKILL_DIR>/references/flight-director.md` first;
 
 ## JOB: escalate
 
-The input names the task, its tier, the attempt number, the ladder state (`next rung <pair>`, or `ladder used up`), whether replanning is still allowed, and a history file holding every attempt's failure and review. If the history ends with a "Rejected flight director answer", your last answer was refused; it says why.
+The input names the task, its tier, the attempt number, the ladder state (`next rung <pair>`, or `ladder used up`), whether replanning is still allowed, and a history file. The history's first line gives the task's base and head SHAs (and, in a multi-repo run, `repo=<r>`, the task's repo); then come each attempt's failure, every review verdict in full, and each check log in short: one line for a passing log (it names any checks skipped through BASELINE_SKIP, which did not run), and for a failing one the checks that failed, then any that were skipped, the last lines of their output and the full log's path. If the history ends with a "Rejected flight director answer", your last answer was refused; it says why.
 
-1. **Read the history,** then the task's commits with `git -C <DOCS_WORKTREE> log --oneline <base sha>..<head sha>`, using the SHAs the history gives. Worktrees share one repository, so the commits are visible from the docs worktree. Commit subjects and review verdicts are enough; don't read diffs.
+1. **Read the history,** then the task's commits with `git -C <folder> log --oneline <base sha>..<head sha>`, using the SHAs the history gives. The folder is `<DOCS_WORKTREE>` in a single-repo run (`REPOS=none`), and `<DOCS_WORKTREE>/<r>` in a multi-repo run, `<r>` being the `repo=` the history names. Worktrees share their repository, so the commits are visible from that docs worktree. Commit subjects and review verdicts are enough; don't read diffs.
 2. **Choose one response:**
    - **Another attempt** (the usual answer while rungs remain):
      1. Choose the reset point: the task's base SHA from the history, or the last good step commit if a review confined the failure to a later step.

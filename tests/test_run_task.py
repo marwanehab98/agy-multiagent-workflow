@@ -5,7 +5,10 @@ import sys
 import unittest
 from pathlib import Path
 
-from helpers import Base, sh
+from helpers import SKILL, Base, sh
+
+sys.path.insert(0, str(SKILL / "scripts"))
+import run_task  # noqa: E402
 
 
 class HappyPath(Base):
@@ -65,6 +68,32 @@ class GateAndFixes(Base):
         # Call 0: impl (conv_impl_1), Call 1: s1 fix, Call 2: fix resume attempt (fails), Call 3: fresh fix, Call 4: s1 pass, Call 5: s2 pass
         self.assertEqual(calls[2]["conversation"], "conv_impl_1")
         self.assertEqual(calls[3]["conversation"], "")
+
+    def crew_events(self):
+        """Task 01's dispatch lines and every worker start, in progress.log order (stamps dropped)."""
+        events = []
+        for line in (self.run_dir / "progress.log").read_text().splitlines():
+            text = line.split(" ", 1)[1]
+            if text.startswith("[worker] start"):
+                events.append("worker start")
+            elif text.startswith("[progress] 01 ") and any(w in text for w in (" dispatched", " reused", " resume ")):
+                events.append(text[len("[progress] "):])
+        return events
+
+    def test_crew_dispatch_is_logged_before_its_worker_starts(self):
+        self.behave({"do": "commit", "conv_id": "conv_impl_1"}, "fix", "commit", "pass", "pass")
+        w = json.loads(self.world.read_text())
+        w["expired_conversations"] = ["conv_impl_1"]
+        self.world.write_text(json.dumps(w))
+        self.expect(0, "QUEUE_EMPTY")
+        pair, review = "antigravity:g@high", "antigravity:small@high"
+        self.assertEqual(self.crew_events(), [
+            f"01 impl dispatched {pair}", "worker start",
+            f"01 stage1 reviewer dispatched {review}", "worker start",
+            f"01 fix reused {pair}", "worker start",  # the resume attempt, which fails
+            f"01 fix resume failed; a fresh worker is dispatched {pair}", "worker start",
+            f"01 stage1 reviewer dispatched {review}", "worker start",
+            f"01 stage2 reviewer dispatched {review}", "worker start"])
 
     def test_fix_silent_new_conversation_cleans_stray_edits_before_fallback(self):
         stray = self.impl / "stray_fix.txt"
@@ -191,6 +220,98 @@ class GateAndFixes(Base):
         second = (self.run_dir / "specs" / "01-s2-2.txt").read_text()
         self.assertIn("every Critical or Important finding the previous review raised", second)
         self.assertIn("as Minor.", second)
+
+    def test_first_reviews_share_one_empty_re_review_file(self):
+        self.behave("commit", "fix", "commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        specs = self.run_dir / "specs"
+        self.assertEqual(sorted(f.name for f in specs.glob("*re-review*")), ["01-s1-2-re-review.txt", "no-re-review.txt"])
+        self.assertEqual((specs / "no-re-review.txt").read_text(), "")
+
+    def test_history_shows_a_passing_check_log_as_one_line(self):
+        (self.docs / "flight-manifest.txt").write_text(
+            "FEATURE_BRANCH=feature\nVERIFY_1=test ! -e BROKEN\nVERIFY_2=seq 1 5000; echo SUITE-OUTPUT\n")
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.expect(20, "ESCALATE")
+        hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
+        for n in (1, 2, 3):
+            self.assertIn(f"\n=== 01-{n}.log: every check passed\n", hist)
+        self.assertNotIn("SUITE-OUTPUT", hist)
+        self.assertEqual(hist.count("VERDICT: FIX"), 3)  # the verdicts stay in full
+
+    def test_history_shows_a_failing_check_log_as_its_failed_checks_and_their_tails(self):
+        (self.docs / "flight-manifest.txt").write_text(
+            "FEATURE_BRANCH=feature\n"
+            "VERIFY_1=test ! -e BROKEN || { seq 1 3000; echo BROKEN-EXISTS; exit 1; }\n"
+            "VERIFY_2=seq 1 5000; echo SUITE-OUTPUT\n")
+        self.behave("commit-broken", "nocommit", "nocommit")
+        self.expect(20, "ESCALATE")
+        hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
+        log = self.run_dir / "gates" / "01-1.log"
+        self.assertIn(f"\n=== 01-1.log: FAILED VERIFY_1 (full log: {log})\n--- VERIFY_1, last lines:\n", hist)
+        self.assertIn("2999\n3000\nBROKEN-EXISTS\n", hist)  # the tail of the failed check's output
+        self.assertNotIn("\n2900\n", hist)  # bounded: 80 lines
+        self.assertNotIn("SUITE-OUTPUT", hist)  # the passing check's output is left out
+        self.assertLess(len(hist), 3 * 8000 + 5000)
+
+    def test_a_check_log_cut_off_mid_check_counts_as_failed(self):
+        log = self.tmp / "01-1.log"
+        log.write_text("worktree=x head=y\n\n=== GATE_1: make\nok\n\n=== GATE_1 exit=0\n\n=== GATE_2: pytest\nrunning\n")
+        self.assertIn("FAILED GATE_2 (full log:", run_task.gate_summary(log))
+        self.assertIn("--- GATE_2, last lines:\nrunning\n", run_task.gate_summary(log))
+        log.write_text("worktree=x head=y\n\n=== GATE_1: make\n\n=== GATE_1 timed out after 5s\n")
+        self.assertIn("FAILED GATE_1", run_task.gate_summary(log))
+
+    def test_an_all_skipped_check_log_is_reported_as_skipped_not_failed(self):
+        log = self.tmp / "01-1.log"
+        log.write_text("worktree=x head=y\n\n=== GATE_1 skipped (BASELINE_SKIP): pytest\n\n"
+                       "=== VERIFY_api_1 skipped (BASELINE_SKIP): npm test\n")
+        self.assertEqual(run_task.gate_summary(log), "\n=== 01-1.log: every check skipped (GATE_1 VERIFY_api_1)\n")
+        log.write_text("worktree=x head=y\n")
+        self.assertIn("FAILED (no check ran) (full log:", run_task.gate_summary(log))
+
+    def test_a_passing_check_log_with_skipped_checks_names_them(self):
+        log = self.tmp / "01-1.log"
+        log.write_text("worktree=x head=y\n\n=== GATE_1 skipped (BASELINE_SKIP): pytest\n\n"
+                       "=== GATE_2: make\nok\n\n=== GATE_2 exit=0\n\n"
+                       "=== GATE_repos_shop_api_1 skipped (BASELINE_SKIP): npm test\n")
+        self.assertEqual(run_task.gate_summary(log),
+                         "\n=== 01-1.log: every check that ran passed (2 skipped: GATE_1 GATE_repos_shop_api_1)\n")
+        log.write_text("worktree=x head=y\n\n=== GATE_1: make\nok\n\n=== GATE_1 exit=0\n")
+        self.assertEqual(run_task.gate_summary(log), "\n=== 01-1.log: every check passed\n")
+
+    def test_a_failing_check_log_names_its_skipped_checks_after_the_failed_ones(self):
+        log = self.tmp / "01-1.log"
+        log.write_text("worktree=x head=y\n\n=== GATE_1 skipped (BASELINE_SKIP): pytest\n\n"
+                       "=== GATE_2: make\nboom\n\n=== GATE_2 exit=2\n\n"
+                       "=== GATE_repos_shop_api_1 skipped (BASELINE_SKIP): npm test\n")
+        summary = run_task.gate_summary(log)
+        self.assertTrue(summary.startswith(
+            f"\n=== 01-1.log: FAILED GATE_2; skipped GATE_1 GATE_repos_shop_api_1 (full log: {log})\n"), summary)
+        self.assertIn("--- GATE_2, last lines:\nboom\n", summary)
+
+    def test_worker_prompts_let_a_task_rule_tests_out(self):
+        self.behave("commit", "fix", "commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        specs = self.run_dir / "specs"
+        rule = "When the task or {} design decisions rule tests out (no test runner, tests out of scope), "
+        impl = (specs / "01-implement.txt").read_text()
+        self.assertIn(rule.format("its") + "that overrides this: follow the task's own verification steps instead, "
+                      "write no tests, and never build a scratch test harness or check script", impl)
+        self.assertIn(rule.format("its") + "that holds in this round too", (specs / "01-fix-1.txt").read_text())
+        self.assertIn(rule.format("the") + "that overrides this: do not raise missing tests as an item.",
+                      (specs / "01-s1-1.txt").read_text())
+        self.assertIn(rule.format("the") + "that overrides this: do not raise missing tests or coverage as a finding.",
+                      (specs / "01-s2-1.txt").read_text())
+
+    def test_reviewer_prompts_ask_for_one_plain_git_command_per_call(self):
+        self.behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        for spec in ("01-s1-1.txt", "01-s2-1.txt"):
+            self.assertIn("run nothing else. Run one plain `git` command per call (`git ...` in this worktree, or "
+                          "`git -C <repo> ...`), with no `cd`, chaining, loops, pipes or redirects, and read or search "
+                          "files with your file tools rather than shell commands.",
+                          (self.run_dir / "specs" / spec).read_text())
 
     def test_a_review_after_an_escalation_is_a_first_review(self):
         self.behave("commit", "fix", "commit", "fix", "commit", "fix")

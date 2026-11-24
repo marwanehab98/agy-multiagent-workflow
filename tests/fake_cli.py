@@ -82,6 +82,7 @@ def run_fake_cli(
         "permission_mode": ns.permission_mode,
         "allowed_tools": ns.allowedTools,
         "sandbox": ns.sandbox,
+        "disable_auto_memory": os.environ.get("CLAUDE_CODE_DISABLE_AUTO_MEMORY"),
         resume_dest: resume_val,
     })
 

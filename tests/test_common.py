@@ -207,8 +207,9 @@ class WorkerPermissions(unittest.TestCase):
         args = harnesses.ClaudeAdapter.permission_args("read", [], dirs, workdir=str(root))
         tools = args[args.index("--allowedTools") + 1].split(",")
         got = [t for t in tools if t.startswith("Bash(git -C ") and t.endswith(" diff *)")]
-        self.assertEqual(got, [f"Bash(git -C {p} diff *)" for p in (
-            root, ".", root / "api", "api", "./api", root / "web", "web", "./web", outside)])
+        self.assertEqual(got, [f"Bash(git -C {q} diff *)" for p in (
+            root, ".", root / "api", "api", "./api", root / "web", "web", "./web", outside)
+            for q in (p, f'"{p}"', f"'{p}'")])
         # Each rule is a fixed path followed by one allowed subcommand: no wildcard before the subcommand.
         self.assertFalse([t for t in tools if t.startswith("Bash(git -C") and "*" in t[:-3]], tools)
         # A relative git dir is read from the worker's folder, never from this process's cwd.
@@ -225,12 +226,47 @@ class WorkerPermissions(unittest.TestCase):
         args = harnesses.ClaudeAdapter.permission_args("read", ["/srv/out"], dirs, workdir=str(root))
         value = args[args.index("--allowedTools") + 1]
         got = re.findall(r"Bash\(git -C ((?:(?!Bash\().)*?) diff \*\)", value)
+        cd = str(Path("/srv/c,d").resolve())
         self.assertEqual(got, [f'"{root}/a b"', f"'{root}/a b'", '"a b"', "'a b'", '"./a b"', "'./a b'",
-                               str(Path("/srv/c,d").resolve()), f"'{Path('/srv/$HOME x').resolve()}'"])
+                               cd, f'"{cd}"', f"'{cd}'", f"'{Path('/srv/$HOME x').resolve()}'"])
         # An output folder a rule cannot name safely is refused, not left out.
         for bad in ("/srv/out)", "/srv/o*t", "/srv/o\nt"):
             with self.assertRaises(ValueError):
                 harnesses.ClaudeAdapter.permission_args("read", [bad], [])
+
+    def test_claude_read_profile_allows_quoted_plain_paths(self):
+        # Rules match the command as typed (live, 2.1.331): `git -C "/repo" diff` needs a rule with the quotes
+        # even though the path needs none. Bare first, no duplicates, nothing for an unsafe path.
+        self.assertEqual(harnesses._shell_spellings("/srv/repo"), ["/srv/repo", '"/srv/repo"', "'/srv/repo'"])
+        self.assertEqual(harnesses._shell_spellings("."), [".", '"."', "'.'"])
+        self.assertEqual(harnesses._shell_spellings("/srv/a(b"), [])
+        self.assertEqual(harnesses._shell_spellings("/srv/a b"), ['"/srv/a b"', "'/srv/a b'"])
+        root = Path(removed_after(self, tempfile.mkdtemp())).resolve()
+        args = harnesses.ClaudeAdapter.permission_args("read", [str(root)], [str(root), str(root)], workdir=str(root))
+        tools = args[args.index("--allowedTools") + 1].split(",")
+        self.assertEqual(len(tools), len(set(tools)))
+        for q in (str(root), f'"{root}"', f"'{root}'", ".", '"."', "'.'"):
+            self.assertIn(f"Bash(git -C {q} log *)", tools)
+
+    def test_claude_read_profile_stays_far_below_the_argument_limit(self):
+        # A four-repo run: the worker's worktree plus an impl and a docs worktree per repo, every one under the
+        # run's folder (relative spellings too). Linux caps one argument at 128 KiB (MAX_ARG_STRLEN).
+        base = "/home/someone/.local/state/mission-control/worktrees/project-0123abcd-PROJ-1234"
+        impl = f"{base}-impl"
+        dirs = [impl] + [f"{impl}/repos/service-name-{i}" for i in range(4)] + \
+            [f"{base}-docs/repos/service-name-{i}" for i in range(4)]
+        args = harnesses.ClaudeAdapter.permission_args("read", [f"{base}-docs/run"], dirs, workdir=impl)
+        value = args[args.index("--allowedTools") + 1]
+        rules = value.split(",")
+        self.assertEqual(len(rules), len(set(rules)))
+        # 399 rules, 32,412 bytes here (2026-11-24): a quarter of the limit, with room for longer paths.
+        self.assertLess(len(value.encode()), 128 * 1024 // 3, (len(rules), len(value.encode())))
+
+    def test_antigravity_read_profile_refuses_an_output_folder_a_rule_cannot_hold(self):
+        for bad in ("/srv/out)", "/srv/o*t", "/srv/o?t", "/srv/o[t]", "/srv/o\\t", "/srv/o\nt"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                harnesses.AntigravityAdapter.permission_args("read", [bad])
+        self.assertTrue(harnesses.AntigravityAdapter.permission_args("read", ["/srv/a b,c"]))
 
     def test_antigravity_read_profile(self):
         run = str(Path("/run").resolve())
@@ -366,6 +402,55 @@ class TurnStats(unittest.TestCase):
         self.assertEqual(claude["tokens"], 900)
         # The running totals live beside the worker logs, not in state.json.
         self.assertFalse([k for k in json.loads(st.read_text()) if k.startswith("USAGE_SO_FAR")])
+        self.assertEqual(json.loads((d / "logs" / "usage-so-far.json").read_text()), {"c-1": "199092,2,427"})
+
+    def test_resumed_claude_turn_logs_only_its_share_of_the_cost(self):
+        # Live 2026-11-24: one conversation, three calls, total_cost_usd 0.00378, 0.00695, 0.00736 (running total);
+        # turns, time and tokens were each call's own.
+        d = Path(removed_after(self, tempfile.mkdtemp()))
+        st = d / "state.json"
+        st.write_text(json.dumps({"RUN_DIR": str(d)}))
+        runner = common.AgyRunner(Run(st))
+        record = d / "logs" / "usage-so-far.json"
+        seen = []
+        for resumed, cost in ((False, 3.32), (True, 7.32), (True, 11.83)):
+            stats = {"cost": f"${cost:.2f}", "turns": 3, "model_time": "40s", "tokens": 5000}
+            runner._turn_stats(harnesses.ClaudeAdapter, "s-1", resumed, stats, cost=cost)
+            seen.append(stats)
+        self.assertEqual([x["cost"] for x in seen], ["$3.32", "$4.00", "$4.51"])
+        self.assertEqual({(x["turns"], x["model_time"], x["tokens"]) for x in seen}, {(3, "40s", 5000)})
+        self.assertEqual(json.loads(record.read_text()), {"s-1": "5000,3,40,11.83"})
+        # Full precision, not the two-decimal text: fractions of a cent still split.
+        runner._turn_stats(harnesses.ClaudeAdapter, "s-2", False, {}, cost=0.00378)
+        small = {"cost": "$0.01"}
+        runner._turn_stats(harnesses.ClaudeAdapter, "s-2", True, small, cost=0.00695)
+        self.assertEqual(small["cost"], "$0.00")
+        self.assertEqual(json.loads(record.read_text())["s-2"], ",,,0.00695")
+        # A new conversation, or one recorded before costs were (three fields), logs the cost as reported.
+        fresh = {"cost": "$2.00"}
+        runner._turn_stats(harnesses.ClaudeAdapter, "s-1", False, fresh, cost=2.0)
+        self.assertEqual(fresh["cost"], "$2.00")
+        record.write_text(json.dumps({"s-3": "900,2,4", "s-4": "1,1,1,junk"}))
+        for cid in ("s-3", "s-4"):
+            old = {"cost": "$1.50"}
+            runner._turn_stats(harnesses.ClaudeAdapter, cid, True, old, cost=1.5)
+            self.assertEqual(old["cost"], "$1.50")
+        # No cost reported: nothing recorded, nothing changed.
+        none = {"turns": 2}
+        runner._turn_stats(harnesses.ClaudeAdapter, "s-5", True, none)
+        self.assertEqual(none, {"turns": 2})
+        self.assertNotIn("s-5", json.loads(record.read_text()))
+
+    def test_agy_record_stays_three_fields_without_a_cost(self):
+        d = Path(removed_after(self, tempfile.mkdtemp()))
+        st = d / "state.json"
+        st.write_text(json.dumps({"RUN_DIR": str(d)}))
+        (d / "logs").mkdir()
+        # A record a newer runner wrote with a cost field still splits Antigravity's tokens.
+        (d / "logs" / "usage-so-far.json").write_text(json.dumps({"c-1": "185176,1,379,0.5"}))
+        stats = {"turns": 2, "model_time": "427s", "tokens": 199092}
+        common.AgyRunner(Run(st))._turn_stats(harnesses.AntigravityAdapter, "c-1", True, stats)
+        self.assertEqual(stats, {"turns": 1, "model_time": "48s", "tokens": 13916})
         self.assertEqual(json.loads((d / "logs" / "usage-so-far.json").read_text()), {"c-1": "199092,2,427"})
 
     def test_corrupt_running_totals_count_as_none(self):

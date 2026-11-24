@@ -1,6 +1,7 @@
 """Tests for Claude Code (`claude` CLI) runner dispatch and mixed cross-harness runs."""
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -473,7 +474,44 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
                 self.assertEqual(common._CHILDREN, [])
                 self.assertIsNone(self.st("WORKER_PID"))
                 log = self.run_dir / "logs" / f"{label}-1.log"
-                self.assertIn(f"{label}: interrupted", log.read_text(encoding="utf-8"))
+                self.assertRegex(log.read_text(encoding="utf-8"), rf"\[worker \+\d+s\] {label}: interrupted")
+                # Like a timed-out or stopped worker, the line reaches progress.log.
+                self.assertRegex((self.run_dir / "progress.log").read_text(encoding="utf-8"),
+                                 rf"\[worker \+\d+s\] {label}: interrupted")
+
+    def _finish_costs(self):
+        return re.findall(r"\] (\S+): (?:done|resume failed)\b.* cost=\$([0-9.]+)",
+                          (self.run_dir / "progress.log").read_text(encoding="utf-8"))
+
+    def test_a_resumed_claude_conversation_logs_each_turns_own_cost(self):
+        # Claude Code reports a resumed conversation's running cost (live 2026-11-24); the report sums the lines.
+        import costs
+        def turn(cost):
+            return {"do": "script", "session_id": "s_c", "steps": [
+                {"result": "OK\n", "extra": {"total_cost_usd": cost, "num_turns": 1, "duration_ms": 1000}}]}
+        self.claude_behave(turn(1.25), turn(3.5), turn(4.75))
+        runner = self._runner()
+        self.assertEqual(runner.run("p", pair="claude:opus@high", worktree=self.impl, label="F1-implement")[3], "s_c")
+        for n in (1, 2):
+            self.assertEqual(runner.try_resume("q", "claude:opus@high", self.impl, "s_c", label=f"F1-fix-{n}")[0],
+                             "done")
+        self.assertEqual(self._finish_costs(), [("F1-implement", "1.25"), ("F1-fix-1", "2.25"), ("F1-fix-2", "1.25")])
+        self.assertIn("Total: $4.75 across 3 worker runs", costs.summarize(self.run_dir / "progress.log"))
+
+    def test_a_resume_that_starts_a_new_conversation_keeps_its_whole_cost(self):
+        self.claude_behave(
+            {"do": "script", "session_id": "s_a", "steps": [{"result": "OK\n", "extra": {"total_cost_usd": 1.0}}]},
+            {"do": "script", "session_id": "s_new", "steps": [{"result": "OK\n", "extra": {"total_cost_usd": 1.5}}]})
+        runner = self._runner()
+        runner.run("p", pair="claude:opus@high", worktree=self.impl, label="first")
+        self.assertIsNone(runner.try_resume("q", "claude:opus@high", self.impl, "s_a", label="again"))
+        self.assertEqual(self._finish_costs(), [("first", "1.00"), ("again", "1.50")])
+
+    def test_every_claude_worker_runs_without_saved_memory(self):
+        runner = self._runner()
+        for access, mcp in (("read", False), ("full", False), ("full", True)):
+            runner.run("p", pair="claude:opus@high", worktree=self.impl, access=access, mcp=mcp)
+        self.assertEqual([c["disable_auto_memory"] for c in self.claude_calls()], ["1", "1", "1"])
 
     # agy's result response joins every non-empty agent message of the turn (stream shapes seen live 2026-11-24, agy
     # 1.5.15): a message written before a background command ended, or narration before a tool call.

@@ -7,7 +7,8 @@ Reads every worker's finish line ("[worker +Ns] <tag>: done (...) pair=<pair> co
 markdown summary: the total, then by role and by pair, with tokens where the harness reports them (agy reports
 tokens but no cost). Roles come from the worker's tag: crew (implement, fix,
 commit, attempt), reviewers (stage 1 and 2), Flight Director, Range Safety and design workers, final review, drift
-check, test launches; a resumed worker is "resumed". Harnesses that report no cost count as unknown.
+check, test launches; a resumed worker is "resumed". A resumed worker's finish line carries only that turn's share of
+the conversation's cost (common.py), so the total is the real total. Harnesses that report no cost count as unknown.
 Prints the summary; with --out also writes it there. Exit 0, or 64 on bad usage.
 """
 import argparse

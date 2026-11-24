@@ -24,6 +24,11 @@ Exit 41  PAUSED <prompt file>              the user paused at a usage-limit prom
                                            call shows the same prompt
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
+
+A final review that follows a final-fix task is a re-review: its spec adds re-review.txt with the previous final
+verdict and the fix range, from the heads the previous final review covered (FIN_PREV_VERDICT, FIN_PREV_HEADS, set when
+the final-fix task is queued from FIN_LAST_VERDICT and FIN_REVIEWED_HEADS) to the current ones; multi-repo, one range
+per repo the fix moved. The starting-state check clears them.
 """
 import argparse
 import re
@@ -38,6 +43,7 @@ from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, USAGE_REPLIES, AgyRu
                     void_prompt, write_atomic, write_prompt)
 from probe import USAGE_LIMIT, Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 from pairs import parse_pair  # noqa: E402
+from run_task import RE_REVIEW_WORDS, no_re_review, re_review_section  # noqa: E402
 
 VERIFIED, RUN_QUEUE = 0, 21
 
@@ -91,7 +97,8 @@ class Finish:
     # -- item 1: starting state
     def do_start(self):
         r = self.r
-        r.set(PHASE="finish", **{k: None for k in r.s if k.startswith("IMPL_CONVERSATION_ID_")})
+        r.set(PHASE="finish", FIN_PREV_VERDICT=None, FIN_PREV_HEADS=None,
+              **{k: None for k in r.s if k.startswith("IMPL_CONVERSATION_ID_")})
         rc, out = self._check_impl_trees()
         if rc != 0:
             raise Done(ERROR, f"ERROR TREE_NOT_CLEAN {out}")
@@ -106,6 +113,31 @@ class Finish:
             raise Done(ERROR, f"ERROR RESET {out}")
 
     # -- item 2: the final review
+    def heads(self):
+        """{repo: LAST_MERGED} for every repo (multi-repo), or {"": LAST_MERGED} (single-repo)."""
+        r = self.r
+        return {repo: r.repo_last_merged(repo) for repo in r.repos} if r.is_multi_repo else {"": r.need("LAST_MERGED")}
+
+    def re_review(self, spec_out):
+        """The re-review section for a final review that follows a final-fix task, or the shared empty file."""
+        r = self.r
+        prev, prev_heads = r.get("FIN_PREV_VERDICT"), r.get("FIN_PREV_HEADS")
+        if not prev or not prev_heads or not Path(prev).is_file():
+            return no_re_review(r)
+        before = dict(item.rsplit("=", 1) for item in prev_heads.split())
+        now = self.heads()
+        moved = [k for k in now if k in before and before[k] != now[k]]
+        if not moved:
+            return no_re_review(r)
+        if r.is_multi_repo:
+            previous_head = ", ".join(f"{k} at {before[k]}" for k in before)
+            fix_range = "; ".join(f"{k}: {before[k]}..{now[k]}" for k in moved)
+        else:
+            previous_head, fix_range = before[""], f"{before['']}..{now['']}"
+        return re_review_section(spec_out.with_name(f"{spec_out.stem}-re-review.txt"),
+                                 "A final-fix task followed the previous final review.", previous_head, fix_range,
+                                 RE_REVIEW_WORDS[2], prev)
+
     def do_review(self):
         r = self.r
         n = r.incr("FINAL_N")
@@ -120,12 +152,16 @@ class Finish:
             head = r.need("LAST_MERGED")
             review_range = f"{r.need('INITIAL_BASE_SHA')}..{head}"
             conventions = r.repo_convention_paths()
-        spec = build("final-review.txt", next_free(r.run_dir / "specs", "final-review-{n}.txt"),
+        spec_out = next_free(r.run_dir / "specs", "final-review-{n}.txt")
+        spec = build("final-review.txt", spec_out,
                      {"REVIEW_RANGE": review_range, "CONVENTION_PATHS": conventions, "OUTPUT_FILE": out,
                       "AC_IDS": ac_ids(r.need("DESIGN_FILE"), r.need("DECISIONS_LOG"))},
-                     {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG")})
+                     {"DESIGN": r.need("DESIGN_FILE"), "DECISIONS_LOG": r.need("DECISIONS_LOG"),
+                      "RE_REVIEW": self.re_review(spec_out)})
         pair = r.need("ROLE_DIRECTOR")
-        self.set_phase("reviewing", FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair)
+        reviewed = " ".join(f"{k}={v}" for k, v in self.heads().items())
+        self.set_phase("reviewing", FIN_OUT=out, FIN_HEAD=head, FIN_SPEC=spec, FIN_PAIR=pair,
+                       FIN_REVIEWED_HEADS=reviewed)
         r.log(f"final review {n} dispatched {pair}")
         result = self.runner.run(spec, pair=pair, worktree=r.impl, access="read")
         self.settle_review(result)
@@ -372,6 +408,8 @@ class Finish:
 
     def run_queue(self, fid):
         r = self.r
+        # The next final review is a re-review of the last one: its verdict, and the heads it covered.
+        r.set(FIN_PREV_VERDICT=r.get("FIN_LAST_VERDICT"), FIN_PREV_HEADS=r.get("FIN_REVIEWED_HEADS"))
         write_atomic(r.run_dir / "queue.txt", f"{fid}\n")
         r.log(f"final fix {fid} queued")
         self.set_phase("review", WAITING_ON=None)  # the next advance, after QUEUE_EMPTY, starts a new review

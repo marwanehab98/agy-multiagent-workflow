@@ -2,5 +2,6 @@ Run the RSO review phase of the Range Safety `wind-tunnel` skill. The skill is a
 Skip Step 1 entirely: the clarification with the user is already done. The anchored feature hypothesis is the full text of {{CONCEPTS_FILE}}. Treat that as confirmed; do not ask the user anything and do not present any readiness gate. Skip Steps 3 and 4.
 Use the brainstorm lenses to find edge cases, risks, and blind spots in that hypothesis, reading the code in this repository where it helps. One round only.
 Write the synthesized findings to {{OUTPUT_FILE}} with your file-writing tool (not a shell redirect), as a plain list of findings, each with the lens that raised it and why it matters. Do not write concepts_brief.md or any other file, do not edit any file, and do not commit.
+When you inspect the repository, run one plain `git` command per call (`git ...` in this worktree, or `git -C <repo> ...`), with no `cd`, chaining, loops, pipes or redirects, and read or search files with your file tools rather than shell commands.
 If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 When finished, end your response with the number of findings and the path {{OUTPUT_FILE}}.

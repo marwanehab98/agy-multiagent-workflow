@@ -113,8 +113,8 @@ class Design:
 
     def docs_rel(self, path, line):
         """path relative to DOCS_WORKTREE, in the form git status prints it (check-tree.sh --allow matches it
-        exactly): no ./, no .., not absolute. A path outside the docs worktree, also through a symlink inside it, is
-        ERROR BAD_NEED."""
+        exactly): no ./, no .., not absolute. A path outside the docs worktree, also through a symlink inside it, or
+        the worktree root itself (also through a symlink) is ERROR BAD_NEED."""
         root = Path(self.docs_wt).resolve()
         full = Path(path) if Path(path).is_absolute() else root / path
         try:
@@ -127,9 +127,11 @@ class Design:
         if rel == Path("."):
             raise Done(ERROR, f"ERROR BAD_NEED {line[:300]}")
         try:
-            (root / rel).resolve().relative_to(root)  # a symlink in the worktree may lead outside it
+            resolved = (root / rel).resolve().relative_to(root)  # a symlink in the worktree may lead outside it
         except ValueError:
             raise Done(ERROR, f"ERROR BAD_NEED findings path outside the docs worktree: {line[:300]}")
+        if resolved == Path("."):  # a symlink in the worktree that leads to its root
+            raise Done(ERROR, f"ERROR BAD_NEED {line[:300]}")
         return rel.as_posix()
 
     def count_run(self, kind):

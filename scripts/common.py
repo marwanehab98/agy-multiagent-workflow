@@ -701,10 +701,10 @@ def envelope_stats(data):
     process's running total, so the latest one counts. Values a harness does not report are left out."""
     envs = [d for d in (data if isinstance(data, list) else [data]) if isinstance(d, dict)]
     out, turns, secs, tokens = {}, None, None, None
+    cost = envelope_cost(envs)
+    if cost is not None:
+        out["cost"] = f"${cost:.2f}"
     for d in envs:
-        cost = d.get("total_cost_usd", d.get("cost_usd"))
-        if isinstance(cost, (int, float)):
-            out["cost"] = f"${cost:.2f}"
         if isinstance(d.get("num_turns"), int):
             turns = (turns or 0) + d["num_turns"]
         if isinstance(d.get("duration_ms"), (int, float)):
@@ -725,6 +725,17 @@ def envelope_stats(data):
     if tokens is not None:
         out["tokens"] = tokens
     return out
+
+
+def envelope_cost(data):
+    """The latest cost a result envelope, or a list of one process's result events, reports, at full precision
+    (the process's running total; see envelope_stats); None when none reports one."""
+    cost = None
+    for d in (data if isinstance(data, list) else [data]):
+        c = d.get("total_cost_usd", d.get("cost_usd")) if isinstance(d, dict) else None
+        if isinstance(c, (int, float)) and not isinstance(c, bool):
+            cost = float(c)
+    return cost
 
 
 def _parse_json_envelope(raw_out, adapter):
@@ -872,11 +883,19 @@ class AgyRunner:
         if to_stderr:
             progress(self.r, line, milestone=milestone)
 
-    def _turn_stats(self, adapter, conv_id, resumed, stats):
+    def _turn_stats(self, adapter, conv_id, resumed, stats, cost=None):
         """For a harness that reports a resumed conversation's running totals, log this turn's share: subtract the
         totals recorded after the conversation's previous turn (<RUN_DIR>/logs/usage-so-far.json, by conversation;
-        kept out of state.json, which every set rewrites whole; a missing or corrupt file counts as empty)."""
-        if not adapter.cumulative_usage or not conv_id or not self.r.get("RUN_DIR"):
+        kept out of state.json, which every set rewrites whole; a missing or corrupt file counts as empty).
+        cumulative_usage covers tokens, turns and model time; cumulative_cost the cost, given here at full precision
+        (cost: the process's latest total_cost_usd, not the two-decimal text). A record is "tokens,turns,secs" with
+        ",cost" after it when a cost was reported (readers of the three-field form ignore the fourth). A conversation
+        whose previous turn left no cost in its record (it ran before costs were recorded) cannot be split: its
+        first resumed turn logs the running total."""
+        cost = cost if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None
+        if not conv_id or not self.r.get("RUN_DIR"):
+            return
+        if not (adapter.cumulative_usage or (getattr(adapter, "cumulative_cost", False) and cost is not None)):
             return
         path = Path(self.r.get("RUN_DIR")) / "logs" / "usage-so-far.json"
         try:
@@ -888,12 +907,21 @@ class AgyRunner:
                "secs": int(stats["model_time"][:-1]) if str(stats.get("model_time", "")).endswith("s") else None}
         saved = str(totals.get(conv_id, "")).split(",") if resumed else []
         prev = dict(zip(("tokens", "turns", "secs"), (int(x) if x.isdigit() else None for x in saved)))
-        for k, field in (("tokens", "tokens"), ("turns", "turns")):
-            if isinstance(now[k], int) and isinstance(prev.get(k), int) and now[k] >= prev[k]:
-                stats[field] = now[k] - prev[k]
-        if isinstance(now["secs"], int) and isinstance(prev.get("secs"), int) and now["secs"] >= prev["secs"]:
-            stats["model_time"] = f"{now['secs'] - prev['secs']}s"
-        totals[conv_id] = ",".join("" if now[k] is None else str(now[k]) for k in ("tokens", "turns", "secs"))
+        if adapter.cumulative_usage:
+            for k, field in (("tokens", "tokens"), ("turns", "turns")):
+                if isinstance(now[k], int) and isinstance(prev.get(k), int) and now[k] >= prev[k]:
+                    stats[field] = now[k] - prev[k]
+            if isinstance(now["secs"], int) and isinstance(prev.get("secs"), int) and now["secs"] >= prev["secs"]:
+                stats["model_time"] = f"{now['secs'] - prev['secs']}s"
+        if getattr(adapter, "cumulative_cost", False) and cost is not None and len(saved) > 3:
+            try:
+                prev_cost = float(saved[3])
+            except ValueError:
+                prev_cost = None
+            if prev_cost is not None and 0 <= prev_cost <= cost:
+                stats["cost"] = f"${cost - prev_cost:.2f}"
+        totals[conv_id] = ",".join("" if now[k] is None else str(now[k]) for k in ("tokens", "turns", "secs")) + (
+            "" if cost is None else f",{cost!r}")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             write_atomic(path, json.dumps(totals))
@@ -927,7 +955,8 @@ class AgyRunner:
         except Exception:  # noqa: BLE001
             pass
         try:
-            self._emit_progress(log_fh, line, to_stderr=False)
+            # Like every other way a worker ends (timed out, stopped): in its log, progress.log and on stderr.
+            self._emit_progress(log_fh, line, to_stderr=True, milestone=True)
         except Exception:  # noqa: BLE001
             pass
         if log_fh is not None and not log_fh.closed:
@@ -1010,7 +1039,7 @@ class AgyRunner:
             proc = subprocess.Popen(
                 cmd,
                 cwd=worktree,
-                env=worker_env(access),
+                env={**worker_env(access), **adapter.extra_env},
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1232,7 +1261,7 @@ class AgyRunner:
             rc = 0 if stopped_after_result else proc.returncode
             env = adapter.extract_envelope(data, rc, exe, conversation_id=conversation_id, raw_err=raw_err)
             self._turn_stats(adapter, env["conv_id"], bool(conversation_id) and env["returned_id"] in ("", conversation_id),
-                             stats)
+                             stats, cost=envelope_cost(results or data))
             conv_id = env["conv_id"]
 
             if not env["ok"]:
@@ -1278,7 +1307,8 @@ class AgyRunner:
             if not finished:
                 # Unwound by an exception: Interrupted from the driver's signal handler (which has stopped the
                 # worker already) or anything else. Stop what still runs and let go of the worker.
-                self._abandon_worker(entry, seen_kids, log_fh, f"{tag}: interrupted")
+                self._abandon_worker(entry, seen_kids, log_fh,
+                                     f"[worker +{time.monotonic() - start:.0f}s] {tag}: interrupted")
 
     def run(self, spec, pair=None, args=None, worktree=None, harness=None, label=None, access="full", write_extra=(),
             mcp=False):

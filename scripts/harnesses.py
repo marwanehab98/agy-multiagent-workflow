@@ -135,15 +135,15 @@ def _shell_spellings(path):
     """The ways a worker writes path in a shell command that a Claude Code Bash rule can name. Rules match the
     command's literal text (verified live 2026-11-24, 2.1.331): `git -C "/a b/r" log` matches only a rule written
     with the same double quotes, `git -C '/a b/r' log` only one with single quotes, and a backslash-escaped
-    `/a\\ b/r` matches no rule at all. So a path that needs quoting gets its double- and single-quoted forms (each
-    only when the shell would take it literally: no " $ ` ! inside double quotes, no ' inside single quotes), and
-    one that does not keeps its bare form only. A path with a _RULE_UNSAFE character gets none: such a worker cannot
-    use `git -C` on it (backslash-escaped spellings are never allowed either)."""
+    `/a\\ b/r` matches no rule at all. So every path gets its double- and single-quoted forms (each only when the
+    shell would take it literally: no " $ ` ! inside double quotes, no ' inside single quotes), and one that needs
+    no quoting also its bare form, first: a worker may quote a plain path too (`git -C "/repo" diff`). A path with a
+    _RULE_UNSAFE character gets none: such a worker cannot use `git -C` on it (backslash-escaped spellings are never
+    allowed either)."""
     if _RULE_UNSAFE.search(path):
         return []
-    if shlex.quote(path) == path:
-        return [path]
-    return ([f'"{path}"'] if not re.search(r'["$`!]', path) else []) + ([f"'{path}'"] if "'" not in path else [])
+    return (([path] if shlex.quote(path) == path else [])
+            + ([f'"{path}"'] if not re.search(r'["$`!]', path) else []) + ([f"'{path}'"] if "'" not in path else []))
 
 
 def _git_dir_spellings(d, workdir):
@@ -169,6 +169,11 @@ class Adapter:
     name = binary = ""
     # True when a resumed conversation's result reports the whole conversation's usage so far, not the turn's.
     cumulative_usage = False
+    # True when a resumed conversation's result reports the whole conversation's cost so far (total_cost_usd), not
+    # the turn's; its tokens, turns and time may still be the turn's own (cumulative_usage).
+    cumulative_cost = False
+    # Environment variables every worker of this harness gets on top of worker_env (they win over the user's).
+    extra_env = {}
     styles = []
     version_cmd = ["--version"]
     exe_state_key = ""
@@ -294,6 +299,10 @@ class AntigravityAdapter(Adapter):
             return ["--dangerously-skip-permissions"] + ([] if mcp else
                                                           ["--settings", json.dumps(no_mcp, separators=(",", ":"))])
         dirs = [str(Path(d).resolve()) for d in write_dirs]
+        bad = [d for d in dirs if _RULE_UNSAFE.search(d)]
+        if bad:
+            raise ValueError(f"output folder {bad[0]!r} has a character a permission rule cannot hold "
+                             "(one of ( ) * ? [ ] \\ or a control character); use a folder without it")
         settings = {
             "toolPermission": "proceed-in-sandbox",
             "enableTerminalSandbox": True,
@@ -464,6 +473,16 @@ class ClaudeAdapter(Adapter):
     exe_state_key = "CLAUDE"
     resume_flag = "--resume"
     stream_output_args = ["--output-format", "stream-json", "--verbose"]
+    # Live 2026-11-24 (2.1.331): three calls on one conversation (the first, then twice --resume) reported
+    # total_cost_usd 0.00378, 0.00695, 0.00736 while num_turns, duration_ms and usage were each call's own.
+    cumulative_cost = True
+    # A worker must not read or write the user's saved memory (~/.claude/projects/<project>/memory): a reviewer
+    # once quoted a memory from an unrelated ticket over the run's own decisions. The variable turns auto-memory off
+    # whatever the settings say (a settings key, autoMemoryEnabled, would lose to the variable set to 0). Verified
+    # live 2026-11-24, 2.1.331: a worker that named a word from the project's MEMORY.md without it did not with it,
+    # and wrote no memory file; CLAUDE.md discovery runs the same with it (its own switch is
+    # CLAUDE_CODE_DISABLE_CLAUDE_MDS).
+    extra_env = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
     # Read-only workers get no general shell and no network: reading, writing only under write_dirs (their
     # output file), subagents and skills for the review swarms, and read-only git. Anything else is denied
     # without a prompt (dontAsk). check-tree.sh still voids any change to the worktree.

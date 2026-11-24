@@ -7,5 +7,6 @@ Run the Range Safety `cross-check` review loop for exactly one round, findings o
 {{FILE:CONTEXT}}
 Run Step 2.2 (the RSO review panel) once and consolidate the findings, merging findings that two reviewers raised about the same issue. Do not run Step 2.3 (resolution), do not apply any fix, do not loop, and do not edit any file.
 Write the consolidated findings to {{OUTPUT_FILE}} with your file-writing tool (not a shell redirect), each with its id, reviewer, severity, the plan section it concerns, and the evidence. Do not create any other file, and do not commit.
+When you inspect the repository, run one plain `git` command per call (`git ...` in this worktree, or `git -C <repo> ...`), with no `cd`, chaining, loops, pipes or redirects, and read or search files with your file tools rather than shell commands.
 If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 When finished, end your response with the count per severity and the path {{OUTPUT_FILE}}.

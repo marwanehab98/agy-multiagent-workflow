@@ -461,6 +461,40 @@ class TestWorkspace(unittest.TestCase):
                 self.assertFalse(docs.exists())
                 for repo in (good, bad):
                     self.assert_no_docs_left(repo, docs / repo.name, topic)
+                    # The call added the run's block to good's exclude file before bad failed; rollback removes it.
+                    exclude = repo / ".git" / "info" / "exclude"
+                    self.assertNotIn("mission-control", exclude.read_text() if exclude.exists() else "")
+
+    def test_a_failed_multi_repo_init_docs_keeps_the_block_another_run_needs(self):
+        ws = self.tmp / "ws-shared"
+        good, bad = ws / "good", ws / "bad"
+        good_sha, bad_sha = make_repo(good), make_repo(bad)
+        r = py(WORKSPACE, "init-docs", "--main-checkout", str(good), "--topic", "other", "--start-sha", good_sha)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.hook(bad, self.BREAK_TREE)
+        r = py(WORKSPACE, "init-docs", "--workspace", str(ws), "--topic", "t",
+               "--repo", f"good={good}@{good_sha}", "--repo", f"bad={bad}@{bad_sha}")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(".mission/", (good / ".git" / "info" / "exclude").read_text())  # the other run's worktree
+
+    def test_a_single_repo_init_docs_that_fails_after_its_excludes_removes_them(self):
+        sys.path.insert(0, str(SKILL / "scripts"))
+        import workspace
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        real = workspace._make_run_dirs
+
+        def boom(_docs_root):
+            raise OSError("disk full")
+        workspace._make_run_dirs = boom
+        try:
+            args = workspace.argparse.Namespace(main_checkout=str(repo), workspace=None, topic="t", start_sha=sha)
+            with self.assertRaises(OSError):
+                workspace.cmd_init_docs(args)
+        finally:
+            workspace._make_run_dirs = real
+        self.assert_no_docs_left(repo, self.root(repo) / "t-docs", "t")
+        self.assertNotIn("mission-control", (repo / ".git" / "info" / "exclude").read_text())
 
     def test_a_malformed_topic_is_bad_usage(self):
         repo = self.tmp / "app"
@@ -521,7 +555,9 @@ class TestWorkspace(unittest.TestCase):
         self.assertIn("PROBLEM 02: missing REPO", r.stdout)
         self.assertIn("PROBLEM 03: REPO 'unknown' not in run REPOS", r.stdout)
 
-    def test_multi_repo_run_task_and_run_finish(self):
+    def multi_run(self, behaviors):
+        """A two-repo run (my-api, web-app) set up to its task loop, with tasks 01 (my-api) and 02 (web-app)
+        queued and the fake worker given `behaviors`. Returns what the tests use."""
         ws = self.tmp / "e2e"
         ws.mkdir()
         sha_api = make_repo(ws / "my-api")
@@ -561,11 +597,7 @@ class TestWorkspace(unittest.TestCase):
         world = self.tmp / "world.json"
         world.write_text(json.dumps({
             "seq": 0,
-            "behaviors": [
-                {"do": "commit"}, {"do": "pass"}, {"do": "pass"},  # task 01 in my-api
-                {"do": "commit"}, {"do": "pass"}, {"do": "pass"},  # task 02 in web-app
-                {"do": "pass"},  # final review
-            ],
+            "behaviors": [{"do": b} for b in behaviors],
             "calls": [],
         }))
 
@@ -601,7 +633,15 @@ class TestWorkspace(unittest.TestCase):
         r_ii = py(WORKSPACE, "init-impl", "--state", str(state))
         self.assertEqual(r_ii.returncode, 0, r_ii.stderr)
 
-        env = {**os.environ, "FAKE_AGY_WORLD": str(world)}
+        return {"ws": ws, "state": state, "run_dir": run_dir, "docs_dir": docs_dir, "sha_api": sha_api,
+                "sha_web": sha_web, "world": world, "env": {**os.environ, "FAKE_AGY_WORLD": str(world)}}
+
+    def test_multi_repo_run_task_and_run_finish(self):
+        m = self.multi_run(["commit", "pass", "pass",  # task 01 in my-api
+                            "commit", "pass", "pass",  # task 02 in web-app
+                            "pass"])  # final review
+        ws, state, run_dir, sha_api, sha_web = m["ws"], m["state"], m["run_dir"], m["sha_api"], m["sha_web"]
+        env = m["env"]
         r_task = py(RUN_TASK, "--state", str(state), "advance", env=env)
         self.assertEqual(r_task.returncode, 0, r_task.stdout + r_task.stderr)
         lines = r_task.stdout.strip().splitlines()
@@ -628,6 +668,52 @@ class TestWorkspace(unittest.TestCase):
         fin_spec = (run_dir / "specs" / "final-review-1.txt").read_text()
         self.assertIn(f"my-api: {sha_api}..{st['LAST_MERGED_my_api']}", fin_spec)
         self.assertIn(f"web-app: {sha_web}..{st['LAST_MERGED_web_app']}", fin_spec)
+        self.assertNotIn("re-review", fin_spec)  # the first final review is not a re-review
+
+    def test_multi_repo_final_review_after_a_final_fix_is_a_re_review(self):
+        m = self.multi_run(["commit", "pass", "pass", "commit", "pass", "pass",  # tasks 01 and 02
+                            "fix",  # final review 1
+                            "commit", "pass", "pass",  # final-fix task F1 in my-api
+                            "pass"])  # final review 2
+        state, run_dir, docs_dir, env = m["state"], m["run_dir"], m["docs_dir"], m["env"]
+        self.assertEqual(py(RUN_TASK, "--state", str(state), "advance", env=env).returncode, 0)
+        before = json.loads(state.read_text())
+        r = py(RUN_FINISH, "--state", str(state), "advance", env=env)
+        self.assertEqual(r.stdout.strip().splitlines()[-1],
+                         f"DIRECTOR_JOB final-review {run_dir / 'verdicts' / 'final-1.md'}")
+        (docs_dir / "tasks" / "F1.md").write_text("Fix the final review's finding\n")
+        (docs_dir / "tasks" / "F1.meta").write_text(META.format(title="F1", acs="none", extra="REPO=my-api\n"))
+        (docs_dir / "tasks" / "F1-summary.md").write_text("Summary F1\n")
+        (docs_dir / "tasks" / "F1-decisions.md").write_text("none\n")
+        result = self.tmp / "result.md"
+        result.write_text("RESULT: FINAL_FIX F1\n")
+        s = json.loads(state.read_text())
+        s["LAUNCH_STYLE_antigravity_small_high"] = "flag"  # the F1 review pairs need no test launch here
+        state.write_text(json.dumps(s))
+        r = py(RUN_FINISH, "--state", str(state), "advance", "--director-result", str(result), env=env)
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "RUN_QUEUE F1", r.stdout + r.stderr)
+        r = py(RUN_TASK, "--state", str(state), "advance", env=env)
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "QUEUE_EMPTY", r.stdout + r.stderr)
+        after = json.loads(state.read_text())
+        self.assertNotEqual(after["LAST_MERGED_my_api"], before["LAST_MERGED_my_api"])
+        r = py(RUN_FINISH, "--state", str(state), "advance", env=env)
+        self.assertTrue(r.stdout.strip().splitlines()[-1].startswith("VERIFIED "), r.stdout + r.stderr)
+        spec = (run_dir / "specs" / "final-review-2.txt").read_text()
+        self.assertIn("This is a re-review. A final-fix task followed the previous final review.", spec)
+        self.assertIn(f"covered the work up to my-api at {before['LAST_MERGED_my_api']}, "
+                      f"web-app at {before['LAST_MERGED_web_app']};", spec)
+        self.assertIn(f"The fix range is my-api: {before['LAST_MERGED_my_api']}..{after['LAST_MERGED_my_api']}. "
+                      "First check that every Critical or Important finding", spec)
+        self.assertIn((run_dir / "verdicts" / "final-1.md").read_text().strip(), spec)
+        self.assertIn(f"my-api: {m['sha_api']}..{after['LAST_MERGED_my_api']}; "
+                      f"web-app: {m['sha_web']}..{after['LAST_MERGED_web_app']}", spec)  # the whole range still
+
+    def test_multi_repo_escalation_history_names_the_task_repo(self):
+        m = self.multi_run(["nocommit"])
+        r = py(RUN_TASK, "--state", str(m["state"]), "advance", env=m["env"])
+        self.assertEqual(r.returncode, 20, r.stdout + r.stderr)
+        first = (m["run_dir"] / "verdicts" / "01-history.md").read_text().splitlines()[0]
+        self.assertTrue(first.startswith(f"task=01 repo=my-api base={m['sha_api']} head="), first)
 
     def test_nested_repos_detect_mount_and_cleanup(self):
         ws = self.tmp / "nested"

@@ -58,6 +58,7 @@ class Review(Finish):
         self.assertIn("CONTRIBUTING.md", call["prompt"])
         self.assertIn(str(self.run_dir / "verdicts" / "final-1.md"), call["prompt"])
         self.assertTrue((self.run_dir / "results" / "final-settle-1.md").is_file())
+        self.assertIn("needs context.\nProject conventions", call["prompt"])  # a first final review: no re-review
 
     def test_fix_verdict_goes_to_architect(self):
         self.behave("fix")
@@ -202,6 +203,23 @@ class Fixes(Finish):
         spec = self.calls()[-1]["prompt"]
         self.assertIn(f"{self.older}..{self.st('LAST_MERGED')}", spec)
         self.assertIn(str(self.run_dir / "verdicts" / "final-2.md"), spec)
+        # The second final review is a re-review of the first: its verdict and the final-fix task's range.
+        self.assertIn("needs context.\nThis is a re-review. A final-fix task followed the previous final review. "
+                      f"That review covered the work up to {head};", spec)
+        self.assertIn((self.run_dir / "verdicts" / "final-1.md").read_text().strip(), spec)
+        self.assertIn(f"The fix range is {head}..{self.st('LAST_MERGED')}. First check that every Critical or "
+                      "Important finding the previous review raised is resolved.", spec)
+        self.assertIn(f"Review range: {self.older}..{self.st('LAST_MERGED')}.", spec)  # the whole range still
+
+    def test_a_new_finish_phase_starts_with_a_first_final_review(self):
+        verdict = self.run_dir / "verdicts" / "old.md"
+        verdict.write_text("VERDICT: FIX\n")
+        self.state.write_text(json.dumps({**self.st(), "FIN_PREV_VERDICT": str(verdict),
+                                          "FIN_PREV_HEADS": f"={self.older}"}))
+        self.behave("pass")
+        self.expect(0, "VERIFIED")
+        self.assertNotIn("re-review", self.calls()[0]["prompt"])
+        self.assertIsNone(self.st("FIN_PREV_VERDICT"))
 
     def test_third_final_fix_prompts_continue_or_stop(self):
         self.state.write_text(json.dumps({**self.st(), "FINAL_FIX_ROUNDS": "2"}))
@@ -341,6 +359,7 @@ class Verify(Finish):
 
     def test_final_fix_after_verification_failure_reviews_again_then_verifies_again(self):
         self.commit_broken()
+        broken = self.st("LAST_MERGED")
         self.behave("pass")
         self.expect(20, "DIRECTOR_JOB")
         self.task("F1", "none")
@@ -351,6 +370,9 @@ class Verify(Finish):
         self.behave("pass")
         last, _ = self.expect(0, "VERIFIED")
         self.assertEqual(last, f"VERIFIED {self.run_dir / 'verify-2.log'}")
+        spec = self.calls()[-1]["prompt"]  # the final review after the final-fix task re-reviews the passing one
+        self.assertIn(f"The fix range is {broken}..{self.st('LAST_MERGED')}.", spec)
+        self.assertIn("VERDICT: PASS", spec)
 
     def test_final_clean_after_failed_verification_prompts_then_continue_opens_pr(self):
         self.commit_broken()

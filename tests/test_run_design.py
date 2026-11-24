@@ -278,6 +278,14 @@ class RangeSafety(Design):
                 self.assertIn("BAD_NEED", last)
         self.assertEqual(self.calls(), [])
 
+    def test_findings_path_that_is_a_symlink_to_the_docs_worktree_root_is_a_bad_need(self):
+        (self.docs_wt / "root").symlink_to(self.docs_wt)
+        for spelled in ("root", str(self.docs_wt / "root")):
+            with self.subTest(spelled=spelled):
+                last, _ = self.need(f"NEED safety design.md {spelled}", (2, "ERROR"))
+                self.assertIn("BAD_NEED", last)
+        self.assertEqual(self.calls(), [])
+
     def test_findings_path_through_a_symlink_to_the_docs_worktree_is_accepted(self):
         link = self.tmp / "docs-link"
         link.symlink_to(self.docs_wt)

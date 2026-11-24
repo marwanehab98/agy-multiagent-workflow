@@ -34,12 +34,17 @@ Rules the loop enforces:
 - Stage 1 review, then Stage 2. After a gate fix passes, the review resumes at REVIEW_STAGE_<id>.
 - A review that follows a fix round of the same stage is a re-review: its spec adds re-review.txt with the previous
   verdict file and the fix range (PREV_VERDICT_<id>_S<n>, PREV_HEAD_<id>_S<n>; cleared when the stage passes, and
-  when the task starts or an escalation attempt starts it over).
+  when the task starts or an escalation attempt starts it over). A first review gets the shared empty
+  specs/no-re-review.txt in its place.
 - A fix round after a review's VERDICT: FIX that commits nothing escalates (a <id>-nocommit note) instead of
   rerunning the gate and the review on the same commit; after a gate failure the gate reruns.
 - Escalate after two fix rounds for one stage (STAGE_FIX_ROUNDS_<id>_S<n>, reset when that stage passes),
   two gate fix rounds in a row (GATE_FIX_ROUNDS_<id>), or four fix rounds of any kind (TOTAL_FIX_ROUNDS_<id>).
   An escalation attempt resets all three.
+- An escalation's history (verdicts/<id>-history.md) has the failure note, every review verdict in full, and each gate
+  log in short (gate_summary): one line for a passing log, naming any checks skipped through BASELINE_SKIP; for a
+  failing one, the failed checks (then any skipped), the tails of their output and the full log's path. Multi-repo,
+  its first line names the task's repo.
 - A reviewer that changes the worktree, or stops/fails without settling, is void and replaced; the third
   void in a row prompts retry or stop. A missing VERDICT line gets one new reviewer; a second counts as FIX.
 - A usage limit (a worker's or a test launch's) pauses the task with a retry/pause/stop prompt instead of counting
@@ -51,6 +56,7 @@ Rules the loop enforces:
 - Merges go only through merge-task.sh (fast-forward, compare-and-swap on the feature branch).
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -62,6 +68,81 @@ from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERRO
                     write_atomic, write_prompt)
 from pairs import ladder, parse_pair  # noqa: E402
 from probe import USAGE_LIMIT, Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
+
+
+# ---------------------------------------------------------------- shared with run_finish.py
+
+# What a re-review (re-review.txt) calls the findings that block, and what it does with anything else newly noticed in
+# code the fix range did not change. Stage 2 and the final review grade findings by severity.
+RE_REVIEW_WORDS = {1: ("missing or extra item", "list anything else newly noticed there (test-coverage or "
+                           "convention gaps not raised before) as Minor, which does not call for VERDICT: FIX"),
+                   2: ("Critical or Important finding", "list anything else newly noticed there (test-coverage or "
+                           "convention gaps not raised before) as Minor")}
+
+
+def no_re_review(r):
+    """The one empty file every first review's spec takes for its {{FILE:RE_REVIEW}} placeholder."""
+    f = r.run_dir / "specs" / "no-re-review.txt"
+    if not f.is_file() or f.stat().st_size:
+        write_atomic(f, "")
+    return f
+
+
+def re_review_section(out, followed, previous_head, fix_range, words, previous):
+    """Write the re-review section (re-review.txt, after a line break) to `out` and return it. It goes to the review
+    spec as a file: a previous verdict can exceed one argument's size limit."""
+    blocking, other = words
+    build("re-review.txt", out, {"FOLLOWED": followed, "PREVIOUS_HEAD": previous_head, "FIX_RANGE": fix_range,
+                                 "BLOCKING": blocking, "OTHER": other}, {"PREVIOUS": previous})
+    write_atomic(out, "\n" + out.read_text(encoding="utf-8"))
+    return out
+
+
+GATE_START = re.compile(r"=== ((?:GATE|VERIFY)_\w*\d+): ")
+GATE_SKIP = re.compile(r"=== ((?:GATE|VERIFY)_\w*\d+) skipped ")
+GATE_TAIL_LINES, GATE_TAIL_CHARS = 80, 8000
+
+
+def gate_summary(log):
+    """A gate.py log as the escalation history shows it. A log with no failed check is one line: "every check
+    passed" when none was skipped (BASELINE_SKIP), "every check that ran passed (<n> skipped: <names>)" when some
+    were, "every check skipped (<names>)" when none ran. Otherwise: the checks that failed (a non-zero exit, timed
+    out, or never ended) and then any skipped ones, the full log's path, and the tail of each failed check's output
+    (of the whole log when no check ran): its last GATE_TAIL_LINES lines, at most GATE_TAIL_CHARS characters. A
+    passing test suite's output can run to hundreds of KB, and the history goes to the Flight Director whole."""
+    lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    output, failed, skipped, cur = {}, [], [], None
+    for line in lines:
+        if cur is None:
+            m = GATE_START.match(line)
+            s = GATE_SKIP.match(line)
+            if m:
+                cur = m.group(1)
+                output[cur] = []
+            elif s:
+                skipped.append(s.group(1))
+        elif line == f"=== {cur} exit=0":
+            cur = None
+        elif line.startswith(f"=== {cur} exit=") or line.startswith(f"=== {cur} timed out after "):
+            failed.append(cur)
+            cur = None
+        else:
+            output[cur].append(line)
+    if cur:
+        failed.append(cur)  # gate.py stopped before the check ended
+    names = " ".join(skipped)
+    if output and not failed:
+        if skipped:
+            return f"\n=== {log.name}: every check that ran passed ({len(skipped)} skipped: {names})\n"
+        return f"\n=== {log.name}: every check passed\n"
+    if skipped and not failed:
+        return f"\n=== {log.name}: every check skipped ({names})\n"
+    also = f"; skipped {names}" if skipped else ""
+    parts = [f"\n=== {log.name}: FAILED {' '.join(failed) or '(no check ran)'}{also} (full log: {log})\n"]
+    for name in failed or [None]:
+        tail = "\n".join(output.get(name, lines)[-GATE_TAIL_LINES:])[-GATE_TAIL_CHARS:]
+        parts.append(f"--- {name or log.name}, last lines:\n{tail}\n")
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------- the loop
@@ -133,22 +214,22 @@ class Loop:
         in_flight = "committing" if kind == "commit" else ("fixing" if kind == "fix" else "impl")
         self.set_phase(t, in_flight)
         result = None
-        reused = False
-        if reuse:
-            conv = self.r.get(f"IMPL_CONVERSATION_ID_{t}")
-            if conv:
-                result = self.runner.try_resume(spec, pair, wt, conv)
-                if result is not None:
-                    reused = True
-                else:
-                    self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
-                    if kind == "fix":
-                        self._discard_or_error(self.r.need(f"WORKER_HEAD_{t}"), t)
+        # Each line is logged before its worker starts, so the run log and a live watch show the worker as started.
+        conv = self.r.get(f"IMPL_CONVERSATION_ID_{t}") if reuse else None
+        if conv:
+            self.r.log(f"{t} {kind} reused {pair}")
+            result = self.runner.try_resume(spec, pair, wt, conv)
+            if result is None:
+                self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
+                if kind == "fix":
+                    self._discard_or_error(self.r.need(f"WORKER_HEAD_{t}"), t)
+                self.r.log(f"{t} {kind} resume failed; a fresh worker is dispatched {pair}")
         if result is None:
+            if not conv:
+                self.r.log(f"{t} {kind} dispatched {pair}")
             result = self.runner.run(spec, pair=pair, worktree=wt)
         if result[3]:
             self.r.set(**{f"IMPL_CONVERSATION_ID_{t}": result[3]})
-        self.r.log(f"{t} {kind} {'reused' if reused else 'dispatched'} {pair}")
         self.after_impl(t, kind, result)
 
     def do_start(self, t):
@@ -325,27 +406,16 @@ class Loop:
         result = self.runner.run(spec, pair=pair, worktree=wt, access="read")
         self.after_review(t, stage, result)
 
-    RE_REVIEW_WORDS = {1: ("missing or extra item", "list anything else newly noticed there (test-coverage or "
-                               "convention gaps not raised before) as Minor, which does not call for VERDICT: FIX"),
-                       2: ("Critical or Important finding", "list anything else newly noticed there (test-coverage or "
-                               "convention gaps not raised before) as Minor")}
-
     def re_review(self, t, stage, spec_out):
         """A file holding the re-review section for a review that follows a fix round of the same stage
-        (re-review.txt: the previous verdict file and the fix range, after a line break), or an empty file for a
-        first review. It goes to the review spec as a file: a previous verdict can exceed one argument's size limit."""
+        (re-review.txt: the previous verdict file and the fix range), or the shared empty file for a first review."""
         r = self.r
-        section = spec_out.with_name(f"{spec_out.stem}-re-review.txt")
         prev, prev_head = r.get(f"PREV_VERDICT_{t}_S{stage}"), r.get(f"PREV_HEAD_{t}_S{stage}")
         if not prev or not prev_head or not Path(prev).is_file():
-            write_atomic(section, "")
-            return section
-        blocking, other = self.RE_REVIEW_WORDS[stage]
-        build("re-review.txt", section,
-              {"PREVIOUS_HEAD": prev_head, "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}"),
-               "BLOCKING": blocking, "OTHER": other}, {"PREVIOUS": prev})
-        write_atomic(section, "\n" + section.read_text(encoding="utf-8"))
-        return section
+            return no_re_review(r)
+        return re_review_section(spec_out.with_name(f"{spec_out.stem}-re-review.txt"),
+                                 "The previous review of this stage asked for fixes and a fix round followed.",
+                                 prev_head, f"{prev_head}..{r.need(f'WORKER_HEAD_{t}')}", RE_REVIEW_WORDS[stage], prev)
 
     def _discard_or_error(self, head, t=None):
         wt = self.task_impl(t) if t is not None else self.r.impl
@@ -476,11 +546,15 @@ class Loop:
         nxt = f"next rung {rungs[a - 1]}" if a <= len(rungs) else "ladder used up"
         replan = "not allowed" if meta.get("REPLANNED_FROM") else "allowed"
         hist = r.run_dir / "verdicts" / f"{t}-history.md"
-        parts = [f"task={t} base={r.need(f'BASE_SHA_{t}')} head={git(wt, 'rev-parse', 'HEAD')}\n"]
+        repo = self.task_repo(t)
+        parts = [f"task={t}" + (f" repo={repo}" if repo else "")
+                 + f" base={r.need(f'BASE_SHA_{t}')} head={git(wt, 'rev-parse', 'HEAD')}\n"]
         if r.get(f"FAIL_MSG_{t}"):
             parts.append(Path(r.get(f"FAIL_MSG_{t}")).read_text(encoding="utf-8"))
-        for f in sorted((r.run_dir / "verdicts").glob(f"{t}-s*.md")) + sorted((r.run_dir / "gates").glob(f"{t}-*.log")):
+        for f in sorted((r.run_dir / "verdicts").glob(f"{t}-s*.md")):
             parts.append(f"\n=== {f.name}\n" + f.read_text(encoding="utf-8"))
+        for f in sorted((r.run_dir / "gates").glob(f"{t}-*.log")):
+            parts.append(gate_summary(f))
         hist.write_text("".join(parts), encoding="utf-8")
         line = f"task {t}, tier {meta['TIER']}, attempt {a}, {nxt}, replan {replan}, history {hist}"
         self.set_phase(t, "escalating", **{f"ESC_INPUT_{t}": line, "WAITING_ON": "director"})
