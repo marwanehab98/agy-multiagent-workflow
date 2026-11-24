@@ -1,0 +1,4 @@
+This is a re-review. The previous review of this stage asked for fixes and a fix round followed. That review covered the work up to {{PREVIOUS_HEAD}}; its review file was:
+{{FILE:PREVIOUS}}
+
+The fix range is {{PREVIOUS_HEAD}}..{{WORKER_HEAD}}. First check that every {{BLOCKING}} the previous review raised is resolved. Then review the fix range in full. In code the fix range did not change, raise a new {{BLOCKING}} only for a defect in behaviour (a wrong result, data loss, a security hole, a broken contract), and {{OTHER}}. The whole review range and the VERDICT rules below still apply.

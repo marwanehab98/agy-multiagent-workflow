@@ -177,6 +177,35 @@ def run_fake_cli(
             time.sleep(float(beh["sleep_after"]))  # a CLI that prints its result and then does not exit
         return rc
 
+    if do == "script":
+        # A scripted stream: each step prints an event, a result ({"result": text}, the harness's ok payload),
+        # sleeps ({"sleep": s}), repeats an event ({"every": s, "times": n, "event": ...}: n times, s seconds
+        # apart), or starts a child in a session of its own ({"detached_child": s}: it sleeps s seconds, then writes
+        # "done" to its done file; [pid, done file] goes in the world's "child_pids"; like a background command of
+        # the real CLI, it does not share the CLI's output).
+        save_world()
+        for step in beh["steps"]:
+            if "every" in step:
+                for _ in range(int(step["times"])):
+                    time.sleep(float(step["every"]))
+                    print(json.dumps(step["event"]), flush=True)
+            elif "sleep" in step:
+                time.sleep(float(step["sleep"]))
+            elif "result" in step:
+                print(json.dumps(ok_payload(cid, step["result"]) | step.get("extra", {})), flush=True)
+            elif "detached_child" in step:
+                done = world_path.with_name(f"child-{seq}.done")
+                child = subprocess.Popen([sys.executable, "-c", "import sys, time; time.sleep(float(sys.argv[1])); "
+                                          "open(sys.argv[2], 'w').write('done')", str(step["detached_child"]),
+                                          str(done)], start_new_session=True, stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                w = json.loads(world_path.read_text(encoding="utf-8"))
+                w.setdefault("child_pids", []).append([child.pid, str(done)])
+                world_path.write_text(json.dumps(w), encoding="utf-8")
+            else:
+                print(json.dumps(step["event"]), flush=True)
+        return 0
+
     if do == "commit":
         f = Path(f"work_{seq}.txt")
         f.write_text(f"work {seq}\n", encoding="utf-8")

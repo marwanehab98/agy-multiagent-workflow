@@ -35,10 +35,17 @@ def load(path):
 def save(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".state-")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=1, sort_keys=True)
-        f.write("\n")
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:  # a failed write or rename leaves no temp file behind
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def key(text):

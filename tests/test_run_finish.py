@@ -156,6 +156,14 @@ class Review(Finish):
         self.assertEqual(self.calls()[2]["conversation"], "")
         self.assertIn("Approved.", self.calls()[2]["prompt"])
 
+    def test_single_repo_final_review_without_convention_paths(self):
+        s = self.st()
+        s.pop("CONVENTION_PATHS", None)
+        self.state.write_text(json.dumps(s))
+        self.behave("pass")
+        self.expect(0, "VERIFIED")
+        self.assertIn(f"{self.older}..{self.base}", self.calls()[0]["prompt"])
+
     def test_starting_state_clears_impl_conversations_and_checks_tree(self):
         self.state.write_text(json.dumps({**self.st(), "IMPL_CONVERSATION_ID_01": "conv_9"}))
         self.behave("pass")
@@ -271,6 +279,22 @@ class Fixes(Finish):
         last, _ = self.result("RESULT: META_FIXED", 21, "RUN_QUEUE")
         self.assertEqual(last, "RUN_QUEUE F1")
         self.assertEqual(self.st("META_FAILS"), "0")
+
+    def test_final_fix_probe_usage_limit_prompts_then_retry_redoes_the_probe(self):
+        self.unproved_fix()
+        self.behave("usage")
+        last, _ = self.result("RESULT: FINAL_FIX F1", 30, "PROMPT")
+        self.assertTrue(last.endswith(" retry pause stop"), last)
+        text = self.prompt_text(last)
+        self.assertIn("The test launch of antigravity:small@low hit its model's usage limit", text)
+        self.assertIn("5-hour limit", text)
+        self.assertIsNone(self.st("LAUNCH_STYLE_antigravity_small_low"))
+        self.expect(41, "PAUSED", "--reply", "pause")
+        self.assertEqual(self.adv()[1], last)  # pausing changed nothing
+        self.behave("ok")
+        last, _ = self.expect(21, "RUN_QUEUE", "--reply", "retry")
+        self.assertEqual(last, "RUN_QUEUE F1")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_small_low"), "slug")
 
     def test_architect_stop(self):
         self.behave("fix")
@@ -437,6 +461,21 @@ class Drift(Finish):
         self.assertIn("5-hour limit", self.prompt_text(last))
         last, _ = self.expect(20, "DIRECTOR_JOB", "--reply", "retry")
         self.assertEqual(last, f"DIRECTOR_JOB drift-done {self.run_dir / 'drift-1.md'}")
+
+    def test_drift_check_that_changes_the_tree_counts_as_failed_and_retries(self):
+        self.behave("pass", {"do": "write-output", "edit": True}, "write-output")
+        last, _ = self.expect(20, "DIRECTOR_JOB")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done {self.run_dir / 'drift-2.md'}")
+        self.assertFalse((self.impl / "stray_design_edit.txt").exists())
+        self.assertEqual(self.st("DRIFT_RETRY"), "1")
+        failed = (self.run_dir / "results" / "drift-failed-1.md").read_text()
+        self.assertIn("changed the worktree", failed)
+
+    def test_drift_check_that_changes_the_tree_twice_reports_failed(self):
+        self.behave("pass", {"do": "write-output", "edit": True}, {"do": "write-output", "edit": True})
+        last, _ = self.expect(20, "DIRECTOR_JOB")
+        self.assertEqual(last, f"DIRECTOR_JOB drift-done failed: {self.run_dir / 'results' / 'drift-failed-2.md'}")
+        self.assertFalse((self.impl / "stray_design_edit.txt").exists())
 
     def test_drift_retry_uses_fresh_file_after_stale_partial_write(self):
         (self.run_dir / "drift-1.md").write_text("stale content from crashed attempt 1\n")

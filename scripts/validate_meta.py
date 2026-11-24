@@ -5,7 +5,8 @@ Usage (picks and catalog, read from the run's state file: CATALOG, ROLE_DIRECTOR
   python3 -I validate_meta.py pair --state <S> --task-meta <F> --pair <P> --attempt <N> --past-ladder <yes|no>
   python3 -I validate_meta.py harness-pair --state <S> --pair <P>
 
-`tasks` checks each <id>.meta. `pair` checks one escalation attempt: with `no` the pair must be rung N of
+`tasks` checks each <id>.meta; --ids (the flight manifest's TASKS) must name at least one id, each once.
+`pair` checks one escalation attempt: with `no` the pair must be rung N of
 ladder(ROLE_CREW, CREW_TOP, ROLE_DIRECTOR, <CREW from F>); with `yes` any pair in the catalog passes.
 `harness-pair` checks a pair is in the flight director's harness with a detected model and effort (preflight check,
 GROUND_CREW_PAIR, reviewers).
@@ -159,7 +160,13 @@ def main():
     problems = []
     if a.mode == "tasks":
         covered = set()
-        for tid in a.ids.split():
+        ids = a.ids.split()
+        if not ids:
+            problems.append("ids: no task ids given")
+        for tid in dict.fromkeys(ids):
+            if ids.count(tid) > 1:
+                problems.append(f"ids: {tid} is listed more than once")
+        for tid in dict.fromkeys(ids):
             path = Path(a.tasks_dir) / f"{tid}.meta"
             if not path.is_file():
                 problems.append(f"{tid}: {path} not found")
@@ -175,24 +182,32 @@ def main():
                     problems.append(f"{tid}: a replacement task needs a new id, not the id of the task it replaces")
                 if a.replanned_from and meta.get("REPLANNED_FROM") != a.replanned_from:
                     problems.append(f"{tid}: needs REPLANNED_FROM={a.replanned_from}")
-            except ValueError as e:
+            except (OSError, ValueError) as e:
                 problems.append(f"{tid}: {e}")
             if not any(x.startswith(f"{tid}:") for x in problems):
                 print(f"OK {tid}")
         if a.design:
-            design = set(AC.findall(Path(a.design).read_text(encoding="utf-8")))
-            if not design:
-                problems.append(f"design: no AC-<n> ids found in {a.design}")
-            for ac in sorted(design - covered, key=lambda x: int(x[3:])):
-                problems.append(f"coverage: {ac} is in the design but in no task's ACS")
-            for ac in sorted(covered - design, key=lambda x: int(x[3:])):
-                problems.append(f"coverage: {ac} is in a task's ACS but not in the design")
+            try:
+                design = set(AC.findall(Path(a.design).read_text(encoding="utf-8")))
+            except (OSError, ValueError) as e:
+                problems.append(f"design: {e}")
+            else:
+                if not design:
+                    problems.append(f"design: no AC-<n> ids found in {a.design}")
+                for ac in sorted(design - covered, key=lambda x: int(x[3:])):
+                    problems.append(f"coverage: {ac} is in the design but in no task's ACS")
+                for ac in sorted(covered - design, key=lambda x: int(x[3:])):
+                    problems.append(f"coverage: {ac} is in a task's ACS but not in the design")
         if a.replanned_from:
             orig = Path(a.tasks_dir) / f"{a.replanned_from}.meta"
             if orig.is_file():
-                before = {x for x in read_meta(orig).get("ACS", "").split() if AC.fullmatch(x)}
-                for ac in sorted(before - covered, key=lambda x: int(x[3:])):
-                    problems.append(f"coverage: {ac} was in {a.replanned_from}'s ACS but in none of the new tasks")
+                try:
+                    before = {x for x in read_meta(orig).get("ACS", "").split() if AC.fullmatch(x)}
+                except (OSError, ValueError) as e:
+                    problems.append(f"{a.replanned_from}: {e}")
+                else:
+                    for ac in sorted(before - covered, key=lambda x: int(x[3:])):
+                        problems.append(f"coverage: {ac} was in {a.replanned_from}'s ACS but in none of the new tasks")
     elif a.mode == "harness-pair":
         msg = own_harness_problem(picks, "pair", a.pair)
         if msg:

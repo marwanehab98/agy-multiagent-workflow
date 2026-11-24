@@ -139,7 +139,7 @@ find "$release" -name __pycache__ -prune -exec rm -rf {} +
 {
   echo "commit $sha"
   echo "subject $(git -C "$repo" log -1 --format=%s "$sha")"
-  echo "installed $(date -Iseconds) from $repo"
+  echo "installed $(date -u +%Y-%m-%dT%H:%M:%SZ) from $repo"
 } > "$release/VERSION"
 
 prune_backups() {

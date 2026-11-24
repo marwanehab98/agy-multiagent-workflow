@@ -1,6 +1,7 @@
 """Tests for Claude Code (`claude` CLI) runner dispatch and mixed cross-harness runs."""
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -275,7 +276,7 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         s["WORKER_TIMEOUT"] = "60"
         self.state.write_text(json.dumps(s))
         self.claude_behave({"do": "response", "text": "finished\n", "session_id": "s_hang", "sleep_after": 60})
-        with unittest.mock.patch("common.ENVELOPE_GRACE", 1):
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
             start = time.monotonic()
             res = self._runner().run("p", pair="claude:opus@high", worktree=self.impl)
         self.assertEqual(res, ("done", "succeeded", "finished\n", "s_hang"))
@@ -291,7 +292,7 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
                             "no_final_newline": True})
         self.behave({"do": "response", "text": "a1\n", "conv_id": "conv_a", "sleep_after": 60,
                      "no_final_newline": True})
-        with unittest.mock.patch("common.ENVELOPE_GRACE", 1):
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
             for pair, want in (("claude:opus@high", ("done", "succeeded", "c1\n", "s1")),
                                ("claude:opus@high", ("done", "succeeded", "c2\n", "s2")),
                                ("antigravity:gemini-4-hydrogen@high", ("done", "succeeded", "a1\n", "conv_a"))):
@@ -308,6 +309,293 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         with unittest.mock.patch("common.ENVELOPE_GRACE", 100):
             res = self._runner().run("p", pair="claude:opus@high", worktree=self.impl)
         self.assertEqual(res, ("done", "succeeded", "finished\n", "s_late"))
+
+
+    # A Claude worker that ends its turn while a run_in_background Bash command runs (stream shape seen live).
+    BG_ON = {"event": {"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "b1"}]}}
+    BG_OFF = [{"event": {"type": "system", "subtype": "task_notification", "task_id": "b1"}},
+              {"event": {"type": "system", "subtype": "background_tasks_changed", "tasks": []}},
+              {"event": {"type": "system", "subtype": "init", "session_id": "s_bg"}},
+              {"event": {"type": "assistant", "message": {"content": [{"type": "text", "text": "FINAL"}]}}}]
+
+    def _timed_run(self, **patches):
+        with unittest.mock.patch.multiple("common", **patches):
+            start = time.monotonic()
+            res = self._runner().run("p", pair="claude:opus@high", worktree=self.impl, label="bg")
+        return res, time.monotonic() - start
+
+    def test_a_worker_waiting_on_a_background_command_is_not_cut_off(self):
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            self.BG_ON, {"result": "WAITING\n", "extra": {"num_turns": 2, "duration_ms": 6000, "total_cost_usd": 0.10,
+                                                         "usage": {"input_tokens": 10, "output_tokens": 5}}},
+            {"sleep": 1.5}, *self.BG_OFF,
+            {"result": "FINAL\n", "extra": {"num_turns": 1, "duration_ms": 4000, "total_cost_usd": 0.25,
+                                            "usage": {"input_tokens": 20, "output_tokens": 1}}}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=1)
+        self.assertEqual(res, ("done", "succeeded", "FINAL\n", "s_bg"))
+        self.assertGreater(took, 1.5)
+        # Stats cover both turn segments; total_cost_usd is already the process's running total.
+        log = (self.run_dir / "logs" / "bg-1.log").read_text(encoding="utf-8")
+        self.assertIn("done (succeeded) pair=claude:opus@high cost=$0.25 turns=3 model_time=10s tokens=36", log)
+
+    def test_a_background_command_that_never_ends_is_waited_on_for_a_bounded_time(self):
+        s = self.st()
+        s["WORKER_BACKGROUND_WAIT"] = "1"
+        self.state.write_text(json.dumps(s))
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            self.BG_ON, {"result": "WAITING\n"}, {"sleep": 60}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=0.5)
+        self.assertEqual(res, ("done", "succeeded", "WAITING\n", "s_bg"))
+        self.assertGreater(took, 1)
+        self.assertLess(took, 15)
+
+    def test_activity_after_a_result_holds_the_grace_until_the_next_result(self):
+        # No background commands: the grace runs from the latest result, and a new turn in between stops it.
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            {"result": "FIRST\n"}, {"sleep": 0.2}, *self.BG_OFF[2:], {"sleep": 1.5}, {"result": "SECOND\n"},
+            {"sleep": 60}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=1)
+        self.assertEqual(res, ("done", "succeeded", "SECOND\n", "s_bg"))
+        self.assertGreater(took, 2.5)
+        self.assertLess(took, 15)
+
+    def test_a_result_with_no_background_commands_is_used_after_the_grace(self):
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            self.BG_ON, *self.BG_OFF[:2], {"result": "DONE\n"}, {"sleep": 60}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=0.3, BACKGROUND_WAIT=100)
+        self.assertEqual(res, ("done", "succeeded", "DONE\n", "s_bg"))
+        self.assertLess(took, 15)
+
+    def _set_state(self, **kv):
+        s = self.st()
+        s.update({k: str(v) for k, v in kv.items()})
+        self.state.write_text(json.dumps(s))
+
+    def test_a_new_turn_after_a_result_that_runs_into_the_timeout_is_a_timeout(self):
+        # The interim result is stale once a new turn starts: that turn timing out is not a success.
+        self._set_state(WORKER_TIMEOUT=3)
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            self.BG_ON, {"result": "WAITING\n"}, {"sleep": 0.3}, *self.BG_OFF, {"sleep": 60}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=100)
+        self.assertEqual(res[0], "stopped")
+        self.assertIn("timed out after 3s", res[1])
+        self.assertLess(took, 15)
+
+    def test_task_events_do_not_hold_a_worker_past_the_background_wait(self):
+        # A background command that keeps reporting progress is still bounded by WORKER_BACKGROUND_WAIT.
+        self._set_state(WORKER_BACKGROUND_WAIT=1.2, WORKER_TIMEOUT=30)
+        tick = {"type": "system", "subtype": "task_updated", "task_id": "b1"}
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            self.BG_ON, {"result": "WAITING\n"}, {"every": 0.3, "times": 60, "event": tick}, {"sleep": 60}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=0.5)
+        self.assertEqual(res, ("done", "succeeded", "WAITING\n", "s_bg"))
+        self.assertGreater(took, 1.2)
+        self.assertLess(took, 10)
+        log = (self.run_dir / "logs" / "bg-1.log").read_text(encoding="utf-8")
+        self.assertIn("background commands still running 1s after its result; stopping it", log)
+
+    def test_the_grace_restarts_when_the_last_background_command_ends(self):
+        # The list empties but no new turn comes and the CLI does not exit: stopped one grace after the list emptied.
+        self._set_state(WORKER_TIMEOUT=30)
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            self.BG_ON, {"result": "WAITING\n"}, {"sleep": 1}, self.BG_OFF[1], {"sleep": 60}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=0.8, BACKGROUND_WAIT=100)
+        self.assertEqual(res, ("done", "succeeded", "WAITING\n", "s_bg"))
+        self.assertGreater(took, 1.75)  # 1 s to the empty list, then the full grace (not the grace from the result)
+        self.assertLess(took, 10)
+
+    def test_an_empty_task_list_during_a_turn_starts_no_clock(self):
+        self._set_state(WORKER_TIMEOUT=30)
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            self.BG_ON, {"result": "FIRST\n"}, {"sleep": 0.2}, self.BG_OFF[2], self.BG_OFF[3], self.BG_OFF[1],
+            {"sleep": 1.5}, {"result": "SECOND\n"}, {"sleep": 60}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=1, BACKGROUND_WAIT=100)
+        self.assertEqual(res, ("done", "succeeded", "SECOND\n", "s_bg"))
+        self.assertLess(took, 10)
+
+    @staticmethod
+    def _wait_gone(pid, limit=10):
+        """Whether pid is gone (or a zombie) within limit seconds."""
+        deadline = time.monotonic() + limit
+        while time.monotonic() < deadline:
+            state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+            if state[:1] in ("", "Z"):
+                return True
+            time.sleep(0.1)
+        return False
+
+    def _assert_child_stopped(self):
+        pid, done = json.loads(self.claude_world.read_text())["child_pids"][0]
+        self.assertTrue(self._wait_gone(pid))
+        self.assertFalse(Path(done).exists())  # gone without finishing its work: stopped, not ended
+
+    def test_a_stopped_worker_takes_its_detached_commands_with_it(self):
+        # Claude Code runs a background command in a session of its own; stopping the worker must stop it too.
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            {"detached_child": 4}, {"result": "DONE\n"}, {"sleep": 60}]})
+        res, _ = self._timed_run(ENVELOPE_GRACE=0.5)
+        self.assertEqual(res[2], "DONE\n")
+        self._assert_child_stopped()
+
+    def test_a_worker_that_exits_by_itself_takes_its_detached_commands_with_it(self):
+        # Once the worker has exited, its detached child belongs to init: it is found from the listing taken at
+        # the result, while the worker still ran.
+        self.claude_behave({"do": "script", "session_id": "s_bg", "steps": [
+            {"detached_child": 4}, {"result": "DONE\n"}, {"sleep": 1}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=100)
+        self.assertEqual(res, ("done", "succeeded", "DONE\n", "s_bg"))
+        self.assertLess(took, 4)
+        self._assert_child_stopped()
+
+    def test_a_run_unwound_by_an_exception_stops_the_worker_and_lets_go_of_it(self):
+        # Interrupted (the driver's signal handler, which stops the workers itself) or any other exception.
+        import common
+        import harnesses
+        old = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+        self.addCleanup(lambda: [signal.signal(s, h) for s, h in old.items()])
+
+        def other(obj, acc=None):
+            raise RuntimeError("boom")
+
+        def interrupt(obj, acc=None):
+            common._on_signal(signal.SIGTERM, None)
+
+        for seq, (label, effect, exc) in enumerate((("other", other, RuntimeError),
+                                                    ("signal", interrupt, common.Interrupted))):
+            with self.subTest(label):
+                self.claude_world.write_text(json.dumps({"seq": seq * 10, "calls": [], "behaviors": [
+                    {"do": "script", "session_id": "s_x", "steps": [
+                        {"detached_child": 4}, {"event": {"type": "system", "subtype": "init"}}, {"sleep": 60}]}]}))
+                with unittest.mock.patch.object(harnesses.ClaudeAdapter, "parse_stream_event", side_effect=effect):
+                    with self.assertRaises(exc):
+                        self._runner().run("p", pair="claude:opus@high", worktree=self.impl, label=label)
+                self._assert_child_stopped()
+                self.assertEqual(common._CHILDREN, [])
+                self.assertIsNone(self.st("WORKER_PID"))
+                log = self.run_dir / "logs" / f"{label}-1.log"
+                self.assertIn(f"{label}: interrupted", log.read_text(encoding="utf-8"))
+
+    # agy's result response joins every non-empty agent message of the turn (stream shapes seen live 2026-11-24, agy
+    # 1.5.15): a message written before a background command ended, or narration before a tool call.
+    @staticmethod
+    def _agy_step(i, step_type, state="DONE", **kw):
+        return {"event": "step_update", "step_update": {"step_index": i, "step_type": step_type, "state": state, **kw}}
+
+    def _agy_bg_events(self, interim, final):
+        """A worker that ends its turn while a background command runs; the command's end wakes it."""
+        s = self._agy_step
+        return [
+            {"event": "init", "init": {"conversation_id": "conv_bg"}},
+            s(0, "user_input"),
+            s(1, "agent_response", text_delta=""),
+            s(2, "tool", "ACTIVE", tool_name="run_command", tool_info={"parameters": {"CommandLine": "sleep 25"}}),
+            s(2, "tool", tool_name="run_command"),
+            s(3, "agent_response", "ACTIVE", text_delta=interim[:3]),
+            s(3, "agent_response", text_delta=interim[3:]),
+            s(4, "system_message"),
+            s(5, "agent_response", "ACTIVE", text_delta=final[:4]),
+            s(5, "agent_response", text_delta=final[4:] + "\n"),
+        ]
+
+    def _agy_bg_run(self, events, text):
+        self.behave({"do": "response", "text": text, "conv_id": "conv_bg", "wrap_event": "result",
+                     "stream_events": events})
+        res = self._runner().run("p", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, label="agybg")
+        log = (self.run_dir / "logs" / "agybg-1.log").read_text(encoding="utf-8")
+        return res, log
+
+    def test_agy_final_message_after_a_background_wait_decides_failed(self):
+        res, log = self._agy_bg_run(self._agy_bg_events("WAITING", "FAILED: could not finish"),
+                                    "WAITING\nFAILED: could not finish\n")
+        self.assertEqual(res[:2], ("done", "failed"))
+        self.assertTrue(res[2].startswith("FAILED:"), res[2])
+        self.assertEqual(res[2].strip(), "FAILED: could not finish")
+        self.assertIn("dropped earlier messages before the final one: WAITING", log)
+        self.assertIn("done (failed)", log)
+
+    def test_agy_final_message_after_a_background_wait_decides_ask(self):
+        res, _ = self._agy_bg_run(self._agy_bg_events("Started the build; waiting.", "ASK: which branch?"),
+                                  "Started the build; waiting.\nASK: which branch?\n")
+        self.assertEqual(res[0], "ask")
+        self.assertEqual(res[2].strip(), "ASK: which branch?")
+
+    def test_agy_tool_call_after_the_wake_up_still_decides_failed(self):
+        # Probe 1, live 2026-11-24: after the system_message the worker reads its output, then answers.
+        s = self._agy_step
+        events = [
+            s(0, "user_input"), s(1, "agent_response", text_delta=""),
+            s(2, "tool", "ACTIVE", tool_name="run_command"), s(2, "tool", tool_name="run_command"),
+            s(3, "agent_response", text_delta="WAITING\n"), s(4, "system_message"),
+            s(5, "agent_response", text_delta=""),
+            s(6, "tool", "ACTIVE", tool_name="run_command", tool_info={"parameters": {"CommandLine": "cat out"}}),
+            s(6, "tool", tool_name="run_command"),
+            s(7, "agent_response", text_delta="FAILED: test marker\n"),
+        ]
+        res, log = self._agy_bg_run(events, "WAITING\nFAILED: test marker\n")
+        self.assertEqual(res, ("done", "failed", "FAILED: test marker\n", "conv_bg"))
+        self.assertIn("dropped earlier messages before the final one: WAITING", log)
+
+    def test_agy_narration_before_a_tool_call_does_not_hide_the_final_message(self):
+        # Two agent messages with a tool call between them and no system_message: the last one is the response.
+        s = self._agy_step
+        events = [s(0, "user_input"), s(1, "agent_response", text_delta="Working on it.\n"),
+                  s(2, "tool", tool_name="run_command"),
+                  s(3, "agent_response", text_delta="FAILED: could not finish\n")]
+        res, log = self._agy_bg_run(events, "Working on it.\nFAILED: could not finish\n")
+        self.assertEqual(res, ("done", "failed", "FAILED: could not finish\n", "conv_bg"))
+        self.assertIn("dropped earlier messages before the final one: Working on it.", log)
+
+    def test_agy_the_last_non_empty_message_wins(self):
+        s = self._agy_step
+        events = [s(0, "user_input"), s(1, "agent_response", text_delta="Checked the tests.\n"),
+                  s(2, "tool", tool_name="run_command"),
+                  s(3, "agent_response", text_delta="FAILED: two tests fail\n"),
+                  s(4, "agent_response", text_delta="")]
+        res, _ = self._agy_bg_run(events, "Checked the tests.\nFAILED: two tests fail\n")
+        self.assertEqual(res, ("done", "failed", "FAILED: two tests fail\n", "conv_bg"))
+
+    def test_agy_single_message_result_is_unchanged(self):
+        s = self._agy_step
+        events = [s(0, "user_input"), s(1, "tool", tool_name="run_command"),
+                  s(2, "agent_response", text_delta="All done.\n")]
+        res, log = self._agy_bg_run(events, "All done.\n")
+        self.assertEqual(res, ("done", "succeeded", "All done.\n", "conv_bg"))
+        self.assertNotIn("dropped earlier messages", log)
+
+    def test_agy_response_that_does_not_end_with_the_last_message_is_unchanged(self):
+        text = "WAITING\nFAILED: could not finish\nSomething else.\n"
+        res, log = self._agy_bg_run(self._agy_bg_events("WAITING", "FAILED: could not finish"), text)
+        self.assertEqual(res, ("done", "succeeded", text, "conv_bg"))
+        self.assertNotIn("dropped earlier messages", log)
+
+    def test_agy_last_message_matching_mid_line_leaves_the_response_unchanged(self):
+        # The stream missed the start of the last message: its text ends the response but starts mid-line.
+        s = self._agy_step
+        events = [s(0, "user_input"), s(1, "agent_response", text_delta="WAITING\n"),
+                  s(2, "tool", tool_name="run_command"), s(3, "agent_response", text_delta="could not finish\n")]
+        text = "WAITING\nFAILED: could not finish\n"
+        res, log = self._agy_bg_run(events, text)
+        self.assertEqual(res, ("done", "succeeded", text, "conv_bg"))
+        self.assertNotIn("dropped earlier messages", log)
+
+    def test_agy_without_stream_events_the_response_is_unchanged(self):
+        s = self.st()
+        s["WORKER_STREAM"] = "0"
+        self.state.write_text(json.dumps(s))
+        text = "Working on it.\nFAILED: could not finish\n"
+        self.behave({"do": "response", "text": text, "conv_id": "conv_bg"})
+        res = self._runner().run("p", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, label="agybg")
+        self.assertEqual(res, ("done", "succeeded", text, "conv_bg"))
+
+    def test_timeout_defaults_by_access(self):
+        runner = self._runner()
+        with unittest.mock.patch.dict(os.environ, {"WORKER_TIMEOUT": "", "AGY_TIMEOUT": ""}):
+            self.assertEqual((runner._timeout("full"), runner._timeout("read")), (3600, 1800))
+            s = self.st()
+            s["WORKER_TIMEOUT"] = "900"
+            self.state.write_text(json.dumps(s))
+            runner = self._runner()
+            self.assertEqual((runner._timeout("full"), runner._timeout("read")), (900, 900))
 
 
 class ClaudeDirectorAndTaskFallbackTests(MultiHarnessBase):

@@ -20,6 +20,10 @@ if [ -n "$holder" ]; then
   echo "  Switch that checkout to another branch (git -C $holder switch <other>); the run moves $branch itself."
   exit 2
 fi
+if ! git -C "$repo" merge-base --is-ancestor "$old" "$new"; then
+  echo "NOT_FAST_FORWARD branch=$branch target=$new does not contain $old"
+  exit 3
+fi
 if [ "$actual" = "$new" ] && [ "$new" != "$old" ]; then
   # Already moved by an earlier call that died before the run recorded it (resume after a crash).
   echo "MERGED head=$new"
@@ -28,10 +32,6 @@ fi
 if [ "$actual" != "$old" ]; then
   echo "NOT_FAST_FORWARD branch=$branch expected=$old actual=$actual"
   git -C "$repo" log --oneline "$old..$actual" | sed 's/^/  moved by: /'
-  exit 3
-fi
-if ! git -C "$repo" merge-base --is-ancestor "$old" "$new"; then
-  echo "NOT_FAST_FORWARD branch=$branch target=$new does not contain $old"
   exit 3
 fi
 git -C "$repo" update-ref -m "mission-control: fast-forward to reviewed $new" "$ref" "$new" "$old" \

@@ -77,6 +77,23 @@ class GateTests(unittest.TestCase):
         self.assertIn("TREE_DIRTY", out)
         self.assertEqual((self.wt / "uncommitted.txt").read_text(), "keep me\n")
 
+    def test_a_failing_git_status_before_the_checks_is_an_error(self):
+        index = self.wt / ".git" / "index"
+        index.write_bytes(b"not an index")
+        self.rv.write_text(f"VERIFY_1=touch {self.d / 'ran'}\n")
+        rc, out = self.gate()
+        self.assertEqual(rc, 2, out)
+        self.assertTrue(out.startswith("STATUS_FAILED "), out)
+        self.assertIn("index", out)
+        self.assertFalse((self.d / "ran").exists())  # no check ran on a tree of unknown state
+
+    def test_a_failing_git_after_the_checks_is_an_error(self):
+        self.rv.write_text("VERIFY_1=printf 'not an index' > .git/index\n")
+        rc, out = self.gate()
+        self.assertEqual(rc, 2, out)
+        self.assertIn("RESTORE_FAILED git reset --hard", out)
+        self.assertNotIn("PASSED", out)
+
     def test_non_utf8_command_output_is_replaced(self):
         self.rv.write_text(f"VERIFY_1={sys.executable} -c \"import sys; sys.stdout.buffer.write(b'hi \\\\xff\\\\xfe ok')\"\n")
         rc, out = self.gate()
@@ -171,6 +188,14 @@ class MergeLocalTests(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.g("rev-parse", "main"), self.tip)
         self.assertEqual(self.g("rev-parse", "--abbrev-ref", "HEAD"), "other")
+
+    def test_a_failing_git_status_in_the_checkout_refuses(self):
+        (self.main / ".git" / "index").write_bytes(b"not an index")
+        rc, out = self.merge()
+        self.assertEqual(rc, 2, out)
+        self.assertTrue(out.startswith("MERGE_FAILED git status failed: "), out)
+        self.assertIn("index", out)
+        self.assertNotEqual(self.g("rev-parse", "main"), self.tip)
 
     def test_diverged_target_refuses(self):
         (self.main / "b.txt").write_text("b\n")

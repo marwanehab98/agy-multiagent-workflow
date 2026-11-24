@@ -17,7 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # -I drops the script dir from sys.path
-from harnesses import _as_text, get_adapter, launch_args, pick_style  # noqa: E402
+from harnesses import _as_text, _one_line, get_adapter, launch_args, pick_style  # noqa: E402
 from pairs import Pair, parse_pair  # noqa: E402
 
 QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, PAUSED, ERROR = 0, 10, 20, 21, 22, 30, 40, 41, 2
@@ -165,12 +165,22 @@ def read_meta(path, strict=False):
 
 
 def write_atomic(path, text):
-    """Write a file via temp file + rename, so a crash never leaves it half-written."""
+    """Write a file via temp file + rename, so a crash never leaves it half-written. A failed write or rename
+    removes the temp file and raises. An existing file keeps its permissions."""
     path = Path(path)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            if path.exists():
+                os.chmod(tmp, path.stat().st_mode & 0o7777)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 class _FileLock:
@@ -383,23 +393,27 @@ def run(cmd, cwd=None):
 def _stop_child(proc, own_session):
     if proc.poll() is not None and not own_session:
         return
+    # A worker (own session) gets SIGTERM first; then it and whatever it started, listed while it still ran, are killed.
+    kids = _descendants(proc.pid) if own_session and proc.poll() is None else []
     try:
         if own_session:
             os.killpg(proc.pid, signal.SIGTERM)
         else:
             proc.terminate()
     except (ProcessLookupError, PermissionError):
+        if own_session:
+            _kill_tree(proc.pid, kids)
         return
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        try:
-            if own_session:
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
+        if not own_session:
+            try:
                 proc.kill()
-        except (ProcessLookupError, PermissionError):
-            pass
+            except (ProcessLookupError, PermissionError):
+                pass
+    if own_session:
+        _kill_tree(proc.pid, kids)
 
 
 class Interrupted(Exception):
@@ -420,6 +434,75 @@ def _group_alive(pgid):
         return True
     except (ProcessLookupError, PermissionError):
         return False
+
+
+def _ps_table():
+    """(pid, ppid, pgid) of every process, from one `ps` listing (Linux and macOS). Empty when ps fails."""
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid="], capture_output=True, text=True,
+                             errors="replace", timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    rows = []
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) == 3 and all(x.isdigit() for x in f):
+            rows.append((int(f[0]), int(f[1]), int(f[2])))
+    return rows
+
+
+def _descendants(pid, table=None):
+    """(pid, pgid) of every process below pid, from one `ps` listing (table: a _ps_table() already taken)."""
+    children = collections.defaultdict(list)
+    for p, ppid, g in (_ps_table() if table is None else table):
+        children[ppid].append((p, g))
+    found, todo = [], [int(pid)]
+    while todo:
+        for kid in children.get(todo.pop(), []):
+            if kid not in found:
+                found.append(kid)
+                todo.append(kid[0])
+    return found
+
+
+def _kill_tree(pid, kids=None, earlier=(), alive=True):
+    """SIGKILL a worker's process group and everything below it (kids: a _descendants listing taken earlier).
+    A worker's tools may start commands in a session and process group of their own (a background shell
+    command of one harness does: live 2026-11-24), which a signal to the worker's group misses; while the worker
+    runs they are still its descendants, so list those first. Once the worker has exited they belong to init and
+    cannot be told apart, so stop the worker this way, not after it, or pass what was listed while it ran.
+
+    earlier: (pid, pgid) pairs listed while the worker still ran, which may be stale by now. Each is killed (with
+    whatever runs below it now) only when a fresh listing still shows that pid in the same process group, so a
+    pid reused since is never hit. alive=False: the worker is known to have exited, so a fresh listing could find
+    nothing below it; ps then runs only when there is an earlier listing to check."""
+    earlier = list(dict.fromkeys(earlier))
+    table = _ps_table() if (kids is None and alive) or earlier else []
+    kids = list(_descendants(pid, table) if kids is None else kids)
+    if earlier:
+        now = {(p, g) for p, _, g in table}
+        for k in earlier:
+            if k in now:
+                kids += [k] + _descendants(k[0], table)
+        kids = list(dict.fromkeys(kids))
+    for target, group in [(int(pid), True)] + [(g, True) for g in {g for _, g in kids} if g != int(pid)] + \
+            [(p, False) for p, _ in kids]:
+        try:
+            (os.killpg if group else os.kill)(target, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def _reap(proc):
+    """Wait for a worker that was sent SIGKILL; a slow exit gets a direct kill, and never raises."""
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+            proc.wait(timeout=1)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
 
 def _pid_command(pid):
@@ -444,11 +527,13 @@ def reap_orphan_worker(state_path):
     # must name the worker's executable (a reused pid is never killed). With the leader gone, a group with
     # that id can only hold what the worker started (a new process with that pid would lead it), so stop it.
     if (cmd and exe and Path(exe).name in cmd) or (not cmd and _group_alive(int(pid))):
+        kids = _descendants(pid) if cmd else []  # what it started in a session of its own (see _kill_tree)
         try:
             os.killpg(int(pid), signal.SIGKILL)
             note = f"stopped orphaned worker pid={pid} ({Path(exe).name}) left by an interrupted call"
         except (ProcessLookupError, PermissionError):
             pass
+        _kill_tree(pid, kids)
     r = Run(state_path)
     r.set(WORKER_PID=None, WORKER_EXE=None)
     if note and r.get("RUN_DIR"):
@@ -575,11 +660,20 @@ def worker_env(access, environ=None):
 
 
 MAX_INLINE_PROMPT_BYTES = 65536
-DEFAULT_AGY_TIMEOUT = 1800
+# Seconds before a worker is stopped (WORKER_TIMEOUT, when set, applies to every worker): workers that edit
+# (crew, flight director) get longer than read-only ones.
+DEFAULT_TIMEOUT_FULL = 3600
+DEFAULT_TIMEOUT_READ = 1800
 DEFAULT_HEARTBEAT = 30
-# Seconds a worker may run on after its result before it is stopped and the result used (a CLI that never exits
-# would otherwise hold a finished result until WORKER_TIMEOUT and lose it).
+# Seconds a worker may run on after its latest result, with nothing showing it is still busy, before it is stopped
+# and the result used (a CLI that never exits would otherwise hold a finished result until WORKER_TIMEOUT and lose
+# it). Turn activity after a result (a new turn, a message, a tool result) stops this clock until the next result;
+# background task events do not. When the last background command ends, the grace starts again from then.
 ENVELOPE_GRACE = 10
+# The same, counted from the result, while the worker reports background commands still running (it may start a
+# new turn when they end): a dev server left in the background must not hold a finished worker until WORKER_TIMEOUT.
+# WORKER_BACKGROUND_WAIT (state key or environment) overrides it; 0 waits until WORKER_TIMEOUT.
+BACKGROUND_WAIT = 900
 STREAM_UNSUPPORTED_RE = re.compile(
     r"(?i)(unknown|invalid|unrecognized|unsupported|unexpected).*(stream-json|--verbose|output-format)"
 )
@@ -600,25 +694,35 @@ def _read_spec_or_text(spec_or_text):
 
 
 def envelope_stats(data):
-    """Cost, turns and duration from a result envelope, when the harness reports them."""
-    out = {}
-    if not isinstance(data, dict):
-        return out
-    cost = data.get("total_cost_usd", data.get("cost_usd"))
-    if isinstance(cost, (int, float)):
-        out["cost"] = f"${cost:.2f}"
-    if isinstance(data.get("num_turns"), int):
-        out["turns"] = data["num_turns"]
-    if isinstance(data.get("duration_ms"), (int, float)):
-        out["model_time"] = f"{data['duration_ms'] / 1000:.0f}s"
-    elif isinstance(data.get("duration_seconds"), (int, float)):
-        out["model_time"] = f"{data['duration_seconds']:.0f}s"
-    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-    tokens = usage.get("total_tokens")
-    if not isinstance(tokens, int) and any(isinstance(usage.get(k), int) for k in ("input_tokens", "output_tokens")):
-        tokens = sum(usage.get(k, 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
-                                               "cache_creation_input_tokens") if isinstance(usage.get(k), int))
-    if isinstance(tokens, int):
+    """Cost, turns, duration and tokens from a result envelope, or from every result event of one process (a list).
+
+    A worker that waits on a background command may print a result per turn segment (live 2026-11-24):
+    num_turns, duration_ms and usage are then that segment's own, so they are summed; total_cost_usd is the
+    process's running total, so the latest one counts. Values a harness does not report are left out."""
+    envs = [d for d in (data if isinstance(data, list) else [data]) if isinstance(d, dict)]
+    out, turns, secs, tokens = {}, None, None, None
+    for d in envs:
+        cost = d.get("total_cost_usd", d.get("cost_usd"))
+        if isinstance(cost, (int, float)):
+            out["cost"] = f"${cost:.2f}"
+        if isinstance(d.get("num_turns"), int):
+            turns = (turns or 0) + d["num_turns"]
+        if isinstance(d.get("duration_ms"), (int, float)):
+            secs = (secs or 0) + d["duration_ms"] / 1000
+        elif isinstance(d.get("duration_seconds"), (int, float)):
+            secs = (secs or 0) + d["duration_seconds"]
+        usage = d.get("usage") if isinstance(d.get("usage"), dict) else {}
+        n = usage.get("total_tokens")
+        if not isinstance(n, int) and any(isinstance(usage.get(k), int) for k in ("input_tokens", "output_tokens")):
+            n = sum(usage.get(k, 0) for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                                              "cache_creation_input_tokens") if isinstance(usage.get(k), int))
+        if isinstance(n, int):
+            tokens = (tokens or 0) + n
+    if turns is not None:
+        out["turns"] = turns
+    if secs is not None:
+        out["model_time"] = f"{secs:.0f}s"
+    if tokens is not None:
         out["tokens"] = tokens
     return out
 
@@ -706,7 +810,10 @@ class AgyRunner:
         adapter = get_adapter(harness)
         return self.r.get(adapter.exe_state_key) or adapter.binary
 
-    def _timeout(self):
+    def _timeout(self, access="full"):
+        """WORKER_TIMEOUT (state, then environment) for every worker; otherwise DEFAULT_TIMEOUT_FULL for workers
+        that edit, DEFAULT_TIMEOUT_READ for read-only ones. 0 or less: no limit (None)."""
+        default = DEFAULT_TIMEOUT_READ if access == "read" else DEFAULT_TIMEOUT_FULL
         raw = (
             self.r.get("WORKER_TIMEOUT")
             or self.r.get("AGY_TIMEOUT")
@@ -714,11 +821,20 @@ class AgyRunner:
             or os.environ.get("AGY_TIMEOUT")
         )
         if raw is None or str(raw).strip() == "":
-            return DEFAULT_AGY_TIMEOUT
+            return default
         try:
             val = int(raw)
         except ValueError:
-            return DEFAULT_AGY_TIMEOUT
+            return default
+        return None if val <= 0 else val
+
+    def _background_wait(self):
+        """WORKER_BACKGROUND_WAIT (state, then environment), else BACKGROUND_WAIT. 0 or less: no bound (None)."""
+        raw = self.r.get("WORKER_BACKGROUND_WAIT") or os.environ.get("WORKER_BACKGROUND_WAIT")
+        try:
+            val = BACKGROUND_WAIT if raw is None or str(raw).strip() == "" else float(raw)
+        except ValueError:
+            val = BACKGROUND_WAIT
         return None if val <= 0 else val
 
     def _heartbeat_interval(self):
@@ -792,6 +908,31 @@ class AgyRunner:
         if self.r.get("WORKER_PID") == str(entry[0].pid):
             self.r.set(WORKER_PID=None, WORKER_EXE=None)
 
+    def _abandon_worker(self, entry, kids, log_fh, line):
+        """Clean up after exec_prompt is unwound by an exception: stop the worker and what it started (kids: listed
+        while it ran), close its log, and drop it from _CHILDREN; WORKER_PID is cleared only once it has exited,
+        so reap_orphan_worker still finds one that could not be stopped. Never raises: the exception goes on."""
+        proc = entry[0]
+        try:
+            if proc.poll() is None or kids:
+                _kill_tree(proc.pid, earlier=kids, alive=proc.poll() is None)
+                _reap(proc)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if entry in _CHILDREN:
+                _CHILDREN.remove(entry)
+            if proc.poll() is not None:
+                self._forget_worker(entry)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._emit_progress(log_fh, line, to_stderr=False)
+        except Exception:  # noqa: BLE001
+            pass
+        if log_fh is not None and not log_fh.closed:
+            log_fh.close()
+
     def _prepare_prompt(self, prompt_text, spec_path=None):
         if len(prompt_text.encode("utf-8")) <= MAX_INLINE_PROMPT_BYTES:
             return prompt_text
@@ -843,15 +984,18 @@ class AgyRunner:
         cmd = adapter.build_exec_cmd(exe, cli_prompt, args, conversation_id=conversation_id, stream=stream,
                                      access=access, write_dirs=write_dirs, git_dirs=git_dirs,
                                      workdir=worktree, mcp=mcp)
-        timeout = self._timeout()
+        timeout = self._timeout(access)
+        background_wait = self._background_wait()
         heartbeat = self._heartbeat_interval()
         tag = label or (spec_path.stem if spec_path else harness)
         log_path, log_fh = self._open_worker_log(tag)
         start = time.monotonic()
 
         stats = {"pair": pair_text} if pair_text else {}
+        finished = []  # set by finish_log: every way out of a call that does not raise goes through it
 
         def finish_log(summary):
+            finished.append(summary)
             self._forget_worker(entry)
             elapsed = time.monotonic() - start
             extra = "".join(f" {k}={v}" for k, v in stats.items())
@@ -880,214 +1024,261 @@ class AgyRunner:
             return ("stopped", f"failed to launch {exe}: {e}", "", "")
         entry = (proc, True)
         _CHILDREN.append(entry)
-        if self.r.get("RUN_DIR"):
-            self.r.set(WORKER_PID=proc.pid, WORKER_EXE=exe)
+        # (pid, pgid) of what the worker ran below it, listed while it still ran (see _kill_tree).
+        seen_kids = []
+        try:
+            if self.r.get("RUN_DIR"):
+                self.r.set(WORKER_PID=proc.pid, WORKER_EXE=exe)
 
-        log_hint = f" log={log_path}" if log_path else ""
-        self._emit_progress(log_fh, f"[worker] start {tag} ({harness} pid={proc.pid}){log_hint}",
-                            to_stderr=True, milestone=True)
+            log_hint = f" log={log_path}" if log_path else ""
+            self._emit_progress(log_fh, f"[worker] start {tag} ({harness} pid={proc.pid}){log_hint}",
+                                to_stderr=True, milestone=True)
 
-        q = queue.Queue()
-        t_out = threading.Thread(target=_drain_stream if stream else _drain_chunks, args=(proc.stdout, "out", q),
-                                 daemon=True)
-        t_err = threading.Thread(target=_drain_stream, args=(proc.stderr, "err", q), daemon=True)
-        t_out.start()
-        t_err.start()
+            q = queue.Queue()
+            t_out = threading.Thread(target=_drain_stream if stream else _drain_chunks, args=(proc.stdout, "out", q),
+                                     daemon=True)
+            t_err = threading.Thread(target=_drain_stream, args=(proc.stderr, "err", q), daemon=True)
+            t_out.start()
+            t_err.start()
 
-        stream_acc = {}  # per-run parser state (agy streams a message in pieces)
-        stdout_lines = collections.deque(maxlen=2000)  # bounded: a long stream's events are not all needed
-        # (without stream-json, pieces as they arrived)
-        stderr_lines = []
-        stream_envelope = None
-        open_streams = {"out", "err"}
-        last_activity = start
-        last_heartbeat = start
-        timed_out = False
-        exited_at = None
-        envelope_at = None
-        stopped_after_result = False  # we stop a worker that holds its result open; its exit code is ours
+            # Per-run parser state: agy streams a message in pieces; the adapter also records there whether the latest
+            # event belongs to a turn ("turn": the worker is at work) and how many background commands it reports
+            # ("background").
+            stream_acc = {}
+            stdout_lines = collections.deque(maxlen=2000)  # bounded: a long stream's events are not all needed
+            # (without stream-json, pieces as they arrived)
+            stderr_lines = collections.deque(maxlen=2000)  # bounded the same way; error checks read its tail
+            stream_envelope = None
+            results = []  # every result event of this process, for its stats
+            open_streams = {"out", "err"}
+            last_activity = start
+            last_heartbeat = start
+            timed_out = False
+            exited_at = None
+            # The clocks after a result; both None while a turn runs. result_at: when the latest result came, with no
+            # turn activity since (only then is the worker idle on that result). grace_at: where ENVELOPE_GRACE runs
+            # from while no background command is reported: the result, or the moment the last one ended (a new turn
+            # usually follows at once, and must not be cut).
+            result_at = grace_at = None
+            stopped_after_result = False  # we stop a worker that holds its result open; its exit code is ours
 
-        while open_streams:
-            now = time.monotonic()
-            if exited_at is None and proc.poll() is not None:
-                exited_at = now
-            if exited_at is not None and now - exited_at > 3:
-                # The worker exited but something it started still holds its output open; stop waiting.
-                break
-            if envelope_at is not None and exited_at is None and now - envelope_at >= ENVELOPE_GRACE:
-                stopped_after_result = True
-                break
-            waits = [1.0]
-            if envelope_at is not None:
-                waits.append(max(0.05, envelope_at + ENVELOPE_GRACE - now))
-            if timeout is not None:
-                rem = (start + timeout) - now
-                if rem <= 0:
-                    timed_out = True
-                    break
-                waits.append(rem)
-            if heartbeat is not None:
-                rem_hb = (last_heartbeat + heartbeat) - now
-                waits.append(max(0.05, rem_hb))
-            wait_s = min(waits)
-            try:
-                kind_ev, payload = q.get(timeout=wait_s)
-            except queue.Empty:
+            def stop_at():
+                """When the worker is stopped and its latest result used; None: not before the timeout."""
+                if result_at is None:
+                    return None
+                if stream_acc.get("background"):
+                    return None if background_wait is None else result_at + background_wait
+                return grace_at + ENVELOPE_GRACE
+
+            def note_result(env_obj):
+                """The latest result wins (a worker may start a new turn when a background command ends)."""
+                nonlocal stream_envelope, result_at, grace_at
+                stream_envelope = env_obj
+                result_at = grace_at = time.monotonic()
+                if proc.poll() is None:
+                    seen_kids.extend(k for k in _descendants(proc.pid) if k not in seen_kids)
+
+            while open_streams:
                 now = time.monotonic()
-                if timeout is not None and (now - start) >= timeout:
-                    timed_out = True
+                if exited_at is None and proc.poll() is not None:
+                    exited_at = now
+                if exited_at is not None and now - exited_at > 3:
+                    # The worker exited but something it started still holds its output open; stop waiting.
                     break
-                if heartbeat is not None and (now - last_heartbeat) >= heartbeat:
-                    elapsed = now - start
-                    idle = now - last_activity
-                    self._emit_progress(
-                        log_fh,
-                        f"[worker +{elapsed:.0f}s] {tag}: still running (no output for {idle:.0f}s)...",
-                        to_stderr=True,
-                    )
-                    last_heartbeat = now
-                continue
+                deadline = stop_at()
+                if deadline is not None and exited_at is None and now >= deadline:
+                    stopped_after_result = True
+                    if stream_acc.get("background"):
+                        self._emit_progress(log_fh, f"[worker +{now - start:.0f}s] {tag}: background commands still "
+                                            f"running {background_wait:.0f}s after its result; stopping it",
+                                            to_stderr=True)
+                    break
+                waits = [1.0]
+                if deadline is not None:
+                    waits.append(max(0.05, deadline - now))
+                if timeout is not None:
+                    rem = (start + timeout) - now
+                    if rem <= 0:
+                        timed_out = True
+                        break
+                    waits.append(rem)
+                if heartbeat is not None:
+                    rem_hb = (last_heartbeat + heartbeat) - now
+                    waits.append(max(0.05, rem_hb))
+                wait_s = min(waits)
+                try:
+                    kind_ev, payload = q.get(timeout=wait_s)
+                except queue.Empty:
+                    now = time.monotonic()
+                    if timeout is not None and (now - start) >= timeout:
+                        timed_out = True
+                        break
+                    if heartbeat is not None and (now - last_heartbeat) >= heartbeat:
+                        elapsed = now - start
+                        idle = now - last_activity
+                        self._emit_progress(
+                            log_fh,
+                            f"[worker +{elapsed:.0f}s] {tag}: still running (no output for {idle:.0f}s)...",
+                            to_stderr=True,
+                        )
+                        last_heartbeat = now
+                    continue
 
-            if kind_ev == "eof":
-                open_streams.discard(payload)
-                continue
+                if kind_ev == "eof":
+                    open_streams.discard(payload)
+                    continue
 
-            if kind_ev == "out":
-                stripped = payload.strip()
-                obj = None
-                if stream and stripped.startswith("{"):
-                    try:
-                        obj = json.loads(stripped)
-                    except json.JSONDecodeError:
-                        obj = None
-                stdout_lines.append(payload)  # error lines may be JSON too ({"error": {"code": 429, ...}})
-                if not stream and stream_envelope is None and stripped.endswith("}"):
-                    # The one JSON result may be complete now: hold it, so a CLI that does not exit cannot lose it.
-                    env_obj = _parse_json_envelope("".join(stdout_lines), adapter)
-                    if env_obj is not None:
-                        stream_envelope, envelope_at = env_obj, time.monotonic()
-                if isinstance(obj, dict):
-                    summary, env_obj = adapter.parse_stream_event(obj, stream_acc)
-                    if env_obj is not None:
-                        stream_envelope = env_obj
-                        envelope_at = envelope_at or time.monotonic()
-                    if summary:
+                if kind_ev == "out":
+                    stripped = payload.strip()
+                    obj = None
+                    if stream and stripped.startswith("{"):
+                        try:
+                            obj = json.loads(stripped)
+                        except json.JSONDecodeError:
+                            obj = None
+                    stdout_lines.append(payload)  # error lines may be JSON too ({"error": {"code": 429, ...}})
+                    if not stream and stream_envelope is None and stripped.endswith("}"):
+                        # The one JSON result may be complete now: hold it, so a CLI that does not exit cannot lose it.
+                        env_obj = _parse_json_envelope("".join(stdout_lines), adapter)
+                        if env_obj is not None:
+                            note_result(env_obj)
+                    if isinstance(obj, dict):
+                        background_before = stream_acc.get("background")
+                        summary, env_obj = adapter.parse_stream_event(obj, stream_acc)
+                        if env_obj is not None:
+                            note_result(env_obj)
+                            results.append(env_obj)
+                        elif stream_acc.pop("turn", False):
+                            result_at = grace_at = None
+                        elif result_at is not None and background_before and not stream_acc.get("background"):
+                            grace_at = time.monotonic()
+                        if summary:
+                            now = time.monotonic()
+                            last_activity = now
+                            last_heartbeat = now
+                            self._emit_progress(log_fh, f"[worker +{now - start:.0f}s] {tag}: {summary}",
+                                                to_stderr=True)
+                elif kind_ev == "err":
+                    stderr_lines.append(payload)
+                    stripped = payload.strip()
+                    if stripped:
                         now = time.monotonic()
                         last_activity = now
-                        last_heartbeat = now
-                        self._emit_progress(log_fh, f"[worker +{now - start:.0f}s] {tag}: {summary}",
-                                            to_stderr=True)
-            elif kind_ev == "err":
-                stderr_lines.append(payload)
-                stripped = payload.strip()
-                if stripped:
-                    now = time.monotonic()
-                    last_activity = now
-                    self._emit_progress(
-                        log_fh,
-                        f"[worker +{now - start:.0f}s] {tag} stderr: {stripped}",
-                        to_stderr=False,
-                    )
+                        self._emit_progress(
+                            log_fh,
+                            f"[worker +{now - start:.0f}s] {tag} stderr: {stripped}",
+                            to_stderr=False,
+                        )
 
-        if timed_out and stream_envelope is not None:
-            # The result came in before the limit: use it rather than report a timeout.
-            timed_out, stopped_after_result = False, proc.poll() is None
-        if timed_out:
+            if timed_out and result_at is not None:
+                # A result came in before the limit and the worker has been idle on it since: use it rather than
+                # report a timeout. (A result followed by a new turn that ran into the limit is a timeout.)
+                timed_out, stopped_after_result = False, proc.poll() is None
+            if timed_out:
+                _kill_tree(proc.pid, earlier=seen_kids, alive=proc.poll() is None)
+                _reap(proc)
+                t_out.join(timeout=1)
+                t_err.join(timeout=1)
+                finish_log(f"timed out after {timeout}s")
+                return ("stopped", f"{exe} timed out after {timeout}s", "", conversation_id or "")
+
+            if not stopped_after_result and proc.poll() is None:
+                seen_kids.extend(k for k in _descendants(proc.pid) if k not in seen_kids)
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                proc.wait(timeout=5)
+                proc.wait(timeout=0 if stopped_after_result else 5)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                pass
+            # Nothing the worker started may outlive it (dev servers, watchers holding its output open, background
+            # commands): its process group, every process below it now, and what was below it while it ran (see
+            # _kill_tree).
+            _kill_tree(proc.pid, earlier=seen_kids, alive=proc.poll() is None)
+            _reap(proc)
             t_out.join(timeout=1)
             t_err.join(timeout=1)
-            finish_log(f"timed out after {timeout}s")
-            return ("stopped", f"{exe} timed out after {timeout}s", "", conversation_id or "")
 
-        try:
-            proc.wait(timeout=0 if stopped_after_result else 5)
-        except subprocess.TimeoutExpired:
-            pass
-        # Nothing the worker started may outlive it (dev servers, watchers holding its output open).
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-        proc.wait(timeout=5)
-        t_out.join(timeout=1)
-        t_err.join(timeout=1)
+            raw_out = "".join(stdout_lines).strip()
+            raw_err = "".join(stderr_lines).strip()
+            data = stream_envelope if isinstance(stream_envelope, dict) else _parse_json_envelope(raw_out, adapter)
 
-        raw_out = "".join(stdout_lines).strip()
-        raw_err = "".join(stderr_lines).strip()
-        data = stream_envelope if isinstance(stream_envelope, dict) else _parse_json_envelope(raw_out, adapter)
+            if not isinstance(data, dict):
+                combined = "\n".join(x for x in (raw_out, raw_err) if x).strip()
+                errors = error_text("".join(stdout_lines).splitlines(), raw_err)
+                if stream and _stream_override is None and STREAM_UNSUPPORTED_RE.search(combined):
+                    finish_log("stream-json unsupported; retrying with --output-format json")
+                    return self.exec_prompt(
+                        prompt_text,
+                        args,
+                        worktree,
+                        conversation_id=conversation_id,
+                        spec_path=spec_path,
+                        harness=harness,
+                        label=label,
+                        _stream_override=False,
+                        access=access,
+                        write_extra=write_extra,
+                        pair_text=pair_text,
+                        mcp=mcp,
+                    )
+                if USAGE_RE.search(errors):
+                    finish_log("usage limit")
+                    return ("usage", errors[:800], "", "")
+                if conversation_id and RESUME_ERR_RE.search(errors):
+                    finish_log("resume failed")
+                    return ("resume_failed", errors[:800], "", "")
+                finish_log(f"stopped rc={proc.returncode}")
+                return ("stopped", f"{exe} exited {proc.returncode}: {combined[:800]}", "", "")
 
-        if not isinstance(data, dict):
-            combined = "\n".join(x for x in (raw_out, raw_err) if x).strip()
-            errors = error_text("".join(stdout_lines).splitlines(), raw_err)
-            if stream and _stream_override is None and STREAM_UNSUPPORTED_RE.search(combined):
-                finish_log("stream-json unsupported; retrying with --output-format json")
-                return self.exec_prompt(
-                    prompt_text,
-                    args,
-                    worktree,
-                    conversation_id=conversation_id,
-                    spec_path=spec_path,
-                    harness=harness,
-                    label=label,
-                    _stream_override=False,
-                    access=access,
-                    write_extra=write_extra,
-                    pair_text=pair_text,
-                    mcp=mcp,
+            stats.update(envelope_stats(results or data))
+            rc = 0 if stopped_after_result else proc.returncode
+            env = adapter.extract_envelope(data, rc, exe, conversation_id=conversation_id, raw_err=raw_err)
+            self._turn_stats(adapter, env["conv_id"], bool(conversation_id) and env["returned_id"] in ("", conversation_id),
+                             stats)
+            conv_id = env["conv_id"]
+
+            if not env["ok"]:
+                detail = env["detail"]
+                if USAGE_RE.search(detail):
+                    finish_log("usage limit")
+                    return ("usage", detail, "", conv_id)
+                if conversation_id and RESUME_ERR_RE.search(detail):
+                    finish_log("resume failed")
+                    return ("resume_failed", detail, "", "")
+                finish_log(f"stopped: {detail[:120]}")
+                return ("stopped", detail, "", conv_id)
+
+            if conversation_id and env["returned_id"] and env["returned_id"] != conversation_id:
+                finish_log("resume failed (new conversation started)")
+                return (
+                    "resume_failed",
+                    f"conversation {conversation_id} was not resumed (started {env['returned_id']})",
+                    "",
+                    "",
                 )
-            if USAGE_RE.search(errors):
-                finish_log("usage limit")
-                return ("usage", errors[:800], "", "")
-            if conversation_id and RESUME_ERR_RE.search(errors):
-                finish_log("resume failed")
-                return ("resume_failed", errors[:800], "", "")
-            finish_log(f"stopped rc={proc.returncode}")
-            return ("stopped", f"{exe} exited {proc.returncode}: {combined[:800]}", "", "")
 
-        stats.update(envelope_stats(data))
-        rc = 0 if stopped_after_result else proc.returncode
-        env = adapter.extract_envelope(data, rc, exe, conversation_id=conversation_id, raw_err=raw_err)
-        self._turn_stats(adapter, env["conv_id"], bool(conversation_id) and env["returned_id"] in ("", conversation_id),
-                         stats)
-        conv_id = env["conv_id"]
-
-        if not env["ok"]:
-            detail = env["detail"]
-            if USAGE_RE.search(detail):
-                finish_log("usage limit")
-                return ("usage", detail, "", conv_id)
-            if conversation_id and RESUME_ERR_RE.search(detail):
-                finish_log("resume failed")
-                return ("resume_failed", detail, "", "")
-            finish_log(f"stopped: {detail[:120]}")
-            return ("stopped", detail, "", conv_id)
-
-        if conversation_id and env["returned_id"] and env["returned_id"] != conversation_id:
-            finish_log("resume failed (new conversation started)")
-            return (
-                "resume_failed",
-                f"conversation {conversation_id} was not resumed (started {env['returned_id']})",
-                "",
-                "",
-            )
-
-        resp = env["response"]
-        first = _strip_marker_formatting(first_nonempty_line(resp))
-        if first.startswith("ASK:") and not _NO_QUESTION.match(first[4:]):
-            finish_log("done (ask)")
-            return ("ask", conv_id, resp, conv_id)
-        if first.startswith("FAILED:"):
-            finish_log("done (failed)")
-            return ("done", "failed", resp, conv_id)
-        finish_log("done (succeeded)")
-        return ("done", "succeeded", resp, conv_id)
+            resp = env["response"]
+            final = stream_acc.get("final_response")
+            if final and data is stream_envelope:
+                # The result joins earlier messages to the final one (agy joins every agent message of the turn; see
+                # AntigravityAdapter._final_message): the final message is the response, for the marker check and for
+                # every first-line reader of the body.
+                earlier = resp.strip()[:-len(final)].strip()
+                self._emit_progress(log_fh, f"[worker +{time.monotonic() - start:.0f}s] {tag}: dropped earlier "
+                                    f"messages before the final one: {_one_line(earlier, 120)}", to_stderr=True)
+                resp = final + "\n"
+            first = _strip_marker_formatting(first_nonempty_line(resp))
+            if first.startswith("ASK:") and not _NO_QUESTION.match(first[4:]):
+                finish_log("done (ask)")
+                return ("ask", conv_id, resp, conv_id)
+            if first.startswith("FAILED:"):
+                finish_log("done (failed)")
+                return ("done", "failed", resp, conv_id)
+            finish_log("done (succeeded)")
+            return ("done", "succeeded", resp, conv_id)
+        finally:
+            if not finished:
+                # Unwound by an exception: Interrupted from the driver's signal handler (which has stopped the
+                # worker already) or anything else. Stop what still runs and let go of the worker.
+                self._abandon_worker(entry, seen_kids, log_fh, f"{tag}: interrupted")
 
     def run(self, spec, pair=None, args=None, worktree=None, harness=None, label=None, access="full", write_extra=(),
             mcp=False):

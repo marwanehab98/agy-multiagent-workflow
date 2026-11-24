@@ -16,7 +16,9 @@ Each command runs with the shell, from the worktree root. All commands run even 
 one fails, so the log shows every failure at once.
 Exit 0: every command passed and the worktree is clean at <head>.
 Exit 1: a command failed (the log has its output); the worktree is clean at <head>.
-Exit 2: the worktree could not be restored to <head> (prints why).  Exit 64: bad usage.
+Exit 2: the worktree was not clean at <head> before the checks (HEAD_MOVED, TREE_DIRTY), could not be restored
+to <head> after them (NOT_RESTORED), or git itself failed so its state is unknown (STATUS_FAILED <git's message>,
+RESTORE_FAILED <git's message>); prints why.  Exit 64: bad usage.
 """
 import argparse
 import os
@@ -68,6 +70,16 @@ def commands_all(flight_manifest, prefix, repo=None):
 
 def git(wt, *args):
     return subprocess.run(["git", "-C", wt, *args], capture_output=True, text=True, errors="replace")
+
+
+def status(wt):
+    """`git status --porcelain` of the worktree, or None when git status fails (printed as STATUS_FAILED):
+    a failed status must never read as a clean tree."""
+    r = git(wt, "status", "--porcelain", "--untracked-files=all")
+    if r.returncode != 0:
+        print(f"STATUS_FAILED {' '.join(r.stderr.split())}")
+        return None
+    return r.stdout.strip()
 
 
 _ACTIVE = []
@@ -141,7 +153,9 @@ def main():
     if not want or head != want:
         print(f"HEAD_MOVED expected={a.head} actual={head}")
         return 2
-    pre_dirty = git(a.worktree, "status", "--porcelain", "--untracked-files=all").stdout.strip()
+    pre_dirty = status(a.worktree)
+    if pre_dirty is None:
+        return 2
     if pre_dirty:
         print(f"TREE_DIRTY\n{pre_dirty}")
         return 2
@@ -174,9 +188,14 @@ def main():
                     failed.append(name)
 
     # Build and test output that is not gitignored would look like a reviewer's edit later.
-    git(a.worktree, "reset", "--hard", want)
-    git(a.worktree, "clean", "-ffd")
-    dirty = git(a.worktree, "status", "--porcelain", "--untracked-files=all").stdout.strip()
+    for step in (("reset", "--hard", want), ("clean", "-ffd")):
+        r = git(a.worktree, *step)
+        if r.returncode != 0:
+            print(f"RESTORE_FAILED git {' '.join(step)}: {' '.join(r.stderr.split())}")
+            return 2
+    dirty = status(a.worktree)
+    if dirty is None:
+        return 2
     if dirty or git(a.worktree, "rev-parse", "HEAD").stdout.strip() != want:
         print(f"NOT_RESTORED\n{dirty}")
         return 2

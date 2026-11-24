@@ -5,7 +5,8 @@
 # Prints `START <sha> <how>`, where <how> is one of:
 #   up-to-date | local-behind (origin's commit is used) | local-ahead (local's commit is used)
 #   | local-only (origin exists, branch not on origin) | no-remote | fetch-failed (local's commit is used)
-# Exit 0: chosen.  Exit 3: local and origin have diverged; nothing chosen.  Exit 64: bad usage.
+# Exit 0: chosen.  Exit 3: local and origin have diverged; nothing chosen.
+# Exit 64: bad usage, or NO_BRANCH <base_branch> when there is no local branch of that name.
 set -u
 if [ $# -ne 2 ]; then echo "usage: start-point.sh <repo> <base_branch>" >&2; exit 64; fi
 repo=$1; branch=$2

@@ -8,8 +8,9 @@
 # `create` creates <name> on new branch <branch> at <base_ref> under this checkout's worktrees folder, outside
 # the checkout (`python3 workspace.py worktrees-root --anchor <main_checkout>`), and prints its path.
 # `remove` removes <worktree_path> (never --force) and with --delete-branch deletes its merged branch (-d,
-# or -D after verifying reachability from --merged-into <ref>). Checks merge status before removing the worktree.
-# Exit 0 ok. Exit 1 git failure. Exit 64 bad usage.
+# or -D after verifying reachability from --merged-into <ref>: the branch refs/heads/<ref> when there is one, else
+# <ref> as given, such as a sha). Checks merge status before removing the worktree.
+# Exit 0 ok. Exit 1 git failure. Exit 64 bad usage (also a create <name> that is empty, ., .. or contains /).
 set -u
 if [ $# -lt 1 ]; then
   echo "usage: worktree.sh <create|remove> ..." >&2
@@ -24,6 +25,9 @@ case "$op" in
       exit 64
     fi
     main_checkout=$1; name=$2; branch=$3; base_ref=$4
+    case "$name" in
+      ""|.|..|*/*) echo "usage: worktree.sh create: <name> must be a single folder name, got '$name'" >&2; exit 64 ;;
+    esac
     main_abs=$(cd "$main_checkout" 2>/dev/null && pwd) || { echo "ERROR missing checkout: $main_checkout" >&2; exit 1; }
     wt_dir=$(python3 -I "$(dirname "$0")/workspace.py" worktrees-root --anchor "$main_abs") || exit 1
     wt_path="$wt_dir/$name"
@@ -59,7 +63,9 @@ case "$op" in
       [ "$branch" = "HEAD" ] && branch=""
       if [ -n "$branch" ]; then
         if [ -n "$merged_into" ]; then
-          target_sha=$(git -C "$main_abs" rev-parse --verify -q "$merged_into^{commit}") || {
+          # The branch first: a tag named like it would otherwise win (callers pass a branch name or a sha).
+          target_sha=$(git -C "$main_abs" rev-parse --verify -q "refs/heads/$merged_into^{commit}") \
+            || target_sha=$(git -C "$main_abs" rev-parse --verify -q "$merged_into^{commit}") || {
             echo "error: unknown --merged-into ref '$merged_into'." >&2
             exit 1
           }

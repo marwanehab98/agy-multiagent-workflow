@@ -1,10 +1,19 @@
 """Run the flight director via headless CLI worker and manage design-phase session turns.
 
 Usage:
-  python3 -I run_director.py start --state <S> --spec <file> --pair <pair> [--keep-open]
-  python3 -I run_director.py send --state <S> --spec <file> --pair <pair>
+  python3 -I run_director.py start --state <S> --job <job> --input <text> --pair <pair> [--keep-open]
+  python3 -I run_director.py send --state <S> --job <job> --input <text> --pair <pair>
+  python3 -I run_director.py start|send ... --spec <file> instead of --job/--input (a spec built earlier)
   python3 -I run_director.py reply --state <S> --file <from-user.md> --pair <pair>
   python3 -I run_director.py notify-ack --state <S> --pair <pair>
+
+With --job, the script builds the spec itself, at <RUN_DIR>/specs/director-<job>-<n>.txt: start fills
+director-start.txt (FIRST_JOB=<job>, INPUT=<text>, and every other run value the template names, read from the state;
+one missing is ERROR MISSING_STATE <key>), send fills director-job.txt (JOB, INPUT). SKILL_DIR in both is the plugin
+root this script runs from (never the state's, which a plugin update leaves pointing at the old version). It records
+the spec as LAST_DIRECTOR_SPEC (for a retry with --spec) and sets LAST_JOB=<job>, LAST_JOB_INPUT=<text> and
+WAITING_ON=director before the Flight Director runs; `start --job resume` (a fallback Flight Director) leaves
+LAST_JOB and LAST_JOB_INPUT as they are, so the lost job can be sent again.
 
 All commands run in DOCS_WORKTREE, save the verbatim response to
 <RUN_DIR>/results/director-{n}.md (never overwriting an earlier file), and branch on line 1:
@@ -18,11 +27,14 @@ All commands run in DOCS_WORKTREE, save the verbatim response to
   Exit 64  bad usage
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import AgyRunner, Run, drive, first_words, next_free, rest_path, save_body  # noqa: E402
+from common import HERE, AgyRunner, Run, build, drive, first_words, next_free, rest_path, save_body  # noqa: E402
+
+TEMPLATES = HERE.parent / "references" / "templates"
 
 def quote_path(p):
     """A path for a status line, in double quotes when it has whitespace, so the line stays unambiguous."""
@@ -105,11 +117,34 @@ def _handle_response(r, result, keep_open):
     return RC_FAILED, f"FAILED {saved}"
 
 
+def build_job_spec(r, op, job, text):
+    """Fill director-start.txt (start) or director-job.txt (send) for job, and record the job in the state."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", job):
+        raise ValueError(f"bad job name {job!r}")
+    template = "director-start.txt" if op == "start" else "director-job.txt"
+    names = re.findall(r"\{\{([A-Z0-9_]+)\}\}", (TEMPLATES / template).read_text(encoding="utf-8"))
+    given = {"FIRST_JOB" if op == "start" else "JOB": job, "INPUT": text, "SKILL_DIR": str(HERE.parent)}
+    values = {n: given[n] if n in given else r.need(n) for n in dict.fromkeys(names)}
+    spec = build(template, next_free(r.run_dir / "specs", f"director-{job}-{{n}}.txt"), values)
+    job_keys = {} if op == "start" and job == "resume" else {"LAST_JOB": job, "LAST_JOB_INPUT": text}
+    r.set(LAST_DIRECTOR_SPEC=spec, WAITING_ON="director", **job_keys)
+    return str(spec)
+
+
 def run_cmd(ns):
     r = Run(ns.state)
     r.require_new_format()
     runner = AgyRunner(r)
     wt = r.need("DOCS_WORKTREE")
+    if ns.op in ("start", "send") and ns.job is not None:
+        if ns.spec is not None or ns.input is None:
+            return 64, "bad usage: give --job with --input, or --spec"
+        try:
+            ns.spec = build_job_spec(r, ns.op, ns.job, ns.input)
+        except ValueError as e:
+            return RC_ERROR, f"ERROR BAD_JOB {e}"
+    elif ns.op in ("start", "send") and (ns.spec is None or ns.input is not None):
+        return 64, "bad usage: give --job with --input, or --spec"
     if ns.op in ("start", "send") and not Path(ns.spec).is_file():
         return RC_ERROR, f"ERROR MISSING_FILE {ns.spec}"
     # A director- tag names the worker log and puts the turn under Flight Director in the cost report.
@@ -156,7 +191,9 @@ def main(argv=None):
         p.add_argument("--state", required=True)
         p.add_argument("--pair", required=True)
         if name in ("start", "send"):
-            p.add_argument("--spec", required=True)
+            p.add_argument("--spec")
+            p.add_argument("--job")
+            p.add_argument("--input")
         if name == "start":
             p.add_argument("--keep-open", action="store_true")
         if name == "reply":

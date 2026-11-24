@@ -47,6 +47,8 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.target / "install.sh").exists())
         self.assertFalse((self.target / ".git").exists())
         self.assertIn(self.head, (self.target / "VERSION").read_text())
+        # A UTC timestamp in a format every `date` supports (BSD date has no -I).
+        self.assertRegex((self.target / "VERSION").read_text(), r"installed \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ from ")
         self.assertIn(f"INSTALLED {self.head[:12]}", out)
 
     def test_second_install_keeps_the_previous_one_as_a_backup(self):

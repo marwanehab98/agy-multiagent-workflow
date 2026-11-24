@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -41,9 +42,18 @@ def read_json(path):
 
 
 def write_json(path, data):
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    os.replace(tmp, path)
+    """Write path via a temp file of its own (two watchers never share one) and a rename; removed on failure."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data))
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def alive(pid):

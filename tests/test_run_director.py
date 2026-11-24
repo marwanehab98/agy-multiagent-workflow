@@ -195,5 +195,95 @@ class RunDirectorTests(Base):
         self.assertIsNone(self.st("LAST_DIRECTOR_RESULT"))
 
 
+class JobSpecs(Base):
+    """start/send --job --input: the script fills director-start.txt / director-job.txt itself."""
+    director = RunDirectorTests.director
+    RUN_VALUES = {"TOPIC": "demo", "DATE": "2026-11-24", "REQUIREMENTS_SOURCE": "written", "JIRA_KEY": "none",
+                  "REQUIREMENTS_FILE": "none", "MISSION_NOTES": "none", "SAFETY_REQUESTED": "no",
+                  "ROLE_CREW": "antigravity:g@high", "REPOS": "api web", "DEFAULT_BRANCH": "api=main web=trunk",
+                  "BASE_BRANCH": "api=main web=release 2", "START_SHA": "api=abc web=def",
+                  "START_HOW": "api=local web=origin", "RELAY_DIR": "/r/relay", "SKILL_DIR": "/old/plugin/1.2.0"}
+
+    def setUp(self):
+        super().setUp()
+        s = self.st()
+        s.update(self.RUN_VALUES)
+        self.state.write_text(json.dumps(s))
+        self.spec = self.tmp / "director-spec.txt"
+        self.spec.write_text("Start job.\n")
+
+    def test_start_fills_the_start_template_from_the_state(self):
+        self.behave({"do": "response", "text": "RESULT: RESUMED\n", "conv_id": "d1"})
+        rc, last = self.director("start", "--state", str(self.state), "--job", "start",
+                                 "--input", "a file with spaces.md", "--pair", "antigravity:big@high", "--keep-open")
+        self.assertEqual(rc, 0, last)
+        spec = self.run_dir / "specs" / "director-start-1.txt"
+        text = spec.read_text()
+        self.assertEqual(self.calls()[0]["prompt"], text)
+        for line in ("JOB: start", "Input: a file with spaces.md", "BASE_BRANCH=api=main web=release 2",
+                     "REPOS=api web", f"SKILL_DIR={SKILL}", f"DOCS_WORKTREE={self.docs_wt}"):
+            self.assertIn(line, text)
+        self.assertNotIn("/old/plugin", text)  # SKILL_DIR is where this script runs from, never the stale state
+        self.assertEqual((self.st("LAST_JOB"), self.st("LAST_JOB_INPUT"), self.st("WAITING_ON")),
+                         ("start", "a file with spaces.md", "director"))
+        self.assertEqual(self.st("LAST_DIRECTOR_SPEC"), str(spec))
+        self.assertEqual(self.st("DIRECTOR_CONVERSATION_ID"), "d1")  # --keep-open still applies
+        self.assertTrue((self.run_dir / "logs" / "director-start-1-1.log").is_file())
+
+    def test_send_fills_the_job_template(self):
+        self.behave({"do": "response", "text": "RESULT: RESUMED\n", "conv_id": "d1"},
+                    {"do": "response", "text": "RESULT: ANSWER /x\n", "conv_id": "d1"})
+        self.director("start", "--state", str(self.state), "--spec", str(self.spec), "--pair", "antigravity:big@high",
+                      "--keep-open")
+        rc, last = self.director("send", "--state", str(self.state), "--job", "safety-done",
+                                 "--input", "failed: /r/results/safety 2.md", "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 0, last)
+        text = (self.run_dir / "specs" / "director-safety-done-1.txt").read_text()
+        self.assertIn("Flight Director job: safety-done", text)
+        self.assertIn(f"{SKILL}/references/flight-director.md", text)
+        self.assertIn("Input: failed: /r/results/safety 2.md", text)
+        self.assertEqual(self.calls()[1]["conversation"], "d1")
+        self.assertEqual((self.st("LAST_JOB"), self.st("LAST_JOB_INPUT")),
+                         ("safety-done", "failed: /r/results/safety 2.md"))
+
+    def test_a_fallback_start_keeps_the_lost_job(self):
+        s = self.st()
+        s.update(LAST_JOB="consult", LAST_JOB_INPUT="/r/asks/01-impl-1.md")
+        self.state.write_text(json.dumps(s))
+        self.behave({"do": "response", "text": "RESULT: RESUMED\n", "conv_id": "d2"})
+        rc, _ = self.director("start", "--state", str(self.state), "--job", "resume", "--input", "none",
+                              "--pair", "antigravity:big@high", "--keep-open")
+        self.assertEqual(rc, 0)
+        self.assertEqual((self.st("LAST_JOB"), self.st("LAST_JOB_INPUT")), ("consult", "/r/asks/01-impl-1.md"))
+        self.assertIn("JOB: resume", (self.run_dir / "specs" / "director-resume-1.txt").read_text())
+
+    def test_single_repo_values_fill_the_template(self):
+        s = self.st()
+        s.update(REPOS="none", DEFAULT_BRANCH="main", BASE_BRANCH="main", START_SHA=self.base, START_HOW="local")
+        self.state.write_text(json.dumps(s))
+        self.behave({"do": "response", "text": "RESULT: META_FIXED\n"})
+        rc, last = self.director("start", "--state", str(self.state), "--job", "fix-meta", "--input", "/r/v.txt",
+                                 "--pair", "antigravity:big@high")
+        self.assertEqual(rc, 0, last)
+        self.assertIn("REPOS=none", (self.run_dir / "specs" / "director-fix-meta-1.txt").read_text())
+
+    def test_a_missing_run_value_is_one_error_line(self):
+        s = self.st()
+        del s["START_HOW"]
+        self.state.write_text(json.dumps(s))
+        rc, last = self.director("start", "--state", str(self.state), "--job", "start", "--input", "none",
+                                 "--pair", "antigravity:big@high")
+        self.assertEqual((rc, last), (2, "ERROR MISSING_STATE START_HOW"))
+        self.assertEqual(self.calls(), [])
+
+    def test_bad_usage(self):
+        for args in (["--job", "start"], ["--input", "x"], ["--job", "start", "--input", "x", "--spec", "f"], [],
+                     ["--job", "../x", "--input", "x"]):
+            with self.subTest(args=args):
+                rc, last = self.director("start", "--state", str(self.state), "--pair", "antigravity:big@high", *args)
+                self.assertEqual(rc, 2 if "../x" in args else 64, last)
+        self.assertEqual(self.calls(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

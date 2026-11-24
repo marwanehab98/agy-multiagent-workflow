@@ -136,6 +136,73 @@ class GateAndFixes(Base):
         self.assertTrue(list((self.run_dir / "gates").glob("01-2.log")))
         self.assertEqual(len([c for c in self.calls() if c["model"] == "small-high"]), 3)
 
+    def test_a_fix_round_after_a_review_that_commits_nothing_escalates(self):
+        self.behave("commit", "pass", "fix", "nocommit")
+        self.expect(20, "ESCALATE")
+        self.assertEqual(len(self.calls()), 4)  # no second gate run, no second stage 2 review
+        self.assertEqual(len(list((self.run_dir / "gates").glob("01-*.log"))), 1)
+        self.assertIn("the fix round after the stage 2 review's VERDICT: FIX made no commits",
+                      (self.run_dir / "verdicts" / "01-history.md").read_text())
+
+    def test_a_fix_round_after_a_gate_failure_that_commits_nothing_reruns_the_gate(self):
+        # A flaky check may pass on the same commit: the gate reruns (here it fails again: two gate rounds).
+        self.behave("commit-broken", "nocommit", "nocommit")
+        self.expect(20, "ESCALATE")
+        self.assertEqual(len(list((self.run_dir / "gates").glob("01-*.log"))), 3)
+        self.assertNotIn("made no commits", (self.run_dir / "verdicts" / "01-history.md").read_text())
+
+    def test_a_review_after_a_fix_round_is_a_re_review(self):
+        self.behave("commit", "fix", "commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        specs = self.run_dir / "specs"
+        first, second = (specs / "01-s1-1.txt").read_text(), (specs / "01-s1-2.txt").read_text()
+        self.assertNotIn("re-review", first)
+        self.assertNotIn("{{", first)
+        calls = self.calls()
+        reviewed, fixed = calls[1], calls[2]
+        head1 = sh("git", "-C", str(self.impl), "rev-parse", "HEAD~1")
+        head2 = sh("git", "-C", str(self.impl), "rev-parse", "HEAD")
+        self.assertIn("This is a re-review.", second)
+        self.assertIn(f"The fix range is {head1}..{head2}.", second)
+        self.assertIn("Review notes.\nVERDICT: FIX", second)  # the previous verdict file, in full
+        self.assertIn(f"Review range: {self.base}..{head2}.", second)  # the whole range still applies
+        self.assertIn("every missing or extra item the previous review raised", second)
+        self.assertNotIn("re-review", (specs / "01-s2-1.txt").read_text())  # stage 2 had no fix round
+        self.assertIsNone(self.st("PREV_VERDICT_01_S1"))  # cleared when the stage passed
+        self.assertTrue(reviewed and fixed)
+
+    def test_a_re_review_takes_a_previous_verdict_larger_than_one_argument(self):
+        self.behave("commit", "fix", "usage")  # the fix round hits a usage limit, so the verdict can be swapped
+        self.expect(30, "PROMPT")
+        big = ("Critical: a long finding.\n" * 12000) + "VERDICT: FIX\n"  # about 300 KB
+        self.assertGreater(len(big), 300_000)
+        Path(self.st("PREV_VERDICT_01_S1")).write_text(big)
+        self.behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY", "--reply", "retry")
+        second = (self.run_dir / "specs" / "01-s1-2.txt").read_text()
+        self.assertIn(big.rstrip("\n"), second)
+        self.assertIn("needs context.\nThis is a re-review.", second)
+        self.assertIn("needs context.\nCheck that every requirement",
+                      (self.run_dir / "specs" / "01-s1-1.txt").read_text())
+
+    def test_a_stage2_re_review_names_its_findings_by_severity(self):
+        self.behave("commit", "pass", "fix", "commit", "pass")
+        self.expect(0, "QUEUE_EMPTY")
+        second = (self.run_dir / "specs" / "01-s2-2.txt").read_text()
+        self.assertIn("every Critical or Important finding the previous review raised", second)
+        self.assertIn("as Minor.", second)
+
+    def test_a_review_after_an_escalation_is_a_first_review(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.expect(20, "ESCALATE")
+        self.assertIn("This is a re-review.", (self.run_dir / "specs" / "01-s1-3.txt").read_text())
+        note = self.tmp / "note.md"
+        note.write_text("try again\n")
+        self.behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY", "--director-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base} {note} antigravity:g@xhigh"))
+        self.assertNotIn("re-review", (self.run_dir / "specs" / "01-s1-4.txt").read_text())
+
 
 class TreeAndWorkers(Base):
     def test_reviewer_that_edits_is_void_and_replaced(self):
@@ -492,6 +559,17 @@ class Prompts(Base):
         self.assertEqual(self.impl_head(), self.st("WORKER_HEAD_01"))
         self.assertEqual((self.run_dir / "queue.txt").read_text(), queue)
 
+    def test_an_escalate_with_a_short_sha_stores_the_full_sha(self):
+        self.behave("commit", "fix", "commit", "fix", "commit", "fix")
+        self.expect(20, "ESCALATE")
+        step_b = sh("git", "-C", str(self.impl), "rev-parse", "HEAD~2")
+        note = self.tmp / "note.md"
+        note.write_text("n\n")
+        self.behave("commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY", "--director-result",
+                    self.result_file(f"RESULT: ESCALATE {step_b[:7]} {note} antigravity:g@xhigh"))
+        self.assertEqual(self.st("IMPL_START_SHA_01"), step_b)
+
     def test_escalate_sha_off_the_head_line_is_rejected(self):
         self.behave("commit", "fix", "commit", "fix", "commit", "fix")
         self.expect(20, "ESCALATE")
@@ -729,6 +807,13 @@ class PicksAndLadder(Base):
         self.assertEqual(self.st("PAIR_01"), "antigravity:small@low")
         self.assertEqual(self.st("LAUNCH_STYLE_antigravity_small_low"), "slug")
 
+    def test_a_past_ladder_escalate_with_a_short_sha_stores_the_full_sha(self):
+        note = self.use_up_ladder()
+        self.behave("usage")
+        self.expect(30, "PROMPT", "--director-result",
+                    self.result_file(f"RESULT: ESCALATE {self.base[:7]} {note} antigravity:small@low"))
+        self.assertEqual(self.st("ESC_PENDING_01").split("\t")[0], self.base)
+
     def test_failed_probe_rejects_the_answer(self):
         note = self.use_up_ladder()
         self.behave("fail", "fail")
@@ -798,6 +883,26 @@ class Replan(Base):
         # The reviewers see the kept commit too, not only 01a's own work on top of it.
         self.assertIn(f"Review range: {self.base}..", review)
         self.assertEqual(self.st("BASE_SHA_01a"), kept)  # where 01a's own work started
+
+    def test_a_replan_with_a_short_sha_keeps_its_commits(self):
+        (self.run_dir / "queue.txt").write_text("01 02\n")
+        self.behave("commit", "fix", "fail")
+        self.expect(20, "ESCALATE")
+        kept = self.impl_head()
+        self.assertNotEqual(kept, self.base)
+        self.task("01a", "AC-1", "REPLANNED_FROM=01")
+        self.behave("commit", "pass", "pass", "commit", "pass", "pass")
+        self.expect(0, "QUEUE_EMPTY", "--director-result", self.result_file(f"RESULT: REPLAN {kept[:7]} 01a"))
+        self.assertEqual(self.st("BASE_SHA_01a"), kept)  # 01a started on the kept commits, not on LAST_MERGED
+        self.assertNotIn("dropped unreviewed commits", (self.run_dir / "mission-log.md").read_text())
+
+    def test_a_replan_sha_that_names_no_commit_is_rejected(self):
+        self.replan_to("01a")
+        queue = (self.run_dir / "queue.txt").read_text()
+        self.expect(20, "ESCALATE", "--director-result", self.result_file("RESULT: REPLAN 0123456789abc 01a"))
+        hist = (self.run_dir / "verdicts" / "01-history.md").read_text()
+        self.assertIn("reset sha 0123456789abc is not between the task's base", hist)
+        self.assertEqual((self.run_dir / "queue.txt").read_text(), queue)
 
     def test_replan_probe_failure_goes_to_fix_meta(self):
         self.replan_to("01a")

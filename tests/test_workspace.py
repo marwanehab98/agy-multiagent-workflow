@@ -353,6 +353,23 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(py(WORKSPACE, "remove-docs", "--state", str(runs["b"])).returncode, 0)
         self.assertEqual(exclude.read_text(), "# mine\n*.log\nnode_modules/\n")
 
+    def test_concurrent_exclude_edits_lose_no_lines(self):
+        # Two runs starting in one repo at once: each read-modify-write of the exclude file holds a lock.
+        git_dir = self.tmp / "gitdir"
+        (git_dir / "info").mkdir(parents=True)
+        (git_dir / "info" / "exclude").write_text("# mine\n")
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import workspace\n"
+                "for i in range(40): workspace._append_excludes(sys.argv[2], [f'{sys.argv[3]}-{i}/'])")
+        procs = [subprocess.Popen([sys.executable, "-I", "-c", code, str(SKILL / "scripts"), str(git_dir), name])
+                 for name in ("a", "b", "c")]
+        self.assertEqual([p.wait() for p in procs], [0, 0, 0])
+        lines = (git_dir / "info" / "exclude").read_text().splitlines()
+        self.assertEqual(sorted(l for l in lines if l.endswith("/")),
+                         sorted(f"{n}-{i}/" for n in "abc" for i in range(40)))
+        self.assertEqual((lines[0], lines.count("# <<< mission-control")), ("# mine", 1))
+        self.assertEqual(sorted(p.name for p in (git_dir / "info").iterdir()),
+                         [".exclude.mission-control.lock", "exclude"])  # no temp file left behind
+
     def test_prune_never_removes_a_run_whose_state_is_unreadable(self):
         repo = self.tmp / "app"
         sha = make_repo(repo)
@@ -368,6 +385,118 @@ class TestWorkspace(unittest.TestCase):
                 self.assertIn(f"UNREADABLE {topic} {d} (state.json missing or unreadable; not removed)", r.stdout)
                 self.assertTrue(d.exists())
             self.assertNotIn("REMOVED", r.stdout)
+
+    def test_remove_excludes_checks_the_worktrees_under_the_exclude_lock(self):
+        # Another run that adds its worktree and its exclude lines while this one ends must keep its block.
+        import fcntl
+        sys.path.insert(0, str(SKILL / "scripts"))
+        import workspace
+        repo = self.tmp / "app"
+        make_repo(repo)
+        exclude = repo / ".git" / "info" / "exclude"
+        exclude.write_text(f"{workspace.EXCLUDE_BEGIN}\n.mission/\n{workspace.EXCLUDE_END}\n")
+        lock = exclude.with_name(".exclude.mission-control.lock")
+        held = []
+        real_git = workspace.git
+
+        def spy(wt, *args):
+            if args[:2] == ("worktree", "list"):
+                with open(lock, "a+") as f:
+                    try:
+                        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        held.append(False)
+                        fcntl.flock(f, fcntl.LOCK_UN)
+                    except BlockingIOError:
+                        held.append(True)
+            return real_git(wt, *args)
+
+        workspace.git = spy
+        try:
+            workspace._remove_excludes(repo)
+        finally:
+            workspace.git = real_git
+        self.assertEqual(held, [True])
+        self.assertEqual(exclude.read_text(), "")  # no mission-control worktree left: the block went
+
+    def hook(self, repo, body):
+        hook = repo / ".git" / "hooks" / "post-checkout"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text("#!/bin/sh\n" + body)
+        hook.chmod(0o755)
+
+    def assert_no_docs_left(self, repo, docs, topic):
+        self.assertFalse(docs.exists(), docs)
+        self.assertEqual(subprocess.run(["git", "-C", str(repo), "show-ref", "--verify", "-q",
+                                         f"refs/heads/mission/{topic}-docs"]).returncode, 1)
+        self.assertNotIn(str(docs), sh("git", "-C", str(repo), "worktree", "list"))
+
+    # A checkout hook in the repo runs in each new worktree: it leaves a stray file (check-tree exit 2), or commits
+    # and breaks the worktree's index, so discard-changes.sh fails.
+    BREAK_TREE = 'echo stray > stray.txt\n'
+    BREAK_DISCARD = ('git -c user.email=t@t -c user.name=t commit -q --allow-empty -m hook && '
+                     'printf x > "$(git rev-parse --git-path index)"\n')
+
+    def test_a_failed_single_repo_init_docs_leaves_nothing_behind(self):
+        for topic, body in (("stray", self.BREAK_TREE), ("nodiscard", self.BREAK_DISCARD)):
+            with self.subTest(topic=topic):
+                repo = self.tmp / topic
+                sha = make_repo(repo)
+                self.hook(repo, body)
+                r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", topic, "--start-sha", sha)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertNotIn("DOCS_WORKTREE", r.stdout)
+                self.assert_no_docs_left(repo, self.root(repo) / f"{topic}-docs", topic)
+
+    def test_a_failed_multi_repo_init_docs_leaves_nothing_behind(self):
+        for topic, body in (("stray", self.BREAK_TREE), ("nodiscard", self.BREAK_DISCARD)):
+            with self.subTest(topic=topic):
+                ws = self.tmp / f"ws-{topic}"
+                good, bad = ws / "good", ws / "bad"
+                good_sha, bad_sha = make_repo(good), make_repo(bad)
+                self.hook(bad, body)
+                r = py(WORKSPACE, "init-docs", "--workspace", str(ws), "--topic", topic,
+                       "--repo", f"good={good}@{good_sha}", "--repo", f"bad={bad}@{bad_sha}")
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                docs = self.root(ws) / f"{topic}-docs"
+                self.assertFalse(docs.exists())
+                for repo in (good, bad):
+                    self.assert_no_docs_left(repo, docs / repo.name, topic)
+
+    def test_a_malformed_topic_is_bad_usage(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        for topic in ("", "a/b", "..", "a..b", "a b", "a\tb", "-x", ".x", "x@y", "x~1", "é"):
+            with self.subTest(topic=topic):
+                for args in (("check-topic", "--main-checkout", str(repo)),
+                             ("init-docs", "--main-checkout", str(repo), "--start-sha", sha),
+                             ("init-docs", "--workspace", str(self.tmp), "--repo", f"app={repo}@{sha}")):
+                    r = py(WORKSPACE, *args, f"--topic={topic}")
+                    self.assertEqual(r.returncode, 64, r.stdout + r.stderr)
+                    self.assertIn("bad --topic", r.stderr)
+        self.assertFalse(self.root(repo).exists())
+        self.assertEqual(sh("git", "-C", str(repo), "branch", "--list", "mission/*"), "")
+        for topic in ("PROJ-123", "add-login-flow", "v2.1_fix"):
+            with self.subTest(topic=topic):
+                r = py(WORKSPACE, "check-topic", "--main-checkout", str(repo), "--topic", topic)
+                self.assertEqual(r.stdout.strip(), f"TOPIC {topic}", r.stderr)
+
+    def test_list_runs_and_prune_tolerate_a_malformed_topic(self):
+        repo = self.tmp / "app"
+        sha = make_repo(repo)
+        r = py(WORKSPACE, "init-docs", "--main-checkout", str(repo), "--topic", "t", "--start-sha", sha)
+        kv = dict(l.split(" ", 1) for l in r.stdout.strip().splitlines())
+        docs, st = Path(kv["DOCS_WORKTREE"]), Path(kv["RUN_DIR"]) / "state.json"
+        for topic in ("../../escape", "a b", 7, ["x"]):
+            with self.subTest(topic=topic):
+                st.write_text(json.dumps({"TOPIC": topic, "REPOS": "none", "MAIN_CHECKOUT": str(self.tmp / "gone"),
+                                          "PHASE": "done", "DOCS_WORKTREE": str(docs)}))
+                r = py(WORKSPACE, "list-runs", "--main-checkout", str(repo))
+                self.assertEqual((r.returncode, r.stdout.strip()), (0, f"t {st}"), r.stderr)
+                for args in ((), ("--apply",)):
+                    r = py(WORKSPACE, "prune", "--main-checkout", str(repo), *args)
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertIn(f"UNREADABLE t {docs} (TOPIC in state.json is malformed; not removed)", r.stdout)
+                    self.assertTrue(docs.exists())
 
     def test_validate_meta_requires_repo_in_multi_repo(self):
         ws = self.tmp / "val"

@@ -5,7 +5,7 @@ Task spec:
 Design decisions that apply (these override the task spec where they differ):
 {{FILE:DECISIONS}}
 
-Review range: {{BASE_SHA}}..{{WORKER_HEAD}}. Use git diff and git show; read other files only where the diff needs context.
+Review range: {{BASE_SHA}}..{{WORKER_HEAD}}. Use git diff and git show; read other files only where the diff needs context.{{FILE:RE_REVIEW}}
 Check that every requirement was implemented, nothing unrequested was added, file ownership was respected, and the tests genuinely test the requirements.
 If you hit a blocking question, respond with `ASK: <question>` on the first line and stop; never wait on a local interactive prompt.
 Write your review to {{OUTPUT_FILE}} with your file-writing tool (not a shell redirect): only a compact verdict, the specific missing or extra items, if any. Its last line must be exactly "VERDICT: PASS" or "VERDICT: FIX". End your response with that exact same VERDICT line.

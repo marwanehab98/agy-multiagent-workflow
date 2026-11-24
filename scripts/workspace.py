@@ -31,18 +31,24 @@ under the worktrees folder, for one checkout, one workspace, or every one (--all
 finished run as remove-impl + remove-docs do, an orphaned one by deleting its folder. Runs in progress (KEEP) and
 runs whose state.json is missing or unreadable (UNREADABLE) are never touched.
 
+A topic (check-topic, init-docs) is a JIRA key or a slug: letters, digits, ".", "_" and "-", starting with a letter
+or digit, with no ".."; anything else is bad usage. init-docs leaves nothing behind when it fails: it removes the
+worktrees, branches and folder it created. list-runs and prune fall back to the run folder's name when a state file
+has no TOPIC or a malformed one, and prune never removes a run whose TOPIC is malformed (UNREADABLE).
+
 Exit 0: ok.  Exit 10: EXISTING run found (check-topic).  Exit 1: git/workspace failure.  Exit 64: bad usage.
 """
 import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import Run, git, read_meta, repo_key, run, tool  # noqa: E402
+from common import Run, _FileLock, git, read_meta, repo_key, run, tool, write_atomic  # noqa: E402
 
 EXCLUDES = [
     ".mission/",
@@ -58,6 +64,21 @@ BRANCH_PREFIX = "mission/"
 # The run's lines in a repo's .git/info/exclude sit between these, so the last run's cleanup can take them out again.
 EXCLUDE_BEGIN = "# >>> mission-control: run worktree ignores (removed with the repo's last mission-control worktree)"
 EXCLUDE_END = "# <<< mission-control"
+TOPIC = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def topic_ok(topic):
+    """A topic names branches (mission/<topic>-docs) and folders (<topic>-docs): a JIRA key or a slug."""
+    return isinstance(topic, str) and bool(TOPIC.fullmatch(topic)) and ".." not in topic
+
+
+def _bad_topic(topic):
+    """Print the usage error for a malformed --topic and return 64, or return None when it is fine."""
+    if topic_ok(topic):
+        return None
+    print(f"ERROR bad --topic {topic!r}: use letters, digits, '.', '_' and '-' (starting with a letter or digit, "
+          "no '..'), such as a JIRA key or a kebab-case slug", file=sys.stderr)
+    return 64
 
 
 def docs_branch(topic):
@@ -105,42 +126,56 @@ def _branch_exists(repo_path, branch):
     return run(["git", "-C", str(repo_path), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode == 0
 
 
+def _exclude_lock(exclude):
+    """The lock both exclude-file edits hold, so two runs starting or ending in one repo never lose each other's
+    lines (a file next to it; the exclude file itself is replaced by write_atomic)."""
+    return _FileLock(exclude.with_name(".exclude.mission-control.lock"))
+
+
 def _append_excludes(git_common_dir, lines):
     """Add the lines the exclude file lacks (older versions wrote them unmarked) inside the mission-control block."""
     exclude = Path(git_common_dir) / "info" / "exclude"
     exclude.parent.mkdir(parents=True, exist_ok=True)
-    old = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
-    new = [l for l in dict.fromkeys(lines) if l not in old]
-    if not new:
-        return
-    if EXCLUDE_BEGIN in old and EXCLUDE_END in old[old.index(EXCLUDE_BEGIN):]:
-        end = old.index(EXCLUDE_END, old.index(EXCLUDE_BEGIN))
-        text = old[:end] + new + old[end:]
-    else:
-        text = old + [EXCLUDE_BEGIN] + new + [EXCLUDE_END]
-    exclude.write_text("\n".join(text) + "\n", encoding="utf-8")
+    with _exclude_lock(exclude):
+        old = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+        new = [l for l in dict.fromkeys(lines) if l not in old]
+        if not new:
+            return
+        if EXCLUDE_BEGIN in old and EXCLUDE_END in old[old.index(EXCLUDE_BEGIN):]:
+            end = old.index(EXCLUDE_END, old.index(EXCLUDE_BEGIN))
+            text = old[:end] + new + old[end:]
+        else:
+            text = old + [EXCLUDE_BEGIN] + new + [EXCLUDE_END]
+        write_atomic(exclude, "\n".join(text) + "\n")
 
 
 def _remove_excludes(repo_path):
     """Drop the mission-control block from the repo's exclude file once no mission-control worktree of the repo is
-    left (none on a mission/ branch, none under the worktrees folder). Lines outside the block are never touched."""
-    out = git(str(repo_path), "worktree", "list", "--porcelain")
+    left (none on a mission/ branch, none under the worktrees folder). Lines outside the block are never touched.
+    The worktree check runs under the exclude lock: another run that adds its worktree and its lines meanwhile
+    keeps them."""
     common_dir = git(str(repo_path), "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if out is None or not common_dir:
+    if not common_dir:
         return
-    base = worktrees_base().resolve()
-    for line in out.splitlines():
-        if line.startswith(f"branch refs/heads/{BRANCH_PREFIX}") or (
-                line.startswith("worktree ") and Path(line[len("worktree "):]).resolve().is_relative_to(base)):
-            return
     exclude = Path(common_dir) / "info" / "exclude"
-    old = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
-    if EXCLUDE_BEGIN not in old or EXCLUDE_END not in old[old.index(EXCLUDE_BEGIN):]:
+    if not exclude.exists():
         return
-    start = old.index(EXCLUDE_BEGIN)
-    end = old.index(EXCLUDE_END, start)
-    rest = old[:start] + old[end + 1:]
-    exclude.write_text("\n".join(rest) + ("\n" if rest else ""), encoding="utf-8")
+    with _exclude_lock(exclude):
+        out = git(str(repo_path), "worktree", "list", "--porcelain")
+        if out is None:
+            return
+        base = worktrees_base().resolve()
+        for line in out.splitlines():
+            if line.startswith(f"branch refs/heads/{BRANCH_PREFIX}") or (
+                    line.startswith("worktree ") and Path(line[len("worktree "):]).resolve().is_relative_to(base)):
+                return
+        old = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+        if EXCLUDE_BEGIN not in old or EXCLUDE_END not in old[old.index(EXCLUDE_BEGIN):]:
+            return
+        start = old.index(EXCLUDE_BEGIN)
+        end = old.index(EXCLUDE_END, start)
+        rest = old[:start] + old[end + 1:]
+        write_atomic(exclude, "\n".join(rest) + ("\n" if rest else ""))
 
 
 def _exclude_in(repo_path, extra=()):
@@ -289,6 +324,8 @@ def cmd_check_topic(args):
     if bool(args.main_checkout) == bool(args.workspace):
         print("ERROR pass exactly one of --main-checkout, --workspace", file=sys.stderr)
         return 64
+    if _bad_topic(args.topic):
+        return 64
     if args.main_checkout:
         main = Path(args.main_checkout).resolve()
         repos = [(main.name, None, main, None)]
@@ -337,15 +374,39 @@ def _init_docs_single(args):
     if not ok:
         print(f"ERROR worktree add: {out}", file=sys.stderr)
         return 1
-    rc, out = tool("check-tree.sh", str(wt), args.start_sha)
-    if rc == 1:
-        tool("discard-changes.sh", str(wt), args.start_sha)  # the branch is new, so nothing is lost
-    elif rc != 0:
-        print(f"ERROR check-tree: {out}", file=sys.stderr)
-        return 1
-    _exclude_in(main)
-    _make_run_dirs(wt)
+    created = [(main, wt, docs_branch(args.topic))]
+    try:
+        err = _fresh_tree(wt, args.start_sha)
+        if err:
+            _undo_docs(created)
+            print(f"ERROR {err}", file=sys.stderr)
+            return 1
+        _exclude_in(main)
+        _make_run_dirs(wt)
+    except BaseException:
+        _undo_docs(created)
+        raise
     return 0
+
+
+def _fresh_tree(wt, sha):
+    """None when the new worktree is clean at sha (after discarding what a checkout hook may have changed: the
+    branch is new, so nothing is lost), else what is wrong."""
+    rc, out = tool("check-tree.sh", str(wt), sha)
+    if rc == 1:
+        rc2, out2 = tool("discard-changes.sh", str(wt), sha)
+        return None if rc2 == 0 else f"discard-changes: {out2}"
+    return None if rc == 0 else f"check-tree: {out}"
+
+
+def _undo_docs(created):
+    """Remove the docs worktrees and branches a failed init-docs call created, newest first."""
+    for repo_path, wt_path, branch in reversed(created):
+        run(["git", "-C", str(repo_path), "worktree", "remove", "--force", str(wt_path)])
+        if Path(wt_path).exists():  # `worktree remove` refused (e.g. git cannot read its index): delete it by hand
+            shutil.rmtree(wt_path, ignore_errors=True)
+            run(["git", "-C", str(repo_path), "worktree", "prune"])
+        run(["git", "-C", str(repo_path), "branch", "-D", branch])
 
 
 def _init_docs_multi(args):
@@ -364,11 +425,30 @@ def _init_docs_multi(args):
         print(f"ERROR docs workspace already exists: {docs_root}", file=sys.stderr)
         return 1
     docs_root.mkdir(parents=True, exist_ok=True)
+    created = []
+    try:
+        err = _init_docs_multi_in(args, repos, docs_root, created)
+    except BaseException:
+        _undo_docs(created)
+        shutil.rmtree(docs_root, ignore_errors=True)
+        raise
+    if err:
+        _undo_docs(created)
+        shutil.rmtree(docs_root, ignore_errors=True)
+        print(f"ERROR {err}", file=sys.stderr)
+        return 1
+    _make_run_dirs(docs_root)
+    for name, k, _, _ in repos:
+        print(f"DOCS_WT_{k} {docs_root / name}")
+    return 0
 
+
+def _init_docs_multi_in(args, repos, docs_root, created):
+    """Set up the docs workspace in docs_root; append each (repo, worktree, branch) created to `created`.
+    Returns an error string or None."""
     r = run(["git", "init", "-q", "-b", docs_branch(args.topic), str(docs_root)])
     if r.returncode != 0:
-        print(f"ERROR git init failed: {r.stderr.strip()}", file=sys.stderr)
-        return 1
+        return f"git init failed: {r.stderr.strip()}"
 
     # Ensure initial commit succeeds even if global git identity is unset.
     r = run([
@@ -377,42 +457,29 @@ def _init_docs_multi(args):
         "commit", "-q", "--allow-empty", "-m", "init docs workspace",
     ])
     if r.returncode != 0:
-        print(f"ERROR initial commit failed: {r.stderr.strip()}", file=sys.stderr)
-        return 1
+        return f"initial commit failed: {r.stderr.strip()}"
 
     docs_common = git(str(docs_root), "rev-parse", "--path-format=absolute", "--git-common-dir")
     _append_excludes(docs_common, EXCLUDES + [f"{name}/" for name, _, _, _ in repos])
 
-    created_wts = []
     for name, k, repo_path, sha in repos:
         wt_path = docs_root / name
         ok, out = _add_worktree(repo_path, wt_path, docs_branch(args.topic), sha)
         if not ok:
-            # Roll back the repo worktrees this call already created.
-            for prev_repo, prev_wt in created_wts:
-                run(["git", "-C", str(prev_repo), "worktree", "remove", "--force", str(prev_wt)])
-                run(["git", "-C", str(prev_repo), "branch", "-D", docs_branch(args.topic)])
-            shutil.rmtree(docs_root, ignore_errors=True)
-            print(f"ERROR worktree add for {name}: {out}", file=sys.stderr)
-            return 1
-        created_wts.append((repo_path, wt_path))
-        rc, out = tool("check-tree.sh", str(wt_path), sha)
-        if rc == 1:
-            tool("discard-changes.sh", str(wt_path), sha)
-        elif rc != 0:
-            print(f"ERROR check-tree for {name}: {out}", file=sys.stderr)
-            return 1
+            return f"worktree add for {name}: {out}"
+        created.append((repo_path, wt_path, docs_branch(args.topic)))
+        err = _fresh_tree(wt_path, sha)
+        if err:
+            return f"{err} (repo {name})"
         _exclude_in(repo_path)
-
-    _make_run_dirs(docs_root)
-    for name, k, _, _ in repos:
-        print(f"DOCS_WT_{k} {docs_root / name}")
-    return 0
+    return None
 
 
 def cmd_init_docs(args):
     if bool(args.main_checkout) == bool(args.workspace):
         print("ERROR pass exactly one of --main-checkout, --workspace", file=sys.stderr)
+        return 64
+    if _bad_topic(args.topic):
         return 64
     return _init_docs_single(args) if args.main_checkout else _init_docs_multi(args)
 
@@ -647,10 +714,11 @@ def cmd_list_runs(args):
         st = d / ".mission" / "state.json"
         if st.is_file():
             try:
-                topic = json.loads(st.read_text(encoding="utf-8")).get("TOPIC", d.name[:-5])
-            except (OSError, json.JSONDecodeError):
-                topic = d.name[:-5]
-            print(f"{topic} {st}")
+                s = json.loads(st.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                s = None
+            topic = s.get("TOPIC") if isinstance(s, dict) else None
+            print(f"{topic if topic_ok(topic) else d.name[:-5]} {st}")
     return 0
 
 
@@ -687,6 +755,9 @@ def cmd_prune(args):
                 continue
             anchor = s.get("WORKSPACE_DIR") if s.get("REPOS", "none") not in ("", "none") else s.get("MAIN_CHECKOUT")
             topic = s.get("TOPIC", docs.name[:-5])
+            if not topic_ok(topic):
+                print(f"UNREADABLE {docs.name[:-5]} {docs} (TOPIC in state.json is malformed; not removed)")
+                continue
             if not anchor or not Path(anchor).exists():
                 kind = "ORPHANED"
             elif s.get("PHASE") == "done":

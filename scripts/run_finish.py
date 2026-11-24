@@ -36,7 +36,7 @@ from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, USAGE_REPLIES, AgyRu
                     bundled_skills_dir, check_repo_trees, discard_repo_trees, drive, first_words, next_free,
                     pick_verdict, read_answer, repo_key, save_ask, save_body, tool, usage_prompt, verdict_line,
                     void_prompt, write_atomic, write_prompt)
-from probe import Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
+from probe import USAGE_LIMIT, Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
 from pairs import parse_pair  # noqa: E402
 
 VERIFIED, RUN_QUEUE = 0, 21
@@ -91,9 +91,7 @@ class Finish:
     # -- item 1: starting state
     def do_start(self):
         r = self.r
-        r.set(PHASE="finish")
-        for key in [k for k in r.s if k.startswith("IMPL_CONVERSATION_ID_")]:
-            r.set(**{key: None})
+        r.set(PHASE="finish", **{k: None for k in r.s if k.startswith("IMPL_CONVERSATION_ID_")})
         rc, out = self._check_impl_trees()
         if rc != 0:
             raise Done(ERROR, f"ERROR TREE_NOT_CLEAN {out}")
@@ -121,7 +119,7 @@ class Finish:
         else:
             head = r.need("LAST_MERGED")
             review_range = f"{r.need('INITIAL_BASE_SHA')}..{head}"
-            conventions = r.need("CONVENTION_PATHS")
+            conventions = r.repo_convention_paths()
         spec = build("final-review.txt", next_free(r.run_dir / "specs", "final-review-{n}.txt"),
                      {"REVIEW_RANGE": review_range, "CONVENTION_PATHS": conventions, "OUTPUT_FILE": out,
                       "AC_IDS": ac_ids(r.need("DESIGN_FILE"), r.need("DECISIONS_LOG"))},
@@ -250,10 +248,13 @@ class Finish:
         head = None if r.is_multi_repo else r.need("LAST_MERGED")
         rc, _ = self._check_impl_trees(head)
         if rc != 0:
+            # A read-only worker that changed the tree is void: its changes are discarded and it counts as failed.
             self._discard_or_error(head)
             r.log("drift check changed the worktree; changes discarded")
             if result[0] == "ask":
                 result = ("stopped", "drift check changed the worktree before asking", "", result[3])
+            elif result[0] != "usage":
+                result = ("stopped", "drift check changed the worktree", "", result[3])
         if result[0] == "ask":
             return self.ask_consult("drift", r.need("FIN_PAIR"), r.need("FIN_SPEC"), result[1], result[2])
         if result[0] == "usage":
@@ -355,6 +356,11 @@ class Finish:
                 out_file = next_free(r.run_dir, "validate-{n}.txt")
                 out_file.write_text(launch_problems(r, [fid], d.line), encoding="utf-8")
                 self.fix_meta(out_file)
+            if d.code == USAGE_LIMIT:
+                # A usage limit says nothing about the pair: the usual usage prompt, and "retry" redoes the probe.
+                _, pair, detail = (d.line + " ").split(" ", 2)
+                self.prompt("probe-usage-limit", usage_prompt(f"The test launch of {pair}", detail.strip()),
+                            USAGE_REPLIES)
             raise
         r.set(META_FAILS=0)
         if r.incr("FINAL_FIX_ROUNDS") >= 3:
@@ -397,6 +403,8 @@ class Finish:
             return self.verified(r.need("FIN_VERIFY_LOG"))
         if name == "drift-usage-limit":
             return self.set_phase("drift")
+        if name == "probe-usage-limit":
+            return self.set_phase("probe")
         self.set_phase("review")
 
     # -- driver

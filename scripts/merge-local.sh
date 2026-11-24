@@ -5,7 +5,8 @@
 # - <target> not checked out anywhere: moved by an atomic compare-and-swap (`update-ref`), no checkout.
 # Usage: bash merge-local.sh <repo> <target_branch> <feature_branch>
 # Exit 0: MERGED <target>=<sha>.
-# Exit 2: CHECKOUT_DIRTY / CHECKED_OUT_ELSEWHERE / MERGE_FAILED; nothing changed (prints why and the files).
+# Exit 2: CHECKOUT_DIRTY / CHECKED_OUT_ELSEWHERE / MERGE_FAILED (also when git status fails); nothing changed
+#         (prints why and the files).
 # Exit 3: NOT_FAST_FORWARD; <target> has commits <feature> lacks; nothing changed.
 set -u
 if [ $# -ne 3 ]; then echo "usage: merge-local.sh <repo> <target_branch> <feature_branch>" >&2; exit 64; fi
@@ -32,13 +33,19 @@ if [ "$holder" != "$top" ]; then
   echo "CHECKED_OUT_ELSEWHERE $target is checked out in $holder; merge there, or switch it to another branch first."
   exit 2
 fi
-dirty=$(git -C "$holder" status --porcelain --untracked-files=no)
+# A failing git status must not read as a clean checkout.
+if ! dirty=$(git -C "$holder" status --porcelain --untracked-files=no 2>/dev/null); then
+  err=$(git -C "$holder" status --porcelain --untracked-files=no 2>&1 >/dev/null)
+  echo "MERGE_FAILED git status failed: $(echo "$err" | tr '\n' ' ' | sed 's/ *$//'); nothing changed"
+  exit 2
+fi
 if [ -n "$dirty" ]; then
   echo "CHECKOUT_DIRTY $holder has uncommitted changes; commit or stash them, then ask again:"
   echo "$dirty" | sed 's/^/  /'
   exit 2
 fi
-if ! out=$(git -C "$holder" merge --ff-only -q "$feature" 2>&1); then
+# The resolved sha, not the name: a tag named like the branch would win over it.
+if ! out=$(git -C "$holder" merge --ff-only -q "$new" 2>&1); then
   echo "MERGE_FAILED git merge --ff-only refused; nothing changed:"
   echo "$out" | sed 's/^/  /'
   exit 2

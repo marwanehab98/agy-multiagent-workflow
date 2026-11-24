@@ -32,6 +32,11 @@ Rules the loop enforces:
   (falling back to a fresh worker run if resume fails).
 - The gate (gate.py) runs before every review; a failing gate goes straight to a fix round with the log.
 - Stage 1 review, then Stage 2. After a gate fix passes, the review resumes at REVIEW_STAGE_<id>.
+- A review that follows a fix round of the same stage is a re-review: its spec adds re-review.txt with the previous
+  verdict file and the fix range (PREV_VERDICT_<id>_S<n>, PREV_HEAD_<id>_S<n>; cleared when the stage passes, and
+  when the task starts or an escalation attempt starts it over).
+- A fix round after a review's VERDICT: FIX that commits nothing escalates (a <id>-nocommit note) instead of
+  rerunning the gate and the review on the same commit; after a gate failure the gate reruns.
 - Escalate after two fix rounds for one stage (STAGE_FIX_ROUNDS_<id>_S<n>, reset when that stage passes),
   two gate fix rounds in a row (GATE_FIX_ROUNDS_<id>), or four fix rounds of any kind (TOTAL_FIX_ROUNDS_<id>).
   An escalation attempt resets all three.
@@ -39,8 +44,9 @@ Rules the loop enforces:
   void in a row prompts retry or stop. A missing VERDICT line gets one new reviewer; a second counts as FIX.
 - A usage limit (a worker's or a test launch's) pauses the task with a retry/pause/stop prompt instead of counting
   as a failure.
-- The escalation pair must be the ladder's next rung (validate_meta.py pair) and its reset sha must lie
-  between the task's base and the worktree's HEAD; two rejected answers prompt the user.
+- The escalation pair must be the ladder's next rung (validate_meta.py pair) and its reset sha must name a commit
+  between the task's base and the worktree's HEAD (a short sha is stored in full); two rejected answers prompt the
+  user.
 - REPLAN is checked the same way and validated (with fix-meta) before the queue changes.
 - Merges go only through merge-task.sh (fast-forward, compare-and-swap on the feature branch).
 """
@@ -184,8 +190,13 @@ class Loop:
                                  f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None,
                                  f"REJECTS_{t}": 0, f"IMPL_CONVERSATION_ID_{t}": None,
                                  f"NO_VERDICT_{t}_S1": 0, f"NO_VERDICT_{t}_S2": 0,
-                                 f"VOIDS_{t}_S1": 0, f"VOIDS_{t}_S2": 0})
+                                 f"VOIDS_{t}_S1": 0, f"VOIDS_{t}_S2": 0, **self.fresh_reviews(t)})
         self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
+
+    @staticmethod
+    def fresh_reviews(t):
+        """State keys that start task t's reviews over: no review counts as a re-review, no fix round is open."""
+        return {f"FIX_FROM_{t}": None, **{f"{k}_{t}_S{n}": None for k in ("PREV_VERDICT", "PREV_HEAD") for n in (1, 2)}}
 
     def ask_consult(self, t, kind, pair, spec, conv_id, body, stage=None):
         r = self.r
@@ -244,6 +255,18 @@ class Loop:
             note.write_text("settled succeeded with no commits\n", encoding="utf-8")
             r.set(**{f"FAIL_MSG_{t}": note})
             return self.escalate(t)
+        fix_from = (r.get(f"FIX_FROM_{t}") or "").split()
+        if fix_from:
+            r.set(**{f"FIX_FROM_{t}": None})
+        if len(fix_from) == 2 and fix_from[0] != "gate" and head == fix_from[1]:
+            # The same commit would get the same gate and the same review again. (After a gate failure the gate
+            # does rerun: a flaky check may pass.)
+            note = next_free(r.run_dir / "results", f"{t}-nocommit-{{n}}.md")
+            note.write_text(f"the fix round after the stage {fix_from[0]} review's VERDICT: FIX made no commits; "
+                            f"HEAD is still {head}\n", encoding="utf-8")
+            r.set(**{f"FAIL_MSG_{t}": note})
+            r.log(f"{t} fix round made no commits")
+            return self.escalate(t)
         log = next_free(r.run_dir / "gates", f"{t}-{{n}}.log")
         gate_args = ["--flight-manifest", r.need("FLIGHT_MANIFEST"), "--worktree", wt, "--head", head, "--log", str(log)]
         if repo:
@@ -266,6 +289,7 @@ class Loop:
             return self.escalate(t)
         r.incr(counter)
         r.incr(f"TOTAL_FIX_ROUNDS_{t}")
+        r.set(**{f"FIX_FROM_{t}": f"{kind} {r.need(f'WORKER_HEAD_{t}')}"})  # do_check: did the round commit?
         meta = self.meta(t)
         spec = build("fix.txt", next_free(r.run_dir / "specs", f"{t}-fix-{{n}}.txt"),
                      {"TASK_TITLE": meta["TITLE"], "BASE_SHA": self.review_base(t),
@@ -286,21 +310,42 @@ class Loop:
         meta = self.meta(t)
         review = next_free(r.run_dir / "verdicts", f"{t}-s{stage}-{{n}}.md")
         r.set(**{f"REVIEW_OUT_{t}": review})
-        common = {"BASE_SHA": self.review_base(t), "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}"),
-                  "OUTPUT_FILE": review}
         out = next_free(r.run_dir / "specs", f"{t}-s{stage}-{{n}}.txt")
+        common = {"BASE_SHA": self.review_base(t), "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}"), "OUTPUT_FILE": review}
+        files = {"RE_REVIEW": self.re_review(t, stage, out), "DECISIONS": r.task_file(t, "-decisions.md")}
         if stage == 1:
-            spec = build("spec-review.txt", out, common,
-                         {"TASK": r.task_file(t, ".md"), "DECISIONS": r.task_file(t, "-decisions.md")})
+            spec = build("spec-review.txt", out, common, {**files, "TASK": r.task_file(t, ".md")})
         else:
             spec = build("quality-review.txt", out, {**common, "CONVENTION_PATHS": r.repo_convention_paths(repo)},
-                         {"SUMMARY": r.task_file(t, "-summary.md"), "DECISIONS": r.task_file(t, "-decisions.md")})
+                         {**files, "SUMMARY": r.task_file(t, "-summary.md")})
         pair = meta[f"REVIEW_{stage}"]
         r.set(**{f"REVIEW_SPEC_{t}": spec, f"REVIEW_PAIR_{t}": pair})
         self.set_phase(t, f"reviewing:{stage}")
         r.log(f"{t} stage{stage} reviewer dispatched {pair}")
         result = self.runner.run(spec, pair=pair, worktree=wt, access="read")
         self.after_review(t, stage, result)
+
+    RE_REVIEW_WORDS = {1: ("missing or extra item", "list anything else newly noticed there (test-coverage or "
+                               "convention gaps not raised before) as Minor, which does not call for VERDICT: FIX"),
+                       2: ("Critical or Important finding", "list anything else newly noticed there (test-coverage or "
+                               "convention gaps not raised before) as Minor")}
+
+    def re_review(self, t, stage, spec_out):
+        """A file holding the re-review section for a review that follows a fix round of the same stage
+        (re-review.txt: the previous verdict file and the fix range, after a line break), or an empty file for a
+        first review. It goes to the review spec as a file: a previous verdict can exceed one argument's size limit."""
+        r = self.r
+        section = spec_out.with_name(f"{spec_out.stem}-re-review.txt")
+        prev, prev_head = r.get(f"PREV_VERDICT_{t}_S{stage}"), r.get(f"PREV_HEAD_{t}_S{stage}")
+        if not prev or not prev_head or not Path(prev).is_file():
+            write_atomic(section, "")
+            return section
+        blocking, other = self.RE_REVIEW_WORDS[stage]
+        build("re-review.txt", section,
+              {"PREVIOUS_HEAD": prev_head, "WORKER_HEAD": r.need(f"WORKER_HEAD_{t}"),
+               "BLOCKING": blocking, "OTHER": other}, {"PREVIOUS": prev})
+        write_atomic(section, "\n" + section.read_text(encoding="utf-8"))
+        return section
 
     def _discard_or_error(self, head, t=None):
         wt = self.task_impl(t) if t is not None else self.r.impl
@@ -342,14 +387,16 @@ class Loop:
         if last:
             r.set(**{f"NO_VERDICT_{t}_S{stage}": 0})
         if last == "VERDICT: PASS":
-            r.set(**{f"STAGE_FIX_ROUNDS_{t}_S{stage}": 0})
+            r.set(**{f"STAGE_FIX_ROUNDS_{t}_S{stage}": 0, f"PREV_VERDICT_{t}_S{stage}": None,
+                     f"PREV_HEAD_{t}_S{stage}": None})
             if stage == 1:
                 r.set(**{f"REVIEW_STAGE_{t}": 2})
                 return self.start_review(t, 2)
             return self.set_phase(t, "merge")
         if last != "VERDICT: FIX" and r.incr(f"NO_VERDICT_{t}_S{stage}") < 2:
             return self.start_review(t, stage)
-        r.set(**{f"REVIEW_STAGE_{t}": stage})
+        # The next review of this stage is a re-review: it gets this verdict and the fix range from this head.
+        r.set(**{f"REVIEW_STAGE_{t}": stage, f"PREV_VERDICT_{t}_S{stage}": verdict, f"PREV_HEAD_{t}_S{stage}": head})
         return self.fix(t, verdict, stage)
 
     def void_review(self, t, stage, why):
@@ -471,6 +518,13 @@ class Loop:
         return (f"reset sha {sha} is not between the task's base {self.r.need(f'BASE_SHA_{t}')} "
                 f"and head {git(self.task_impl(t), 'rev-parse', 'HEAD')}")
 
+    def full_sha(self, t, sha):
+        """The full sha of the commit `sha` names in task t's worktree (a short sha from `git log --oneline` too),
+        or None when it names no commit. Stored shas are compared with `git rev-parse HEAD`, so they must be full."""
+        if sha.startswith("-"):
+            return None
+        return git(self.task_impl(t), "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}")
+
     def director_result(self, t, path):
         r = self.r
         words = first_words(path)
@@ -485,6 +539,14 @@ class Loop:
         kind = words[1]
         meta = self.meta(t)
         a = int(r.need(f"ATTEMPT_{t}"))
+        if kind == "REPLAN" and len(words) >= 4 and meta.get("REPLANNED_FROM"):
+            return self.reject(t, "Replan is not allowed for this task")
+        if kind in ("ESCALATE", "REPLAN") and len(words) >= 4:
+            # Store the reset sha in full: do_start compares the stored REPLAN_HEAD with `git rev-parse HEAD`.
+            full = self.full_sha(t, words[2])
+            if full is None:
+                return self.reject(t, self.range_msg(t, words[2]))
+            words = words[:2] + [full] + words[3:]
         if kind == "ESCALATE" and len(words) >= 5:
             sha, pair = words[2], words[-1]
             note = rest_path(words[:-1], 3)
@@ -504,8 +566,6 @@ class Loop:
                 return self.set_phase(t, f"probe:{a}")
             return self.start_attempt(t, sha, note, pair)
         if kind == "REPLAN" and len(words) >= 4:
-            if meta.get("REPLANNED_FROM"):
-                return self.reject(t, "Replan is not allowed for this task")
             if not self.in_range(t, words[2]):
                 return self.reject(t, self.range_msg(t, words[2]))
             r.set(**{f"PENDING_REPLAN_{t}": " ".join(words[2:])})
@@ -532,7 +592,8 @@ class Loop:
                  f"STAGE_FIX_ROUNDS_{t}_S1": 0, f"STAGE_FIX_ROUNDS_{t}_S2": 0,
                  f"NO_VERDICT_{t}_S1": 0, f"NO_VERDICT_{t}_S2": 0,
                  f"VOIDS_{t}_S1": 0, f"VOIDS_{t}_S2": 0,
-                 f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0})
+                 f"GATE_FIX_ROUNDS_{t}": 0, f"TOTAL_FIX_ROUNDS_{t}": 0, f"FAIL_MSG_{t}": None, f"REJECTS_{t}": 0,
+                 **self.fresh_reviews(t)})
         r.log(f"{t} escalation attempt {a} on {pair} from {sha}")
         return self.start_impl(t, spec, "impl", meta["TITLE"], reuse=False)
 

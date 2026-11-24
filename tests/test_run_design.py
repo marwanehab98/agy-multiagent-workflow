@@ -32,6 +32,12 @@ class Design(Base):
     def docs_clean(self):
         return sh("git", "-C", str(self.docs_wt), "status", "--porcelain", "--untracked-files=all")
 
+    @staticmethod
+    def write_dirs(call):
+        """The folders a read-only agy worker may write to (its --settings write_file rules)."""
+        settings = json.loads(call["argv"][call["argv"].index("--settings") + 1])
+        return [a[len("write_file("):-1] for a in settings["permissions"]["allow"] if a.startswith("write_file(")]
+
 
 class Happy(Design):
     def test_preflight_check_happy_path(self):
@@ -73,6 +79,21 @@ class Happy(Design):
         self.assertEqual(self.st("LAUNCH_STYLE_antigravity_small_high"), "slug")
         self.assertIn("preflight-check-done", last)
         self.assertEqual(len(self.calls()), 2)
+
+    def test_preflight_probe_usage_limit_exits_31_and_the_next_call_probes_again(self):
+        s = self.st()
+        del s["LAUNCH_STYLE_antigravity_small_high"]
+        self.state.write_text(json.dumps(s))
+        self.behave("usage")
+        last, _ = self.builder(expect=(31, "USAGE_LIMIT"))
+        self.assertTrue(last.startswith("USAGE_LIMIT antigravity:small@high "), last)
+        self.assertIn("5-hour limit", last)
+        self.assertEqual(self.st("DESIGN_PHASE"), "probe")
+        self.assertIsNone(self.st("LAUNCH_STYLE_antigravity_small_high"))
+        self.behave("ok", "write-output")
+        last, _ = self.expect(20, "DIRECTOR_JOB")
+        self.assertEqual(last, f"DIRECTOR_JOB preflight-check-done {self.run_dir / 'preflight-check-1.md'}")
+        self.assertEqual(self.st("LAUNCH_STYLE_antigravity_small_high"), "slug")
 
     def test_builder_probe_failure_goes_to_director(self):
         s = self.st()
@@ -132,13 +153,42 @@ class DocsTree(Design):
         self.assertIn("preflight-check-done", last)
         self.assertTrue((self.docs_wt / "plan.md").exists())
 
-    def test_worker_edit_is_discarded_output_kept(self):
-        self.behave({"do": "write-output", "edit": True})
-        self.builder()
+    def test_a_failing_git_status_is_an_error_not_a_dirty_tree(self):
+        index = Path(sh("git", "-C", str(self.docs_wt), "rev-parse", "--path-format=absolute", "--git-path", "index"))
+        good = index.read_bytes()
+        index.write_bytes(b"not an index")
+        try:
+            last, _ = self.builder(expect=(2, "ERROR"))
+        finally:
+            index.write_bytes(good)
+        self.assertIn("CHECK_TREE STATUS_FAILED", last)
+        self.assertEqual(self.calls(), [])
+
+    def test_worker_edit_is_discarded_and_counts_as_failed(self):
+        self.behave({"do": "write-output", "edit": True}, "write-output")
+        last, _ = self.builder()
+        self.assertEqual(last, f"DIRECTOR_JOB preflight-check-done {self.run_dir / 'preflight-check-2.md'}")
         self.assertEqual(self.docs_clean(), "")
         self.assertEqual(sh("git", "-C", str(self.docs_wt), "rev-parse", "HEAD"), self.docs_head)
         self.assertEqual((self.docs_wt / "a.txt").read_text(), "a\n")
-        self.assertTrue((self.run_dir / "preflight-check-1.md").read_text().strip())
+        self.assertIn("changed the docs worktree", (self.run_dir / "results" / "preflight-check-1.md").read_text())
+        self.assertEqual(self.st("RETRY_preflight-check"), "0")
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_worker_that_edits_twice_sends_failed(self):
+        self.behave({"do": "write-output", "edit": True}, {"do": "write-output", "edit": True})
+        last, _ = self.builder()
+        saved = self.run_dir / "results" / "preflight-check-2.md"
+        self.assertEqual(last, f"DIRECTOR_JOB preflight-check-done failed: {saved}")
+        self.assertIn("changed the docs worktree", saved.read_text())
+        self.assertEqual(self.docs_clean(), "")
+
+    def test_safety_worker_that_edits_beyond_its_findings_counts_as_failed(self):
+        self.behave({"do": "write-output", "edit": True}, "write-output")
+        last, _ = self.need(f"NEED safety design.md {FINDINGS}")
+        self.assertEqual(last, f"DIRECTOR_JOB safety-done {self.run_dir / 'safety-2.md'}")
+        self.assertIn("changed the docs worktree", (self.run_dir / "results" / "safety-1.md").read_text())
+        self.assertEqual(self.docs_clean(), f"?? {FINDINGS}")
 
 
 class Failures(Design):
@@ -195,6 +245,73 @@ class RangeSafety(Design):
         self.assertEqual(last, "DIRECTOR_JOB safety-limit none")
         self.assertEqual(self.st("SAFETY_RUNS"), "3")
         self.assertEqual(len(self.calls()), 2)
+
+    def test_findings_path_is_taken_relative_to_the_docs_worktree(self):
+        # check-tree.sh --allow matches git's porcelain path exactly: ./x and an absolute path must become x.
+        for n, spelled in enumerate((f"./{FINDINGS}", str(self.docs_wt / FINDINGS),
+                                     f"{self.docs_wt}/sub/../{FINDINGS}"), 1):
+            with self.subTest(spelled=spelled):
+                self.behave("write-output")
+                last, _ = self.need(f"NEED safety design.md {spelled}")
+                self.assertEqual(self.st("DESIGN_NEED"), f"safety\tdesign.md\t{FINDINGS}")
+                self.assertEqual(last, f"DIRECTOR_JOB safety-done {self.run_dir / f'safety-{n}.md'}")
+                self.assertEqual(self.docs_clean(), f"?? {FINDINGS}")  # kept, not discarded as a stray change
+                (self.docs_wt / FINDINGS).unlink()
+                s = self.st()
+                s["SAFETY_RUNS"] = "0"  # below the run limit for the next spelling
+                self.state.write_text(json.dumps(s))
+
+    def test_findings_path_outside_the_docs_worktree_is_a_bad_need(self):
+        for spelled in (str(self.tmp / "findings.md"), "../findings.md", "."):
+            with self.subTest(spelled=spelled):
+                last, _ = self.need(f"NEED safety design.md {spelled}", (2, "ERROR"))
+                self.assertIn("BAD_NEED", last)
+        self.assertEqual(self.calls(), [])
+
+    def test_findings_path_through_a_symlink_out_of_the_docs_worktree_is_a_bad_need(self):
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (self.docs_wt / "out").symlink_to(outside)
+        for spelled in ("out/findings.md", str(self.docs_wt / "out" / "findings.md")):
+            with self.subTest(spelled=spelled):
+                last, _ = self.need(f"NEED safety design.md {spelled}", (2, "ERROR"))
+                self.assertIn("BAD_NEED", last)
+        self.assertEqual(self.calls(), [])
+
+    def test_findings_path_through_a_symlink_to_the_docs_worktree_is_accepted(self):
+        link = self.tmp / "docs-link"
+        link.symlink_to(self.docs_wt)
+        self.behave("write-output")
+        last, _ = self.need(f"NEED safety design.md {link / FINDINGS}")
+        self.assertEqual(self.st("DESIGN_NEED"), f"safety\tdesign.md\t{FINDINGS}")
+        self.assertEqual(last, f"DIRECTOR_JOB safety-done {self.run_dir / 'safety-1.md'}")
+
+    def test_only_the_safety_review_may_write_in_the_docs_worktree(self):
+        run_dir = str(self.run_dir.resolve())
+        self.behave("write-output")
+        self.need(f"NEED safety design.md {FINDINGS}")
+        self.assertEqual(self.write_dirs(self.calls()[0]), [run_dir, str((self.docs_wt / ".mission").resolve())])
+        (self.docs_wt / FINDINGS).unlink()  # else the next worker waits for commit-docs
+        for line in ("NEED preflight-check design.md antigravity:small@high", f"NEED lens {self.tmp / 'concepts.md'}",
+                     f"NEED plan-review {self.tmp / 'concepts.md'} {self.tmp / 'context.md'}"):
+            with self.subTest(line=line):
+                self.behave("write-output")
+                self.need(line)
+                self.assertEqual(self.write_dirs(self.calls()[-1]), [run_dir])
+
+    def test_a_consult_answer_keeps_the_write_rule(self):
+        for line, extra in ((f"NEED safety design.md {FINDINGS}", [str((self.docs_wt / ".mission").resolve())]),
+                            ("NEED preflight-check design.md antigravity:small@high", [])):
+            with self.subTest(line=line):
+                self.behave("ask", "write-output", "write-output")
+                last, _ = self.need(line, (22, "CONSULT"))
+                ans = self.tmp / "ans.md"
+                ans.write_text("Go on.\n")
+                self.expect(20, "DIRECTOR_JOB", "--answer", str(ans))
+                resumed = [c for c in self.calls() if c["conversation"]][-1]  # the worker that got the answer
+                self.assertEqual(self.write_dirs(resumed), [str(self.run_dir.resolve()), *extra])
+                if (self.docs_wt / FINDINGS).exists():
+                    (self.docs_wt / FINDINGS).unlink()
 
     def test_safety_retry_does_not_count_a_second_run(self):
         self.behave("fail", "write-output")
@@ -306,6 +423,17 @@ class Lens(Design):
 class PlanReview(Design):
     def review_need(self, expect=(20, "DIRECTOR_JOB")):
         return self.need(f"NEED plan-review {self.tmp / 'plan.md'} {self.tmp / 'context.md'}", expect)
+
+    def test_plan_review_paths_with_spaces(self):
+        plan, context = self.tmp / "my plan.md", self.tmp / "my context.md"
+        plan.write_text("the plan\n")
+        context.write_text("the context\n")
+        self.behave("write-output")
+        last, _ = self.need(f'NEED plan-review "{plan}" "{context}"')
+        self.assertEqual(last, f"DIRECTOR_JOB plan-review-done {self.run_dir / 'plan-review-1.md'}")
+        prompt = self.calls()[0]["prompt"]
+        self.assertIn(str(plan), prompt)
+        self.assertIn("the context", prompt)
 
     def test_plan_review_limit_input(self):
         (self.tmp / "plan.md").write_text("plan\n")

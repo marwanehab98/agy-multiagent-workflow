@@ -90,7 +90,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
    - **The Capsule Communicator never picks, changes, or writes a pair.** Model and effort reach the worker CLI only through `harnesses.py args` or the scripts, never typed by hand.
 4. **The Capsule Communicator decides nothing.** It branches only on what the steps name: script exit codes and last lines, `RESULT:` lines, and counters.
    - Every question goes to the Flight Director: worker asks (`CONSULT`), unclear situations, and anything the user should read beyond the fixed lines in the steps.
-   - It never writes spec text. Specs are built from templates with `scripts/build_spec.py`.
+   - It never writes spec text. Specs are built from templates by the scripts (`run_director.py --job` builds the Flight Director's).
    - It never reviews or reads a diff or a worker's output, and never edits, formats, or commits code.
    - It never retypes a worker's message: `run_director.py` and the loop scripts save responses and asks to files verbatim. Only the user's own replies are written by hand.
 5. **Relays are verbatim.** Capsule Communicator "Running the Flight Director" has the state keys to set around a relay; this rule is how to show it. When `run_director.py` exits `11` (`RELAY <path> <saved>`):
@@ -121,7 +121,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 13. **Only the Capsule Communicator's merges touch the feature branch,** and only through `scripts/merge-task.sh`. It moves the branch with an atomic compare-and-swap (`git update-ref`), fast-forward only, without checking it out. Never rebase, `--no-ff`, merge any other way, or check out a branch in the user's main checkout. The one merge into the user's own branch is the local merge they choose at the end, through `scripts/merge-local.sh` only (Capsule Communicator Step 5 item 4).
 14. **Only the Flight Director talks to the user about the work,** through relays. That covers requirement gaps, product decisions, the Range Safety decision, sign-offs, plan approval, and the closing report. The Capsule Communicator's own words to the user are only the fixed lines written in its steps, the note lines `WATCH` prints, and the status lines listed under "What you print" in `capsule-communicator.md`.
 15. **The design Flight Director session stays open until plan approval; after that, each Flight Director job is a fresh worker run.**
-    - In the design phase, `run_director.py send` resumes `DIRECTOR_CONVERSATION_ID` until Step 3 item 1 clears it. If `send` exits `13` (`LOST`), start a fallback Flight Director with `FIRST_JOB=resume`.
+    - In the design phase, `run_director.py send` resumes `DIRECTOR_CONVERSATION_ID` until Step 3 item 1 clears it. If `send` exits `13` (`LOST`), start a fallback Flight Director with `run_director.py start --job resume`.
     - After plan approval, `run_director.py start` runs a fresh Flight Director per job, on the pair from Capsule Communicator "Flight Director job models" (still keeping `DIRECTOR_CONVERSATION_ID` across any `RELAY`/`NOTIFY` turns within that single job). Only one Flight Director works at a time.
 16. **Worktrees live outside the user's checkout,** under `~/.local/state/mission-control/worktrees/<repo or workspace>-<hash>/` (`MISSION_CONTROL_WORKTREES` or `XDG_STATE_HOME` moves it), on branches `mission/<TOPIC>-docs` and `mission/<TOPIC>-impl`, created and removed only with `scripts/workspace.py`.
 17. **Run documents live only in the docs worktree / workspace.**

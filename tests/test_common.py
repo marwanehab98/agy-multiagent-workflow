@@ -2,6 +2,7 @@
 the driver lock, worker environments, envelope parsing and stream progress summaries."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -129,6 +130,22 @@ class StateAndLock(unittest.TestCase):
             proc.kill()
             proc.wait()
 
+    def test_an_earlier_listing_kills_only_what_still_matches_it(self):
+        # What a worker started, listed while it ran, is stopped after the worker exited; a pid now in another
+        # process group (reused since the listing) is left alone.
+        gone = subprocess.Popen(["true"], start_new_session=True)
+        gone.wait()
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        try:
+            common._kill_tree(gone.pid, earlier=[(proc.pid, proc.pid + 100000)], alive=False)
+            time.sleep(0.1)
+            self.assertIsNone(proc.poll())
+            common._kill_tree(gone.pid, earlier=[(proc.pid, proc.pid)], alive=False)
+            self.assertEqual(proc.wait(timeout=5), -9)
+        finally:
+            proc.kill()
+            proc.wait()
+
 
 class WorkerPermissions(unittest.TestCase):
     ENV = {"PATH": "/bin", "HOME": "/h", "GITHUB_TOKEN": "x", "AWS_SECRET_ACCESS_KEY": "x", "AWS_PROFILE": "p",
@@ -200,6 +217,21 @@ class WorkerPermissions(unittest.TestCase):
         self.assertEqual(args[args.index("--disallowedTools") + 1],
                          ",".join(harnesses.ClaudeAdapter.READ_ONLY_DENY))  # the deny list does not change
 
+    def test_claude_read_profile_quotes_paths_that_need_it(self):
+        # Rules match the command's literal text (live, 2.1.331): a path with a space is allowed in the quoted
+        # spellings a worker types, never bare; a path no rule can hold safely gets no rule at all.
+        root = Path("/srv/my repos").resolve()
+        dirs = [str(root / "a b"), "/srv/c,d", "/srv/x(y", "/srv/st*r", "/srv/it's \"q\"", "/srv/$HOME x"]
+        args = harnesses.ClaudeAdapter.permission_args("read", ["/srv/out"], dirs, workdir=str(root))
+        value = args[args.index("--allowedTools") + 1]
+        got = re.findall(r"Bash\(git -C ((?:(?!Bash\().)*?) diff \*\)", value)
+        self.assertEqual(got, [f'"{root}/a b"', f"'{root}/a b'", '"a b"', "'a b'", '"./a b"', "'./a b'",
+                               str(Path("/srv/c,d").resolve()), f"'{Path('/srv/$HOME x').resolve()}'"])
+        # An output folder a rule cannot name safely is refused, not left out.
+        for bad in ("/srv/out)", "/srv/o*t", "/srv/o\nt"):
+            with self.assertRaises(ValueError):
+                harnesses.ClaudeAdapter.permission_args("read", [bad], [])
+
     def test_antigravity_read_profile(self):
         run = str(Path("/run").resolve())
         args = harnesses.AntigravityAdapter.permission_args("read", ["/run"])
@@ -255,6 +287,45 @@ class Envelopes(unittest.TestCase):
     def test_stats(self):
         self.assertEqual(common.envelope_stats({"total_cost_usd": 0.1234, "num_turns": 7, "duration_ms": 61000}),
                          {"cost": "$0.12", "turns": 7, "model_time": "61s"})
+
+    def test_stats_of_several_results_of_one_process(self):
+        # A Claude worker that waited on a background command: one result per turn segment. Turns, time and usage
+        # are per segment; total_cost_usd is the running total (live 2026-11-24), so it is not added up.
+        envs = [{"total_cost_usd": 0.0037, "num_turns": 2, "duration_ms": 6338,
+                 "usage": {"input_tokens": 4, "cache_creation_input_tokens": 14802, "cache_read_input_tokens": 64258,
+                           "output_tokens": 128}},
+                {"total_cost_usd": 0.0242, "num_turns": 1, "duration_ms": 3970,
+                 "usage": {"input_tokens": 4, "cache_creation_input_tokens": 440, "cache_read_input_tokens": 39694,
+                           "output_tokens": 6}}]
+        self.assertEqual(common.envelope_stats(envs),
+                         {"cost": "$0.02", "turns": 3, "model_time": "10s", "tokens": 79192 + 40144})
+        self.assertEqual(common.envelope_stats([]), {})
+
+
+class AtomicWrites(unittest.TestCase):
+    def test_a_failed_write_leaves_no_temp_file(self):
+        d = Path(removed_after(self, tempfile.mkdtemp()))
+        target = d / "f.txt"
+        target.write_text("old")
+        target.chmod(0o644)
+        common.write_atomic(target, "new")
+        self.assertEqual((target.read_text(), target.stat().st_mode & 0o777), ("new", 0o644))
+        with self.assertRaises(IsADirectoryError):
+            common.write_atomic(d, "x")  # os.replace onto a directory fails
+        with self.assertRaises(TypeError):
+            common.write_atomic(target, None)  # the write itself fails
+        self.assertEqual(sorted(p.name for p in d.parent.glob(f".{d.name}-*")) + sorted(x.name for x in d.iterdir()),
+                         ["f.txt"])
+        self.assertEqual(target.read_text(), "new")
+
+    def test_watch_writes_through_its_own_temp_file(self):
+        import watch
+        d = Path(removed_after(self, tempfile.mkdtemp()))
+        watch.write_json(d / "pos.json", {"a": 1})
+        self.assertEqual(json.loads((d / "pos.json").read_text()), {"a": 1})
+        with self.assertRaises(TypeError):
+            watch.write_json(d / "pos.json", {"a": object()})
+        self.assertEqual([x.name for x in d.iterdir()], ["pos.json"])
 
 
 class Costs(unittest.TestCase):
@@ -395,6 +466,26 @@ class ClaudeProgress(unittest.TestCase):
         err = {"type": "user", "message": {"content": [{"type": "tool_result", "is_error": True,
                                                          "content": [{"type": "text", "text": "No such file"}]}]}}
         self.assertEqual(self.parse(err), "tool error: No such file")
+
+    def test_busy_and_background_signals(self):
+        def acc_after(*events):
+            acc = {}
+            for ev in events:
+                harnesses.ClaudeAdapter.parse_stream_event(ev, acc)
+            return acc
+        bg = lambda n: {"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "t"}] * n}
+        self.assertEqual(acc_after(bg(2)), {"background": 2})
+        self.assertEqual(acc_after(bg(1), bg(0)), {"background": 0})
+        for ev in ({"type": "system", "subtype": "init"}, {"type": "assistant", "message": {"content": []}},
+                   {"type": "user", "message": {"content": []}}):
+            self.assertEqual(acc_after(ev), {"turn": True})
+        # Task events and events that also follow a result are not turn activity, and a result is none either.
+        for ev in ({"type": "system", "subtype": "task_started"}, {"type": "system", "subtype": "task_updated"},
+                   {"type": "system", "subtype": "task_progress"}, {"type": "system", "subtype": "task_notification"},
+                   {"type": "system", "subtype": "task_summary"}, {"type": "system", "subtype": "post_turn_summary"},
+                   {"type": "rate_limit_event"}, {"type": "system", "subtype": "hook_response"},
+                   {"type": "result", "subtype": "success", "result": "x", "session_id": "s", "is_error": False}):
+            self.assertEqual(acc_after(ev), {})
 
 
 if __name__ == "__main__":

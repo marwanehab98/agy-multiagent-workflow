@@ -19,6 +19,7 @@ any run exists) uses the harness's first launch style.
 Exit 0 ok. Exit 1 not found (skill-dir, top-effort) or bad input. Exit 64 bad usage.
 """
 import argparse
+import concurrent.futures
 import datetime
 import json
 import os
@@ -121,6 +122,28 @@ def _todo_summary(info):
     now = next((t.get("activeForm") or t.get("content") for t in todos
                 if isinstance(t, dict) and t.get("status") == "in_progress"), "")
     return f"todo {done}/{len(todos)} done" + (f", now: {_one_line(now, 80)}" if now else "")
+
+
+# Characters a path in a Claude permission rule must not contain: "(" or ")" could end the rule early inside the
+# comma-joined --allowedTools value and turn what follows into a rule of its own (a bare "Bash"); "*", "?", "[" and
+# "]" are wildcards in rule patterns, so the rule would cover other paths; "\" escapes, and control characters
+# (newline, tab) split the value. Commas and spaces inside the parentheses are kept (verified live 2026-11-24, 2.1.331).
+_RULE_UNSAFE = re.compile(r"[()*?\[\]\\\x00-\x1f\x7f]")
+
+
+def _shell_spellings(path):
+    """The ways a worker writes path in a shell command that a Claude Code Bash rule can name. Rules match the
+    command's literal text (verified live 2026-11-24, 2.1.331): `git -C "/a b/r" log` matches only a rule written
+    with the same double quotes, `git -C '/a b/r' log` only one with single quotes, and a backslash-escaped
+    `/a\\ b/r` matches no rule at all. So a path that needs quoting gets its double- and single-quoted forms (each
+    only when the shell would take it literally: no " $ ` ! inside double quotes, no ' inside single quotes), and
+    one that does not keeps its bare form only. A path with a _RULE_UNSAFE character gets none: such a worker cannot
+    use `git -C` on it (backslash-escaped spellings are never allowed either)."""
+    if _RULE_UNSAFE.search(path):
+        return []
+    if shlex.quote(path) == path:
+        return [path]
+    return ([f'"{path}"'] if not re.search(r'["$`!]', path) else []) + ([f"'{path}'"] if "'" not in path else [])
 
 
 def _git_dir_spellings(d, workdir):
@@ -264,7 +287,8 @@ class AntigravityAdapter(Adapter):
         write_file rule covers both; verified live 2026-11-24).
         agy has no flag that keeps MCP servers from starting; a session-only deny rule (`mcp(*)`, which the
         changelog says holds even under --dangerously-skip-permissions) refuses every MCP tool call instead.
-        Not yet verified live."""
+        Verified live 2026-11-24 with the crew profile: the call was refused ("Permission denied for
+        mcp(atlassian-mcp-server/atlassianUserInfo)")."""
         if access != "read":
             no_mcp = {"permissions": {"deny": ["mcp(*)"]}}
             return ["--dangerously-skip-permissions"] + ([] if mcp else
@@ -360,16 +384,43 @@ class AntigravityAdapter(Adapter):
         }
 
     @classmethod
+    def _final_message(cls, last_text, response):
+        """The worker's final message when the result's response joins earlier messages to it, else None.
+
+        agy's response is every non-empty agent message of the turn joined with "\n": narration written before a
+        tool call, and a message written before a background command ended (live runs 2026-11-24, agy 1.5.15). So
+        a marker line (ASK:, FAILED:, RESULT:) in the last message can sit behind earlier text. last_text is the
+        text of the turn's last non-empty agent_response step; it is the final message only when the stripped
+        response ends with it and has something in front of it that ends with a line break (agy's separator; a
+        match that starts mid-line means the stream missed part of the message, and the response is kept whole)."""
+        final = (last_text or "").strip()
+        whole = response.strip()
+        if not (final and whole.endswith(final)):
+            return None
+        before = whole[:-len(final)]
+        if not before.strip() or not re.search(r"\n[ \t]*\Z", before):
+            return None
+        return final
+
+    @classmethod
     def parse_stream_event(cls, data, acc=None):
         """agy stream-json (captured 2026-11-23): step_update events; an agent_response streams its text as
         text_delta pieces until its DONE event; a tool step is ACTIVE (tool_info.parameters), then DONE or ERROR
-        (tool_info.error.message)."""
+        (tool_info.error.message). acc["last_text"] keeps the text of the turn's last non-empty agent_response; at
+        the result event, acc["final_response"] is set to that message when the result's response joins earlier
+        messages to it (see _final_message), and removed otherwise."""
         if not isinstance(data, dict):
             return None, None
         acc = {} if acc is None else acc
         ev = data.get("event")
         if ev == "result" and isinstance(data.get("result"), dict):
-            return None, data["result"]
+            result = data["result"]
+            final = cls._final_message(acc.pop("last_text", ""), _as_text(result.get("response")))
+            if final is None:
+                acc.pop("final_response", None)
+            else:
+                acc["final_response"] = final
+            return None, result
         if cls.is_envelope(data):
             return None, data
         if ev == "init":
@@ -398,7 +449,10 @@ class AntigravityAdapter(Adapter):
                 key = f"text-{su.get('step_index')}"
                 acc[key] = acc.get(key, "") + _as_text(su.get("text_delta"))
                 if state == "DONE":
-                    said = _one_line(acc.pop(key), 160)
+                    text = acc.pop(key)
+                    if text.strip():
+                        acc["last_text"] = text
+                    said = _one_line(text, 160)
                     return (f"says: {said}" if said else None), None
         return None, None
 
@@ -433,10 +487,18 @@ class ClaudeAdapter(Adapter):
 
     @classmethod
     def permission_args(cls, access, write_dirs=(), git_dirs=(), workdir=None, mcp=False):
+        """Read-only: `git -C` is allowed only on the git_dirs, in the spellings _shell_spellings gives (a path it
+        cannot spell safely is left out: `git -C` on it is denied). A write dir that cannot be named safely in a rule
+        is refused (ValueError) rather than left out, since the worker could not write its output."""
         if access == "read":
             # "//" marks an absolute path in a permission rule; Edit rules cover every file-editing tool.
+            bad = [str(d) for d in write_dirs if _RULE_UNSAFE.search(str(Path(d).resolve()))]
+            if bad:
+                raise ValueError(f"output folder {bad[0]!r} has a character a permission rule cannot hold "
+                                 "(one of ( ) * ? [ ] \\ or a control character); use a folder without it")
             writes = [f"{tool}(/{Path(d).resolve()}/**)" for d in write_dirs for tool in ("Edit", "Write")]
-            paths = dict.fromkeys(p for d in git_dirs for p in _git_dir_spellings(d, workdir))
+            paths = dict.fromkeys(s for d in git_dirs for p in _git_dir_spellings(d, workdir)
+                                  for s in _shell_spellings(p))
             dash_c = [f"Bash(git -C {p} {c} *)" for p in paths for c in READ_ONLY_GIT]
             # One comma-joined value: --allowedTools is variadic and must not swallow later arguments.
             # --strict-mcp-config with no --mcp-config: no MCP servers (none of them is read-only by contract).
@@ -593,11 +655,23 @@ class ClaudeAdapter(Adapter):
 
     @classmethod
     def parse_stream_event(cls, data, acc=None):
+        """Also records in acc, for exec_prompt: "turn" when the event belongs to a turn (system/init, assistant,
+        user), and "background", the number of background commands (run_in_background Bash) the latest
+        background_tasks_changed listed. Claude Code prints a result when the model ends its turn even while one
+        runs, stays alive, and starts a new turn (system/init) with a second result when it ends (live 2026-11-24).
+        Task events (task_started, task_updated, task_notification, ...) are not turn activity: they only come with
+        the background count. Nor are hook_*, task_summary, post_turn_summary and rate_limit_event, which also come
+        after a result."""
         if not isinstance(data, dict):
             return None, None
         if cls.is_envelope(data):
             return None, data
+        acc = {} if acc is None else acc
         ev_type = data.get("type")
+        if ev_type in ("assistant", "user") or (ev_type == "system" and data.get("subtype") == "init"):
+            acc["turn"] = True
+        if ev_type == "system" and data.get("subtype") == "background_tasks_changed":
+            acc["background"] = len(data["tasks"]) if isinstance(data.get("tasks"), list) else 0
         if ev_type == "system" and data.get("subtype") == "init":
             sid = _as_text(data.get("session_id")).strip()
             return (f"init session={sid}" if sid else "init"), None
@@ -649,10 +723,27 @@ def detect_session_harness(catalog, env=None):
     return "antigravity"
 
 
+def _prefetch(adapters, runner):
+    """Run every command detect will ask of the adapters at once (some CLIs take seconds per command), filling
+    each adapter's run cache; detect then reads the same answers it would have got one by one. Only for adapters
+    whose binary is on PATH (or fixtures)."""
+    fixtures = getattr(runner, "fixtures", False)
+    jobs = [(a, args) for a in adapters if fixtures or shutil.which(a.binary)
+            for args in dict.fromkeys((tuple(a.version_cmd), tuple(a.models_cmd), ("--help",), ("plugin", "list"),
+                                       ("mcp", "list")))]
+    if not jobs:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = [(a, args, pool.submit(runner, [a.binary, *args])) for a, args in jobs]
+        for a, args, fut in futures:
+            a._cache[args] = fut.result()
+
+
 def detect(runner, home, env=None):
     cat = {"detected_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "harnesses": {}}
-    for name, cls in ADAPTERS.items():
-        a = cls(runner, home, env)
+    adapters = {name: cls(runner, home, env) for name, cls in ADAPTERS.items()}
+    _prefetch(adapters.values(), runner)
+    for name, a in adapters.items():
         found = a.find()
         if not found:
             continue

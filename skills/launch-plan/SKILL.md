@@ -58,7 +58,7 @@ You never copy, edit or commit plan files yourself (Rule 4): the Flight Director
 1. **Copy the user's plan into `<RUN_DIR>`** (never into `<DOCS_DIR>`, so tree checks stay clean), and set `INPUT`:
    - **A ready bundle** (`flight-manifest.txt` and `tasks/<id>.{md,meta,-summary.md,-decisions.md}`, with its design file): `cp -R` the bundle folder to `<RUN_DIR>/plan-input/`, plus the design and any decisions log into that folder if they live elsewhere. `INPUT="bundle <RUN_DIR>/plan-input"`.
    - **A markdown plan:** copy it to `<RUN_DIR>/plan-input.md`, and any design/spec doc the user named to `<RUN_DIR>/design-input.md`. `INPUT="<RUN_DIR>/plan-input.md"`, plus `" <RUN_DIR>/design-input.md"` when there is one.
-2. Build `director-start.txt` with `FIRST_JOB=prepare-plan`, `INPUT=<that input>`, and all run values it names.
-3. `STATE set PHASE=design LAST_JOB=prepare-plan LAST_JOB_INPUT=<input> STEP="2 design" WAITING_ON=director`, and run `DIRECTOR start --state <RUN_DIR>/state.json --spec <spec> --pair <ROLE_DIRECTOR> --keep-open`.
-4. Handle `run_director.py` exits using `<SKILL_DIR>/references/capsule-communicator.md` ("Running the Flight Director": `11` RELAY, `12` NOTIFY, `31` USAGE_LIMIT, `1`/`13` Flight Director lost -> `FIRST_JOB=resume`).
+2. `STATE set PHASE=design STEP="2 design"`.
+3. Run `DIRECTOR start --state <RUN_DIR>/state.json --job prepare-plan --input '<that input>' --pair <ROLE_DIRECTOR> --keep-open` (it fills the start spec with every run value from the state, and sets `LAST_JOB`, `LAST_JOB_INPUT` and `WAITING_ON`).
+4. Handle `run_director.py` exits using `<SKILL_DIR>/references/capsule-communicator.md` ("Running the Flight Director": `11` RELAY, `12` NOTIFY, `31` USAGE_LIMIT, `1`/`13` Flight Director lost -> `DIRECTOR start --job resume`).
 5. When `DIRECTOR` returns `0` (`RESULT <saved>`) with `RESULT: PLAN_APPROVED <flight-manifest>`, continue straight to **Step 3** (`<SKILL_DIR>/references/capcom/step-3-setup.md`; item 1 unsets `DIRECTOR_CONVERSATION_ID` and `DIRECTOR_KEEP_OPEN` and proceeds through Steps 3, 4, and 5).

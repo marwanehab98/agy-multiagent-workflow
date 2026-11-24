@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -85,6 +86,32 @@ class DetectTests(unittest.TestCase):
         h = detect(runner, FAKE_HOME, env={})["harnesses"]["antigravity"]
         self.assertEqual(h["models"], [])
         self.assertIn("Unauthorized", h["broken"])
+
+    def test_detect_runs_its_commands_at_once_with_the_same_result(self):
+        # Some CLI commands take seconds each: detect starts them together, and the catalog is what it was.
+        base = fixture_runner()
+        lock, state = threading.Lock(), {"now": 0, "most": 0, "calls": []}
+        two_in_flight = threading.Event()
+
+        def slow(cmd):
+            with lock:
+                state["now"] += 1
+                state["most"] = max(state["most"], state["now"])
+                state["calls"].append(tuple(cmd))
+                if state["now"] >= 2:
+                    two_in_flight.set()
+            two_in_flight.wait(2)  # only a runner called one command at a time waits this out
+            with lock:
+                state["now"] -= 1
+            return base(cmd)
+        slow.fixtures = True
+        with unittest.mock.patch("harnesses.datetime") as dt:
+            dt.datetime.now.return_value.isoformat.return_value = "T"
+            got = detect(slow, FAKE_HOME, env={})
+            want = detect(base, FAKE_HOME, env={})
+        self.assertGreater(state["most"], 1)
+        self.assertEqual(json.dumps(got, indent=1), json.dumps(want, indent=1))
+        self.assertEqual(len(state["calls"]), len(set(state["calls"])))  # each command once
 
     def test_missing_binary_is_left_out(self):
         cat = detect_fixture(agy_version="no_such_file.txt")

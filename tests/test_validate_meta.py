@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -63,6 +64,19 @@ class ValidateMetaTests(unittest.TestCase):
     def test_default_meta_ok(self):
         self.meta("01")
         self.assertOK()
+
+    def test_no_ids_is_a_problem(self):
+        for ids in ("", "   "):
+            with self.subTest(ids=ids):
+                self.assertProblem("PROBLEM ids: no task ids given", ids=ids)
+
+    def test_an_id_listed_twice_is_a_problem(self):
+        self.meta("01")
+        self.meta("02")
+        self.assertProblem("PROBLEM ids: 01 is listed more than once", ids="01 02 01")
+        rc, out = self.tasks_cmd("01 02 01")
+        self.assertEqual(out.count("ids: 01"), 1, out)
+        self.assertEqual(out.count("OK 01"), 1, out)  # each listed task is still checked, once
 
     def test_missing_key(self):
         (self.tasks / "01.meta").write_text("TITLE=t\n")
@@ -187,6 +201,23 @@ class ValidateMetaTests(unittest.TestCase):
         self.meta("02", "AC-2")
         self.meta("02a", "AC-2")
         self.assertProblem("needs REPLANNED_FROM=02", ids="02a", extra=("--replanned-from", "02"))
+
+    def test_missing_design_is_a_problem(self):
+        self.meta("01", "AC-1")
+        self.assertProblem("design:", "No such file", extra=("--design", str(self.d / "missing.md")))
+
+    def test_malformed_replaced_meta_is_a_problem(self):
+        self.meta("02a", "AC-2", extra="REPLANNED_FROM=02\n")
+        (self.tasks / "02.meta").write_text("not a key value line\n")
+        self.assertProblem("02:", "not KEY=VALUE", ids="02a", extra=("--replanned-from", "02"))
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads any file")
+    def test_unreadable_meta_is_a_problem(self):
+        self.meta("01")
+        path = self.tasks / "01.meta"
+        path.chmod(0)
+        self.addCleanup(path.chmod, 0o644)
+        self.assertProblem("01:", "Permission denied")
 
     def test_acs_none_allowed(self):
         self.meta("F1", "none")
