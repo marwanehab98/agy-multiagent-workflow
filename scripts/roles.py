@@ -59,7 +59,7 @@ def unknown_why(catalog, pair):
         return f"harness {pair.harness} is broken: {h['broken']}"
     if not h.get("read_sandbox"):
         return (f"harness {pair.harness} {h.get('version', '')} lacks the flags read-only workers run with "
-                f"(see references/agy-facts.md); update {h.get('binary', pair.harness)}")
+                f"(see references/cli-facts.md); update {h.get('binary', pair.harness)}")
     for m in h["models"]:
         if m["model"] == pair.model:
             if pair.effort not in m["efforts"]:

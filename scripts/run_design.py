@@ -51,7 +51,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, STOP, ERROR, AgyRunner, Done, Run, answer_worker, build,  # noqa: E402
+from common import (CONSULT, ESCALATE, STOP, ERROR, WorkerRunner, Done, Run, answer_worker, build,  # noqa: E402
                     bundled_skills_dir, check_repo_trees, discard_repo_trees, drive, first_words, git, next_free,
                     read_answer, save_ask, save_body, tool)
 from pairs import parse_pair  # noqa: E402
@@ -66,7 +66,7 @@ class Design:
     def __init__(self, state_path):
         self.r = Run(state_path)
         self.r.require_new_format()
-        self.runner = AgyRunner(self.r)
+        self.runner = WorkerRunner(self.r)
 
     # -- state helpers
     def phase(self):

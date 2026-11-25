@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (HERE, AgyRunner, ConversationLost, Run, build, drive, first_words,  # noqa: E402
+from common import (HERE, WorkerRunner, ConversationLost, Run, build, drive, first_words,  # noqa: E402
                     next_free, rest_path, save_body)
 
 TEMPLATES = HERE.parent / "references" / "templates"
@@ -136,7 +136,7 @@ def build_job_spec(r, op, job, text):
 def run_cmd(ns):
     r = Run(ns.state)
     r.require_new_format()
-    runner = AgyRunner(r)
+    runner = WorkerRunner(r)
     wt = r.need("DOCS_WORKTREE")
     if ns.op in ("start", "send") and ns.job is not None:
         if ns.spec is not None or ns.input is None:

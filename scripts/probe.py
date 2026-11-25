@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (FIX_META, STOP, ERROR, AgyRunner, Done, Run, build, check_repo_trees,  # noqa: E402
+from common import (FIX_META, STOP, ERROR, WorkerRunner, Done, Run, build, check_repo_trees,  # noqa: E402
                     discard_repo_trees, drive, git, next_free, read_meta, save_body, tool)
 from harnesses import launch_args  # noqa: E402
 from pairs import Pair, parse_pair, pair_key  # noqa: E402
@@ -175,7 +175,7 @@ def set_pairs(r, name, one=None):
 
 def run_advance(r, set_name, one, moved=False, if_changed=False):
     r.require_new_format()
-    runner = AgyRunner(r)
+    runner = WorkerRunner(r)
     if moved:
         docs_moved(r)
     if set_name and (set_name != r.get("PROBE_SET") or (set_name == "pair" and one != r.get("PROBE_PAIR"))):

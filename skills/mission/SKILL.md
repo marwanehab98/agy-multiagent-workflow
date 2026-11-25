@@ -61,7 +61,7 @@ The session that loads this skill **is the Capsule Communicator**:
 3. Read `<SKILL_DIR>/references/capsule-communicator.md` and `<SKILL_DIR>/references/capcom/resume.md` in full, and run "Resume a run" with that state file in this same session.
 
 All required skills (`mission-brief`, `flight-plan`, `red-green`, `gatecheck`, `touchdown`, `wind-tunnel`, `flight-readiness`, `cross-check`, `spec-drift`, `launch-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
-The Flight Director worker reads `references/flight-director.md` and its job's file under `references/flight-director/`; its spec tells it to. Confirmed headless CLI worker behavior is in `references/agy-facts.md`.
+The Flight Director worker reads `references/flight-director.md` and its job's file under `references/flight-director/`; its spec tells it to. Confirmed headless CLI worker behavior is in `references/cli-facts.md`.
 
 ## Roles
 

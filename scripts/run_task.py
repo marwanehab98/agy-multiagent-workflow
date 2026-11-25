@@ -62,7 +62,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR, USAGE_REPLIES,  # noqa: E402
-                    AgyRunner, Done, Run, paused,
+                    WorkerRunner, Done, Run, paused,
                     answer_worker, build, drive, first_words, git, next_free, pick_verdict, read_answer, read_meta,
                     repo_key, rest_path, run, save_ask, save_body, tool, usage_prompt, verdict_line, void_prompt,
                     write_atomic, write_prompt)
@@ -151,7 +151,7 @@ class Loop:
     def __init__(self, state_path):
         self.r = Run(state_path)
         self.r.require_new_format()
-        self.runner = AgyRunner(self.r)
+        self.runner = WorkerRunner(self.r)
         self.events = []
 
     # -- queue

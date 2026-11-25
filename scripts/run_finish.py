@@ -36,8 +36,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, USAGE_REPLIES, AgyRunner, Done, Run, paused,  # noqa: E402
-                    answer_worker, build,
+from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, USAGE_REPLIES, WorkerRunner, Done, Run,  # noqa: E402
+                    paused, answer_worker, build,
                     bundled_skills_dir, check_repo_trees, discard_repo_trees, drive, first_words, next_free,
                     pick_verdict, read_answer, repo_key, save_ask, save_body, tool, usage_prompt, verdict_line,
                     void_prompt, write_atomic, write_prompt)
@@ -63,7 +63,7 @@ class Finish:
     def __init__(self, state_path):
         self.r = Run(state_path)
         self.r.require_new_format()
-        self.runner = AgyRunner(self.r)
+        self.runner = WorkerRunner(self.r)
 
     # -- state helpers
     def phase(self):

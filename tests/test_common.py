@@ -399,7 +399,7 @@ class TurnStats(unittest.TestCase):
         d = Path(removed_after(self, tempfile.mkdtemp()))
         st = d / "state.json"
         st.write_text(json.dumps({"RUN_DIR": str(d)}))
-        runner = common.AgyRunner(Run(st))
+        runner = common.WorkerRunner(Run(st))
         first = {"turns": 1, "model_time": "379s", "tokens": 185176}
         runner._turn_stats(harnesses.AntigravityAdapter, "c-1", False, first)
         self.assertEqual(first["tokens"], 185176)
@@ -419,7 +419,7 @@ class TurnStats(unittest.TestCase):
         d = Path(removed_after(self, tempfile.mkdtemp()))
         st = d / "state.json"
         st.write_text(json.dumps({"RUN_DIR": str(d)}))
-        runner = common.AgyRunner(Run(st))
+        runner = common.WorkerRunner(Run(st))
         record = d / "logs" / "usage-so-far.json"
         seen = []
         for resumed, cost in ((False, 3.32), (True, 7.32), (True, 11.83)):
@@ -458,7 +458,7 @@ class TurnStats(unittest.TestCase):
         # A record a newer runner wrote with a cost field still splits Antigravity's tokens.
         (d / "logs" / "usage-so-far.json").write_text(json.dumps({"c-1": "185176,1,379,0.5"}))
         stats = {"turns": 2, "model_time": "427s", "tokens": 199092}
-        common.AgyRunner(Run(st))._turn_stats(harnesses.AntigravityAdapter, "c-1", True, stats)
+        common.WorkerRunner(Run(st))._turn_stats(harnesses.AntigravityAdapter, "c-1", True, stats)
         self.assertEqual(stats, {"turns": 1, "model_time": "48s", "tokens": 13916})
         self.assertEqual(json.loads((d / "logs" / "usage-so-far.json").read_text()), {"c-1": "199092,2,427"})
 
@@ -469,7 +469,7 @@ class TurnStats(unittest.TestCase):
         (d / "logs").mkdir()
         (d / "logs" / "usage-so-far.json").write_text("{not json")
         stats = {"turns": 2, "model_time": "427s", "tokens": 199092}
-        common.AgyRunner(Run(st))._turn_stats(harnesses.AntigravityAdapter, "c-1", True, stats)
+        common.WorkerRunner(Run(st))._turn_stats(harnesses.AntigravityAdapter, "c-1", True, stats)
         self.assertEqual(stats["tokens"], 199092)
         self.assertEqual(json.loads((d / "logs" / "usage-so-far.json").read_text()), {"c-1": "199092,2,427"})
 

@@ -1,4 +1,4 @@
-"""Tests for Claude Code (`claude` CLI) runner dispatch and mixed cross-harness runs."""
+"""Tests for common.WorkerRunner on both harnesses: dispatch, limits, resumes, stops, and mixed runs."""
 import json
 import os
 import re
@@ -14,7 +14,7 @@ from helpers import Base, SKILL, sh
 
 sys.path.insert(0, str(SKILL / "scripts"))
 import common  # noqa: E402
-from common import AgyRunner, Run  # noqa: E402
+from common import WorkerRunner, Run  # noqa: E402
 
 FAKE_CLAUDE = SKILL / "tests" / "fake_claude.py"
 CATALOG_MULTI = SKILL / "tests" / "fixtures" / "catalog_multi.json"
@@ -71,7 +71,7 @@ class MultiHarnessBase(Base):
         return r.returncode, lines[-1]
 
 
-class ClaudeRunnerUnitTests(MultiHarnessBase):
+class RunnerUnitTests(MultiHarnessBase):
     def setUp(self):
         super().setUp()
         p = unittest.mock.patch.dict(os.environ, {
@@ -82,7 +82,7 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         self.addCleanup(p.stop)
 
     def _runner(self):
-        return AgyRunner(Run(self.state))
+        return WorkerRunner(Run(self.state))
 
     def test_claude_run_and_resume_flags(self):
         self.claude_behave(
@@ -906,6 +906,20 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
             s["WORKER_TIMEOUT"] = "0"
             self.state.write_text(json.dumps(s))
             self.assertEqual(self._runner()._timeout("read"), None)
+            # The old name still sets the limit, so existing state files keep theirs.
+            del s["WORKER_TIMEOUT"]
+            s["AGY_TIMEOUT"] = "600"
+            self.state.write_text(json.dumps(s))
+            self.assertEqual(self._runner()._timeout("full"), 600)
+
+    def test_a_worker_needs_a_harness(self):
+        # No CLI is assumed: a call without a pair or a harness is a mistake, not an Antigravity worker.
+        runner = self._runner()
+        with self.assertRaisesRegex(ValueError, "needs a pair or a harness"):
+            runner.run("p", args=[], worktree=self.impl)
+        with self.assertRaisesRegex(ValueError, "needs a harness"):
+            runner.exec_prompt("p", [], self.impl)
+        self.assertEqual(self.calls() + self.claude_calls(), [])
 
     def test_without_stream_json_the_run_limit_keeps_its_old_defaults(self):
         with unittest.mock.patch.dict(os.environ, {"WORKER_TIMEOUT": "", "AGY_TIMEOUT": ""}):
@@ -944,7 +958,7 @@ class ClaudeDirectorAndTaskFallbackTests(MultiHarnessBase):
         crew = self.claude_calls()[1]["argv"]
         self.assertIn("--dangerously-skip-permissions", crew)
         self.assertIn("--strict-mcp-config", crew)
-        runner = AgyRunner(Run(self.state))
+        runner = WorkerRunner(Run(self.state))
         with unittest.mock.patch.dict(os.environ, self._env()):
             runner.run("work", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl)
         crew_agy = self.calls()[-1]["argv"]

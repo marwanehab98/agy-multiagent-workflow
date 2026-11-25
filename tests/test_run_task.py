@@ -481,10 +481,10 @@ class TreeAndWorkers(Base):
         self.expect(20, "ESCALATE")
         self.assertIn("boom", (self.run_dir / "verdicts" / "01-history.md").read_text())
 
-    def test_agy_timeout_triggers_stopped_and_escalates(self):
+    def test_worker_timeout_triggers_stopped_and_escalates(self):
         import time as _time
         s = self.st()
-        s["AGY_TIMEOUT"] = "1"
+        s["WORKER_TIMEOUT"] = "1"
         self.state.write_text(json.dumps(s))
         self.behave({"do": "response", "spawn_child_sleep": 10, "sleep": 10, "text": "late\n"})
         t0 = _time.monotonic()

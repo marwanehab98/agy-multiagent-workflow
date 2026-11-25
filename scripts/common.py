@@ -676,6 +676,7 @@ MAX_INLINE_PROMPT_BYTES = 65536
 # Seconds a worker call may run in all, busy or not, a resume after silence included: the backstop on cost
 # (WORKER_TIMEOUT, when set, applies to every worker). Workers that edit (crew, flight director) get longer than
 # read-only ones.
+LEGACY_TIMEOUT_KEY = "AGY_TIMEOUT"  # WORKER_TIMEOUT's old name (see WorkerRunner._timeout)
 DEFAULT_TIMEOUT_FULL = 14400
 DEFAULT_TIMEOUT_READ = 7200
 # Without stream-json (WORKER_STREAM=0, or a CLI that falls back to plain JSON) there is no activity to see and so no
@@ -879,7 +880,7 @@ def _drain_stream(stream, tag, out_q):
         out_q.put(("eof", tag))
 
 
-class AgyRunner:
+class WorkerRunner:
     """Run headless CLI workers synchronously with live `--output-format stream-json` progress logging."""
 
     def __init__(self, r):
@@ -897,11 +898,13 @@ class AgyRunner:
             default = DEFAULT_TIMEOUT_READ if access == "read" else DEFAULT_TIMEOUT_FULL
         else:
             default = DEFAULT_TIMEOUT_READ_NO_STREAM if access == "read" else DEFAULT_TIMEOUT_FULL_NO_STREAM
+        # AGY_TIMEOUT: the setting's old name, from when only agy workers ran; still read so existing state files
+        # and environments keep their limit.
         raw = (
             self.r.get("WORKER_TIMEOUT")
-            or self.r.get("AGY_TIMEOUT")
+            or self.r.get(LEGACY_TIMEOUT_KEY)
             or os.environ.get("WORKER_TIMEOUT")
-            or os.environ.get("AGY_TIMEOUT")
+            or os.environ.get(LEGACY_TIMEOUT_KEY)
         )
         if raw is None or str(raw).strip() == "":
             return default
@@ -1059,7 +1062,7 @@ class AgyRunner:
         parsed = _as_pair(pair)
         return launch_args(catalog, parsed, pick_style(catalog, self.r.s, parsed))
 
-    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None, spec_path=None, harness="antigravity",
+    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None, spec_path=None, harness=None,
                     label=None, access="full", write_extra=(), pair_text="", mcp=False, resume_on_silence=True):
         """Invoke a headless worker and return (kind, detail_or_outcome, body, conversation_id).
 
@@ -1075,7 +1078,11 @@ class AgyRunner:
         resumed once in that conversation with the message it was working on (SILENCE_RESUME_PROMPT) and what is
         left of WORKER_TIMEOUT. The caller sees the resumed call's result, or the first stop when the conversation
         cannot be resumed.
+
+        harness (a key of harnesses.ADAPTERS) is required: there is no default CLI.
         """
+        if harness is None:
+            raise ValueError("exec_prompt needs a harness")
         total = self._timeout(access, self._stream_enabled())
         deadline = None if total is None else time.monotonic() + total
         launch = dict(args=args, worktree=worktree, harness=harness,
@@ -1105,7 +1112,7 @@ class AgyRunner:
         worktree,
         conversation_id=None,
         spec_path=None,
-        harness="antigravity",
+        harness=None,
         label=None,
         _stream_override=None,
         access="full",
@@ -1528,7 +1535,9 @@ class AgyRunner:
         may write only under RUN_DIR and write_extra. mcp: keep the user's MCP servers (the flight director only).
         resume_on_silence: see exec_prompt (off for test launches, where a resume is no use)."""
         prompt_text, spec_path = _read_spec_or_text(spec)
-        target_harness = harness or (_as_pair(pair).harness if pair else "antigravity")
+        target_harness = harness or (_as_pair(pair).harness if pair else None)
+        if target_harness is None:
+            raise ValueError("run needs a pair or a harness")
         launch = list(args) if args is not None else self.launch(pair)
         return self.exec_prompt(prompt_text, launch, worktree, spec_path=spec_path, harness=target_harness, label=label,
                                 access=access, write_extra=write_extra, pair_text=str(_as_pair(pair)) if pair else "",
@@ -1549,9 +1558,6 @@ class AgyRunner:
             # fresh worker, as for any conversation it cannot resume.
             return None
         return res
-
-
-WorkerRunner = AgyRunner
 
 
 # ---------------------------------------------------------------- shared by run_task, run_design and run_finish

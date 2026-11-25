@@ -423,7 +423,7 @@ class AntigravityAdapter(Adapter):
     @classmethod
     def parse_stderr_line(cls, line, acc):
         """agy prints "root agent idle; waiting for N background task(s) to finish" when the worker ends its turn
-        while a command it moved to the background still runs (agy-facts.md): no result and no steps come until
+        while a command it moved to the background still runs (cli-facts.md): no result and no steps come until
         that command ends, so the worker is waiting, not stuck."""
         if _AGY_WAITING_RE.search(line):
             acc["waiting"] = True
@@ -467,7 +467,7 @@ class AntigravityAdapter(Adapter):
             su = nested or data
             step_type = _as_text(su.get("step_type")).strip()
             if step_type == "system_message":
-                # The step that wakes the agent when a background command ends (agy-facts.md). Only this ends
+                # The step that wakes the agent when a background command ends (cli-facts.md). Only this ends
                 # "waiting": stdout and stderr are read apart, so a step printed just before the waiting line may be
                 # seen after it. A stale "waiting" only lengthens the silence limit to the wait limit.
                 acc.pop("waiting", None)
