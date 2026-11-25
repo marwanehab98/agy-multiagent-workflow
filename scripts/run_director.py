@@ -32,7 +32,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import HERE, AgyRunner, Run, build, drive, first_words, next_free, rest_path, save_body  # noqa: E402
+from common import (HERE, AgyRunner, ConversationLost, Run, build, drive, first_words,  # noqa: E402
+                    next_free, rest_path, save_body)
 
 TEMPLATES = HERE.parent / "references" / "templates"
 
@@ -45,7 +46,8 @@ RC_RESULT, RC_FAILED, RC_ERROR, RC_RELAY, RC_NOTIFY, RC_LOST, RC_USAGE = 0, 1, 2
 
 
 def _handle_response(r, result, keep_open):
-    if result is None:
+    # A director kept open whose conversation went silent and could not be resumed: later calls cannot resume it.
+    if result is None or (keep_open and isinstance(result, ConversationLost)):
         r.set(DIRECTOR_CONVERSATION_ID=None, LAST_DIRECTOR_RESULT=None)
         return RC_LOST, "LOST flight director conversation could not be resumed"
     kind, detail, body, conv_id = result

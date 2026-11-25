@@ -80,6 +80,21 @@ class RunDirectorTests(Base):
         self.assertEqual(rc, 0)
         self.assertIsNone(self.st("DIRECTOR_CONVERSATION_ID"))
 
+    def test_a_kept_open_director_whose_silent_conversation_cannot_be_resumed_is_lost(self):
+        s = self.st()
+        s["WORKER_IDLE_TIMEOUT"] = "1"
+        self.state.write_text(json.dumps(s))
+        init = {"event": {"event": "init", "conversation_id": "dir_s", "init": {}}}
+        self.behave({"do": "script", "conv_id": "dir_s", "steps": [init, {"sleep": 60}]})
+        w = json.loads(self.world.read_text())
+        w["expired_conversations"] = ["dir_s"]  # the resume finds the conversation gone
+        self.world.write_text(json.dumps(w))
+        rc, last = self.director("start", "--state", str(self.state), "--spec", str(self.spec),
+                                 "--pair", "antigravity:big@high", "--keep-open")
+        self.assertEqual(rc, 13)
+        self.assertTrue(last.startswith("LOST "), last)
+        self.assertIsNone(self.st("DIRECTOR_CONVERSATION_ID"))
+
     def test_expired_conversation_returns_lost_13(self):
         self.behave({"do": "response", "text": "RESULT: COMMITTED\n", "conv_id": "dir_dead"})
         self.director("start", "--state", str(self.state), "--spec", str(self.spec),

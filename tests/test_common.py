@@ -383,6 +383,15 @@ class Costs(unittest.TestCase):
         self.assertIn("| claude:haiku@default | $0.15 | 0 | 2 | 5 |", text)
         self.assertIn("| antigravity:g@high | $0.00 | 18,004 | 1 | 1 |", text)
 
+    def test_a_paused_call_counts_as_a_run(self):
+        import costs
+        d = Path(removed_after(self, tempfile.mkdtemp()))
+        log = d / "progress.log"
+        log.write_text("10:00:00 [worker +900s] 01-implement: paused: no activity for 900s; resuming its conversation "
+                       "pair=claude:haiku@default\n"
+                       "10:20:00 [worker +60s] 01-implement: done (succeeded) pair=claude:haiku@default cost=$0.40\n")
+        self.assertIn("Total: $0.40 across 2 worker runs (1 reported no cost).", costs.summarize(log))
+
 
 class TurnStats(unittest.TestCase):
     def test_resumed_agy_turn_reports_only_its_share(self):
@@ -514,7 +523,7 @@ class AntigravityProgress(unittest.TestCase):
             lines += [summary] if summary else []
             env = e or env
         self.assertEqual(lines, [
-            "init",
+            "init conv=edceea8c-a944-44e7-aa19-50e8d50df5d2",
             "says: I am going to list the workspace directory, read `notes.txt`, and attempt to read `missing.txt`.",
             "tool: run_command (ls)",
             "tool: read_file (/home/u/repo/notes.txt)",
@@ -563,7 +572,10 @@ class ClaudeProgress(unittest.TestCase):
         self.assertEqual(acc_after(bg(1), bg(0)), {"background": 0})
         for ev in ({"type": "system", "subtype": "init"}, {"type": "assistant", "message": {"content": []}},
                    {"type": "user", "message": {"content": []}}):
-            self.assertEqual(acc_after(ev), {"turn": True})
+            self.assertEqual(acc_after(ev), {"turn": True, "active": True})
+        self.assertEqual(acc_after({"type": "system", "subtype": "init", "session_id": "s1"}),
+                         {"turn": True, "active": True, "conversation_id": "s1"})
+        self.assertEqual(acc_after({"type": "system", "subtype": "a_new_subtype"}), {"active": True})
         # Task events and events that also follow a result are not turn activity, and a result is none either.
         for ev in ({"type": "system", "subtype": "task_started"}, {"type": "system", "subtype": "task_updated"},
                    {"type": "system", "subtype": "task_progress"}, {"type": "system", "subtype": "task_notification"},
@@ -571,6 +583,53 @@ class ClaudeProgress(unittest.TestCase):
                    {"type": "rate_limit_event"}, {"type": "system", "subtype": "hook_response"},
                    {"type": "result", "subtype": "success", "result": "x", "session_id": "s", "is_error": False}):
             self.assertEqual(acc_after(ev), {})
+
+    def test_the_captured_claude_stream_marks_work_and_noise(self):
+        # A live run (2.1.331, 2026-11-25): a 75 s foreground Bash call, a foreground subagent, a background command.
+        active, quiet = set(), set()
+        acc = {}
+        for raw in (ROOT / "tests" / "fixtures" / "harness" / "claude_stream.ndjson").read_text().splitlines():
+            ev = json.loads(raw)
+            _, env = harnesses.ClaudeAdapter.parse_stream_event(ev, acc)
+            kind = ev["type"] + ("/" + ev["subtype"] if ev.get("subtype") and ev["type"] == "system" else "")
+            if env is None:
+                (active if acc.pop("active", False) else quiet).add(kind)
+            acc.pop("turn", None)
+        self.assertEqual(active, {"assistant", "user", "system/init", "system/thinking_tokens"})
+        self.assertEqual(quiet, {"system/hook_started", "system/hook_response", "system/task_started",
+                                 "system/task_progress", "system/task_updated", "system/task_notification",
+                                 "system/background_tasks_changed", "rate_limit_event", "tool_progress"})
+        self.assertEqual(acc["conversation_id"], "s-capture-1")
+
+    def test_antigravity_activity_signals(self):
+        def acc_after(ev):
+            acc = {}
+            harnesses.AntigravityAdapter.parse_stream_event(ev, acc)
+            return acc
+        # The captured shape: the id at the top level of init, and inside every step_update.
+        self.assertEqual(acc_after({"event": "init", "conversation_id": "c1", "init": {"cwd": "/x"}}),
+                         {"active": True, "conversation_id": "c1"})
+        step = {"conversation_id": "c2", "step_type": "tool", "tool_name": "x", "state": "ACTIVE"}
+        self.assertEqual(acc_after({"event": "step_update", "step_update": step}),
+                         {"active": True, "conversation_id": "c2"})
+        self.assertEqual(acc_after({"event": "a_new_event"}), {"active": True})  # unknown events count as work
+        self.assertEqual(acc_after({"error": {"code": 429}}), {})
+        acc = {}
+        harnesses.AntigravityAdapter.parse_stderr_line("root agent idle; waiting for 1 background task(s) to finish",
+                                                       acc)
+        self.assertEqual(acc, {"waiting": True})
+        harnesses.AntigravityAdapter.parse_stream_event({"event": "step_update", "step_update": {}}, acc)
+        self.assertEqual(acc.get("waiting"), True)  # a step printed before the waiting line may be read after it
+        harnesses.AntigravityAdapter.parse_stream_event(
+            {"event": "step_update", "step_update": {"step_type": "system_message"}}, acc)
+        self.assertNotIn("waiting", acc)  # the step that wakes the agent
+        self.assertEqual(harnesses.AntigravityAdapter.parse_stream_event({"event": {"odd": 1}}, {}), (None, None))
+
+    def test_the_captured_agy_stream_names_its_conversation(self):
+        acc = {}
+        for raw in (ROOT / "tests" / "fixtures" / "harness" / "agy_stream.ndjson").read_text().splitlines():
+            harnesses.AntigravityAdapter.parse_stream_event(json.loads(raw), acc)
+        self.assertEqual(acc["conversation_id"], "edceea8c-a944-44e7-aa19-50e8d50df5d2")
 
 
 if __name__ == "__main__":

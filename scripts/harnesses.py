@@ -260,10 +260,19 @@ class Adapter:
     @classmethod
     def parse_stream_event(cls, data, acc=None):
         """Parse one NDJSON event object. Return (progress_summary_or_None, final_envelope_or_None). acc is a
-        dict kept for one worker run, for harnesses that stream a message in pieces."""
+        dict kept for one worker run, for harnesses that stream a message in pieces. An adapter sets acc["active"]
+        on every event except those it knows are not the worker at work (exec_prompt's silence limit counts the
+        active ones, and results: an event a CLI update adds counts, so it cannot make a busy worker look stuck), and
+        acc["conversation_id"] to the conversation the stream names."""
         if cls.is_envelope(data):
             return None, data
         return None, None
+
+    @classmethod
+    def parse_stderr_line(cls, line, acc):
+        """A stderr line, for what it says about the worker's state: an adapter sets acc["waiting"] while the
+        worker has ended its turn with no result and waits on background commands (exec_prompt then applies the
+        longer wait limit instead of the silence limit)."""
 
 
 class AntigravityAdapter(Adapter):
@@ -412,6 +421,14 @@ class AntigravityAdapter(Adapter):
         return final
 
     @classmethod
+    def parse_stderr_line(cls, line, acc):
+        """agy prints "root agent idle; waiting for N background task(s) to finish" when the worker ends its turn
+        while a command it moved to the background still runs (agy-facts.md): no result and no steps come until
+        that command ends, so the worker is waiting, not stuck."""
+        if _AGY_WAITING_RE.search(line):
+            acc["waiting"] = True
+
+    @classmethod
     def parse_stream_event(cls, data, acc=None):
         """agy stream-json (captured 2026-11-23): step_update events; an agent_response streams its text as
         text_delta pieces until its DONE event; a tool step is ACTIVE (tool_info.parameters), then DONE or ERROR
@@ -422,6 +439,8 @@ class AntigravityAdapter(Adapter):
             return None, None
         acc = {} if acc is None else acc
         ev = data.get("event")
+        if not isinstance(ev, str):
+            ev = ""
         if ev == "result" and isinstance(data.get("result"), dict):
             result = data["result"]
             final = cls._final_message(acc.pop("last_text", ""), _as_text(result.get("response")))
@@ -432,13 +451,26 @@ class AntigravityAdapter(Adapter):
             return None, result
         if cls.is_envelope(data):
             return None, data
+        if ev:
+            # Every agy event but the result shows the worker at work (a result counts anyway); an error object
+            # (no "event") does not.
+            acc["active"] = True
+        nested = data.get(ev) if isinstance(data.get(ev), dict) else {}
+        # The captured stream (tests/fixtures/harness/agy_stream.ndjson) names the conversation at the top level of
+        # the init event and inside every step_update.
+        cid = _as_text(data.get("conversation_id") or nested.get("conversation_id")).strip()
+        if cid:
+            acc.setdefault("conversation_id", cid)  # for exec_prompt: resume a worker stopped before its result
         if ev == "init":
-            init = data.get("init") if isinstance(data.get("init"), dict) else data
-            cid = _as_text(init.get("conversation_id")).strip()
             return (f"init conv={cid}" if cid else "init"), None
         if ev == "step_update":
-            su = data.get("step_update") if isinstance(data.get("step_update"), dict) else data
+            su = nested or data
             step_type = _as_text(su.get("step_type")).strip()
+            if step_type == "system_message":
+                # The step that wakes the agent when a background command ends (agy-facts.md). Only this ends
+                # "waiting": stdout and stderr are read apart, so a step printed just before the waiting line may be
+                # seen after it. A stale "waiting" only lengthens the silence limit to the wait limit.
+                acc.pop("waiting", None)
             state = _as_text(su.get("state")).strip().upper()
             tool_name = _as_text(su.get("tool_name")).strip()
             info = su.get("tool_info") if isinstance(su.get("tool_info"), dict) else {}
@@ -464,6 +496,9 @@ class AntigravityAdapter(Adapter):
                     said = _one_line(text, 160)
                     return (f"says: {said}" if said else None), None
         return None, None
+
+
+_AGY_WAITING_RE = re.compile(r"waiting for \d+ background task")
 
 
 class ClaudeAdapter(Adapter):
@@ -499,6 +534,25 @@ class ClaudeAdapter(Adapter):
     READ_ONLY_DENY = ["Bash(git -c *)", "Bash(git -C * -c *)", "Bash(git *--config-env*)",
                       "Bash(git * --out*)", "Bash(git * --ext*)", "Bash(git * --textc*)",
                       "Bash(git * -O*)", "Bash(git * --op*)"]
+
+    # Events that are not the worker at work, for the silence limit: background command updates, hooks, summaries
+    # after a result, rate-limit notices and API retries (a CLI retrying forever is stuck, not busy), and a tool's
+    # heartbeat (tool_progress with heartbeat: true, every 30 s while a tool runs, whether or not it gets anywhere).
+    # Checked against a live stream (tests/fixtures/harness/claude_stream.ndjson, 2.1.331, 2026-11-25): a 75 s
+    # foreground Bash call gave only heartbeats; thinking gives thinking_tokens events (work); a foreground
+    # subagent's messages come with parent_tool_use_id (work), its Bash calls without heartbeats. A foreground
+    # command is bounded by Claude Code's own Bash timeout (10 minutes at most by default), below the silence limit.
+    NOISE_SUBTYPES = ("background_tasks_changed", "post_turn_summary", "api_retry")
+    NOISE_PREFIXES = ("task_", "hook_")
+
+    @classmethod
+    def _is_noise(cls, data):
+        if data.get("type") == "rate_limit_event":
+            return True
+        if data.get("type") == "tool_progress" and data.get("heartbeat"):
+            return True
+        sub = _as_text(data.get("subtype"))
+        return data.get("type") == "system" and (sub in cls.NOISE_SUBTYPES or sub.startswith(cls.NOISE_PREFIXES))
 
     def read_sandbox(self):
         rc, out = self.run("--help")
@@ -674,8 +728,8 @@ class ClaudeAdapter(Adapter):
 
     @classmethod
     def parse_stream_event(cls, data, acc=None):
-        """Also records in acc, for exec_prompt: "turn" when the event belongs to a turn (system/init, assistant,
-        user), and "background", the number of background commands (run_in_background Bash) the latest
+        """Also records in acc, for exec_prompt: "turn" (and "active") when the event belongs to a turn (system/init,
+        assistant, user), and "background", the number of background commands (run_in_background Bash) the latest
         background_tasks_changed listed. Claude Code prints a result when the model ends its turn even while one
         runs, stays alive, and starts a new turn (system/init) with a second result when it ends (live 2026-11-24).
         Task events (task_started, task_updated, task_notification, ...) are not turn activity: they only come with
@@ -689,10 +743,14 @@ class ClaudeAdapter(Adapter):
         ev_type = data.get("type")
         if ev_type in ("assistant", "user") or (ev_type == "system" and data.get("subtype") == "init"):
             acc["turn"] = True
+        if ev_type and not cls._is_noise(data):
+            acc["active"] = True
         if ev_type == "system" and data.get("subtype") == "background_tasks_changed":
             acc["background"] = len(data["tasks"]) if isinstance(data.get("tasks"), list) else 0
         if ev_type == "system" and data.get("subtype") == "init":
             sid = _as_text(data.get("session_id")).strip()
+            if sid:
+                acc["conversation_id"] = sid  # for exec_prompt: resume a worker stopped before its result
             return (f"init session={sid}" if sid else "init"), None
         msg = data.get("message") if isinstance(data.get("message"), dict) else {}
         content = msg.get("content") if isinstance(msg.get("content"), list) else []

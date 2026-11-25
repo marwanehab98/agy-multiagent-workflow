@@ -68,6 +68,11 @@ class Lines(unittest.TestCase):
                      "10:00:00 [worker +0s] 02-implement: launch failed: no such file"):
             self.assertTrue(watch.wakes(line), line)
 
+    def test_a_worker_paused_for_a_resume_does_not_wake(self):
+        line = "10:00:00 [worker +900s] 02-implement: paused: no activity for 900s; resuming its conversation"
+        self.assertFalse(watch.wakes(line))
+        self.assertTrue(watch.wakes("10:00:00 [worker +950s] 02-implement: timed out: no activity for 900s"))
+
     def test_worker_chatter_is_not_shown(self):
         for line in (LINES[1], LINES[2], LINES[3], LINES[4], LINES[5], LINES[6]):
             self.assertFalse(watch.shows(line), line)

@@ -390,6 +390,19 @@ def run(cmd, cwd=None):
     return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
+def _stop_gently(proc, earlier=()):
+    """Stop a worker (own session) at a limit: SIGTERM its group, give it 5 seconds to save and exit, then kill its
+    group and everything listed below it (now, and earlier while it ran), and reap it."""
+    kids = _descendants(proc.pid) if proc.poll() is None else []
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=5)
+    except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
+        pass
+    _kill_tree(proc.pid, kids, earlier=earlier, alive=proc.poll() is None)
+    _reap(proc)
+
+
 def _stop_child(proc, own_session):
     if proc.poll() is not None and not own_session:
         return
@@ -660,15 +673,43 @@ def worker_env(access, environ=None):
 
 
 MAX_INLINE_PROMPT_BYTES = 65536
-# Seconds before a worker is stopped (WORKER_TIMEOUT, when set, applies to every worker): workers that edit
-# (crew, flight director) get longer than read-only ones.
-DEFAULT_TIMEOUT_FULL = 3600
-DEFAULT_TIMEOUT_READ = 1800
+# Seconds a worker call may run in all, busy or not, a resume after silence included: the backstop on cost
+# (WORKER_TIMEOUT, when set, applies to every worker). Workers that edit (crew, flight director) get longer than
+# read-only ones.
+DEFAULT_TIMEOUT_FULL = 14400
+DEFAULT_TIMEOUT_READ = 7200
+# Without stream-json (WORKER_STREAM=0, or a CLI that falls back to plain JSON) there is no activity to see and so no
+# silence limit: the run limit is the only one, and keeps its tighter defaults.
+DEFAULT_TIMEOUT_FULL_NO_STREAM = 3600
+DEFAULT_TIMEOUT_READ_NO_STREAM = 1800
+# Seconds a streaming worker may go without activity before it is stopped as stuck (WORKER_IDLE_TIMEOUT): any stream
+# event except those its adapter knows are not the worker at work (background command updates, hooks, rate-limit
+# notices, API retries), and not stderr. Not applied while the worker holds a result or waits on background commands
+# with no result (agy). As long as GATE_TIMEOUT, so a check the run itself allows can run in a worker.
+DEFAULT_IDLE_TIMEOUT = 1800
+# A worker stopped for silence is resumed once in its own conversation, with this prompt and what is left of
+# WORKER_TIMEOUT, so its work is not thrown away; only when the stream showed that conversation, and at least
+# MIN_RESUME_SECONDS of the budget is left. {last}: what the stream last showed it doing; {prompt}: the message it was
+# working on.
+MIN_RESUME_SECONDS = 300
+RECENT_MARGIN = 1.0
+SILENCE_RESUME_PROMPT = (
+    "The run stopped you ({why}) and stopped every command you had running.{last} Your files are as you left them. "
+    "If you had started on your task, continue from where you left off without redoing finished work; otherwise do "
+    "it now. Give a command that may run long a time limit. End exactly as your instructions say. {task}"
+)
+# {task} for a worker given a spec file, and for one given a message (repeated: it may not have reached the
+# conversation before the worker went silent).
+RESUME_TASK_SPEC = "Your instructions are in {spec}: read them again."
+RESUME_TASK_TEXT = ("Your task is the message below, repeated in case it had not reached you.\n\n"
+                    "--- The message you were working on ---\n{prompt}")
+
 DEFAULT_HEARTBEAT = 30
 # Seconds a worker may run on after its latest result, with nothing showing it is still busy, before it is stopped
 # and the result used (a CLI that never exits would otherwise hold a finished result until WORKER_TIMEOUT and lose
-# it). Turn activity after a result (a new turn, a message, a tool result) stops this clock until the next result;
-# background task events do not. When the last background command ends, the grace starts again from then.
+# it; the silence limit does not apply while a result is held). Turn activity after a result (a new turn, a
+# message, a tool result) stops this clock until the next result; background task events do not. When the last
+# background command ends, the grace starts again from then.
 ENVELOPE_GRACE = 10
 # The same, counted from the result, while the worker reports background commands still running (it may start a
 # new turn when they end): a dev server left in the background must not hold a finished worker until WORKER_TIMEOUT.
@@ -784,6 +825,33 @@ def _as_pair(pair):
     return pair if isinstance(pair, Pair) else parse_pair(pair)
 
 
+class _Paused(tuple):
+    """A ('stopped', detail, '', conv_id) result from a worker stopped for silence whose conversation the stream
+    showed (conv_id), so exec_prompt can resume it; why: the limit, in words; last: what the stream last showed it
+    doing (or ""). Equal to the plain tuple."""
+
+    def __new__(cls, result, why, last=""):
+        obj = super().__new__(cls, result)
+        obj.why, obj.last = why, last
+        return obj
+
+
+class ConversationLost(tuple):
+    """A ('stopped', detail, '', '') result from exec_prompt when a worker stopped for silence could not be resumed
+    in its conversation: that conversation is gone for later calls too (run_director reports LOST for a director
+    kept open). Equal to the plain tuple."""
+
+
+def _usage_line(errors):
+    """The line of errors (error_text output) that reports a usage limit, or ""."""
+    m = USAGE_RE.search(errors)
+    if not m:
+        return ""
+    begin = errors.rfind("\n", 0, m.start()) + 1
+    end = errors.find("\n", m.end())
+    return _one_line(errors[begin:None if end < 0 else end], 800)
+
+
 def _drain_chunks(stream, tag, out_q):
     """Without stream-json: pass stdout on as it arrives, not by line, so a result printed without a final newline
     by a CLI that then does not exit is still seen before the timeout."""
@@ -821,10 +889,14 @@ class AgyRunner:
         adapter = get_adapter(harness)
         return self.r.get(adapter.exe_state_key) or adapter.binary
 
-    def _timeout(self, access="full"):
-        """WORKER_TIMEOUT (state, then environment) for every worker; otherwise DEFAULT_TIMEOUT_FULL for workers
-        that edit, DEFAULT_TIMEOUT_READ for read-only ones. 0 or less: no limit (None)."""
-        default = DEFAULT_TIMEOUT_READ if access == "read" else DEFAULT_TIMEOUT_FULL
+    def _timeout(self, access="full", stream=True):
+        """The run limit of a worker call: WORKER_TIMEOUT (state, then environment) for every worker; otherwise
+        DEFAULT_TIMEOUT_FULL for workers that edit, DEFAULT_TIMEOUT_READ for read-only ones (the _NO_STREAM ones
+        without stream-json, which has no silence limit). 0 or less: no limit (None)."""
+        if stream:
+            default = DEFAULT_TIMEOUT_READ if access == "read" else DEFAULT_TIMEOUT_FULL
+        else:
+            default = DEFAULT_TIMEOUT_READ_NO_STREAM if access == "read" else DEFAULT_TIMEOUT_FULL_NO_STREAM
         raw = (
             self.r.get("WORKER_TIMEOUT")
             or self.r.get("AGY_TIMEOUT")
@@ -837,6 +909,15 @@ class AgyRunner:
             val = int(raw)
         except ValueError:
             return default
+        return None if val <= 0 else val
+
+    def _idle_timeout(self):
+        """WORKER_IDLE_TIMEOUT (state, then environment), else DEFAULT_IDLE_TIMEOUT. 0 or less: no limit (None)."""
+        raw = self.r.get("WORKER_IDLE_TIMEOUT") or os.environ.get("WORKER_IDLE_TIMEOUT")
+        try:
+            val = DEFAULT_IDLE_TIMEOUT if raw is None or str(raw).strip() == "" else float(raw)
+        except ValueError:
+            val = DEFAULT_IDLE_TIMEOUT
         return None if val <= 0 else val
 
     def _background_wait(self):
@@ -978,7 +1059,46 @@ class AgyRunner:
         parsed = _as_pair(pair)
         return launch_args(catalog, parsed, pick_style(catalog, self.r.s, parsed))
 
-    def exec_prompt(
+    def exec_prompt(self, prompt_text, args, worktree, conversation_id=None, spec_path=None, harness="antigravity",
+                    label=None, access="full", write_extra=(), pair_text="", mcp=False, resume_on_silence=True):
+        """Invoke a headless worker and return (kind, detail_or_outcome, body, conversation_id).
+
+        kind is one of:
+          'done'          -> ('done', 'succeeded'|'failed', body, conv_id)
+          'ask'           -> ('ask', conv_id, body, conv_id)
+          'usage'         -> ('usage', detail, '', conv_id)
+          'resume_failed' -> ('resume_failed', detail, '', '')
+          'stopped'       -> ('stopped', detail, '', conv_id)
+
+        WORKER_TIMEOUT bounds the whole call. A streaming worker that shows no turn activity for WORKER_IDLE_TIMEOUT
+        is stopped; when the stream showed its conversation and resume_on_silence is set (not for probes), it is
+        resumed once in that conversation with the message it was working on (SILENCE_RESUME_PROMPT) and what is
+        left of WORKER_TIMEOUT. The caller sees the resumed call's result, or the first stop when the conversation
+        cannot be resumed.
+        """
+        total = self._timeout(access, self._stream_enabled())
+        deadline = None if total is None else time.monotonic() + total
+        launch = dict(args=args, worktree=worktree, harness=harness,
+                      label=label or (spec_path.stem if spec_path else None), access=access, write_extra=write_extra,
+                      pair_text=pair_text, mcp=mcp, total=total, deadline=deadline)
+        res = self._exec_once(prompt_text, conversation_id=conversation_id, spec_path=spec_path,
+                              may_pause=resume_on_silence, **launch)
+        if not isinstance(res, _Paused):
+            return res
+        last = f" The last thing the run saw from you: {res.last}." if res.last else ""
+        task = (RESUME_TASK_SPEC.format(spec=Path(spec_path).resolve()) if spec_path is not None
+                and Path(spec_path).is_file() else RESUME_TASK_TEXT.format(prompt=prompt_text))
+        resumed = self._exec_once(SILENCE_RESUME_PROMPT.format(why=res.why, last=last, task=task),
+                                  conversation_id=res[3], **launch)
+        if resumed[0] == "resume_failed":
+            return ConversationLost(("stopped", f"{res[1]}; its conversation could not be resumed: "
+                                                f"{_one_line(resumed[1], 300)}", "", ""))
+        if resumed[0] == "stopped":
+            return ("stopped", f"{resumed[1]} (after one resume: it was first stopped for {res.why})",
+                    "", resumed[3] or res[3])
+        return tuple(resumed)
+
+    def _exec_once(
         self,
         prompt_text,
         args,
@@ -992,16 +1112,13 @@ class AgyRunner:
         write_extra=(),
         pair_text="",
         mcp=False,
+        total=None,
+        deadline=None,
+        may_pause=False,
     ):
-        """Invoke a headless worker and return (kind, detail_or_outcome, body, conversation_id).
-
-        kind is one of:
-          'done'          -> ('done', 'succeeded'|'failed', body, conv_id)
-          'ask'           -> ('ask', conv_id, body, conv_id)
-          'usage'         -> ('usage', detail, '', conv_id)
-          'resume_failed' -> ('resume_failed', detail, '', '')
-          'stopped'       -> ('stopped', detail, '', conv_id)
-        """
+        """One worker call (see exec_prompt), stopped at deadline (WORKER_TIMEOUT, total seconds, counted from the
+        start of exec_prompt). may_pause: a stop for silence in a conversation the stream showed is a _Paused, left
+        for exec_prompt to resume, when at least MIN_RESUME_SECONDS are left before the deadline."""
         adapter = get_adapter(harness)
         exe = self.exe_for(harness)
         stream = self._stream_enabled() if _stream_override is None else bool(_stream_override)
@@ -1013,8 +1130,11 @@ class AgyRunner:
         cmd = adapter.build_exec_cmd(exe, cli_prompt, args, conversation_id=conversation_id, stream=stream,
                                      access=access, write_dirs=write_dirs, git_dirs=git_dirs,
                                      workdir=worktree, mcp=mcp)
-        timeout = self._timeout(access)
+        idle = self._idle_timeout() if stream else None  # without stream-json there is no activity to see
         background_wait = self._background_wait()
+        # The silence limit while an agy worker reports waiting on background commands with no result: the longer of
+        # the silence limit and WORKER_BACKGROUND_WAIT, so a long build is not cut short, nor waited on forever.
+        wait_limit = None if idle is None or background_wait is None else max(idle, background_wait)
         heartbeat = self._heartbeat_interval()
         tag = label or (spec_path.stem if spec_path else harness)
         log_path, log_fh = self._open_worker_log(tag)
@@ -1077,12 +1197,19 @@ class AgyRunner:
             stdout_lines = collections.deque(maxlen=2000)  # bounded: a long stream's events are not all needed
             # (without stream-json, pieces as they arrived)
             stderr_lines = collections.deque(maxlen=2000)  # bounded the same way; error checks read its tail
+            # (time read, "out"/"err", text) of recent output: a limit stop looks for a usage limit only in what came
+            # after the worker's latest activity (an old, transient "429, retrying" it got past is not why it is
+            # stopped), less RECENT_MARGIN: stdout and stderr are read apart, so a line printed just after the
+            # activity may be read a moment before it.
+            recent = collections.deque(maxlen=400)
             stream_envelope = None
             results = []  # every result event of this process, for its stats
             open_streams = {"out", "err"}
-            last_activity = start
+            last_activity = start  # any output, for the heartbeat line
+            last_seen = ""  # the latest progress summary (what the worker was last seen doing), for a resume
+            last_turn = start  # turn activity (the adapter's "active"), for the silence limit
             last_heartbeat = start
-            timed_out = False
+            timed_out = None  # why the worker is stopped by a limit: "deadline" or "idle"
             exited_at = None
             # The clocks after a result; both None while a turn runs. result_at: when the latest result came, with no
             # turn activity since (only then is the worker idle on that result). grace_at: where ENVELOPE_GRACE runs
@@ -1099,6 +1226,26 @@ class AgyRunner:
                     return None if background_wait is None else result_at + background_wait
                 return grace_at + ENVELOPE_GRACE
 
+            def limit_hit(now):
+                """Which limit stops the worker now: "deadline" (WORKER_TIMEOUT), "idle" (no activity for
+                silence_limit()), or None. None once the worker has exited by itself: its own result or error decides
+                then."""
+                if proc.poll() is not None:
+                    return None
+                if deadline is not None and now >= deadline:
+                    return "deadline"
+                lim = silence_limit()
+                if lim is not None and now - last_turn >= lim:
+                    return "idle"
+                return None
+
+            def silence_limit():
+                """The silence limit now: none while a result is held (the post-result clocks apply), wait_limit while
+                the worker reports waiting on background commands, else idle."""
+                if result_at is not None:
+                    return None
+                return wait_limit if stream_acc.get("waiting") else idle
+
             def note_result(env_obj):
                 """The latest result wins (a worker may start a new turn when a background command ends)."""
                 nonlocal stream_envelope, result_at, grace_at
@@ -1114,8 +1261,8 @@ class AgyRunner:
                 if exited_at is not None and now - exited_at > 3:
                     # The worker exited but something it started still holds its output open; stop waiting.
                     break
-                deadline = stop_at()
-                if deadline is not None and exited_at is None and now >= deadline:
+                result_deadline = stop_at()
+                if result_deadline is not None and exited_at is None and now >= result_deadline:
                     stopped_after_result = True
                     if stream_acc.get("background"):
                         self._emit_progress(log_fh, f"[worker +{now - start:.0f}s] {tag}: background commands still "
@@ -1123,14 +1270,15 @@ class AgyRunner:
                                             to_stderr=True)
                     break
                 waits = [1.0]
+                if result_deadline is not None:
+                    waits.append(max(0.05, result_deadline - now))
+                timed_out = limit_hit(now)
+                if timed_out:
+                    break
                 if deadline is not None:
                     waits.append(max(0.05, deadline - now))
-                if timeout is not None:
-                    rem = (start + timeout) - now
-                    if rem <= 0:
-                        timed_out = True
-                        break
-                    waits.append(rem)
+                if silence_limit() is not None:
+                    waits.append(max(0.05, (last_turn + silence_limit()) - now))
                 if heartbeat is not None:
                     rem_hb = (last_heartbeat + heartbeat) - now
                     waits.append(max(0.05, rem_hb))
@@ -1139,15 +1287,15 @@ class AgyRunner:
                     kind_ev, payload = q.get(timeout=wait_s)
                 except queue.Empty:
                     now = time.monotonic()
-                    if timeout is not None and (now - start) >= timeout:
-                        timed_out = True
+                    timed_out = limit_hit(now)
+                    if timed_out:
                         break
                     if heartbeat is not None and (now - last_heartbeat) >= heartbeat:
                         elapsed = now - start
-                        idle = now - last_activity
+                        quiet = now - last_activity
                         self._emit_progress(
                             log_fh,
-                            f"[worker +{elapsed:.0f}s] {tag}: still running (no output for {idle:.0f}s)...",
+                            f"[worker +{elapsed:.0f}s] {tag}: still running (no output for {quiet:.0f}s)...",
                             to_stderr=True,
                         )
                         last_heartbeat = now
@@ -1166,6 +1314,7 @@ class AgyRunner:
                         except json.JSONDecodeError:
                             obj = None
                     stdout_lines.append(payload)  # error lines may be JSON too ({"error": {"code": 429, ...}})
+                    recent.append((time.monotonic(), "out", payload))
                     if not stream and stream_envelope is None and stripped.endswith("}"):
                         # The one JSON result may be complete now: hold it, so a CLI that does not exit cannot lose it.
                         env_obj = _parse_json_envelope("".join(stdout_lines), adapter)
@@ -1174,6 +1323,8 @@ class AgyRunner:
                     if isinstance(obj, dict):
                         background_before = stream_acc.get("background")
                         summary, env_obj = adapter.parse_stream_event(obj, stream_acc)
+                        if stream_acc.pop("active", False) or env_obj is not None:
+                            last_turn = time.monotonic()
                         if env_obj is not None:
                             note_result(env_obj)
                             results.append(env_obj)
@@ -1185,14 +1336,18 @@ class AgyRunner:
                             now = time.monotonic()
                             last_activity = now
                             last_heartbeat = now
+                            if not summary.startswith("init"):
+                                last_seen = summary
                             self._emit_progress(log_fh, f"[worker +{now - start:.0f}s] {tag}: {summary}",
                                                 to_stderr=True)
                 elif kind_ev == "err":
                     stderr_lines.append(payload)
+                    recent.append((time.monotonic(), "err", payload))
                     stripped = payload.strip()
                     if stripped:
                         now = time.monotonic()
                         last_activity = now
+                        adapter.parse_stderr_line(stripped, stream_acc)  # "waiting": see silence_limit
                         self._emit_progress(
                             log_fh,
                             f"[worker +{now - start:.0f}s] {tag} stderr: {stripped}",
@@ -1204,12 +1359,62 @@ class AgyRunner:
                 # report a timeout. (A result followed by a new turn that ran into the limit is a timeout.)
                 timed_out, stopped_after_result = False, proc.poll() is None
             if timed_out:
-                _kill_tree(proc.pid, earlier=seen_kids, alive=proc.poll() is None)
-                _reap(proc)
+                # SIGTERM first, so the CLI can save its conversation (it may be resumed), then kill what is left.
+                _stop_gently(proc, seen_kids)
                 t_out.join(timeout=1)
                 t_err.join(timeout=1)
-                finish_log(f"timed out after {timeout}s")
-                return ("stopped", f"{exe} timed out after {timeout}s", "", conversation_id or "")
+                # What it printed while it was being stopped: for its stats, conversation and errors, not its result.
+                while True:
+                    try:
+                        kind_ev, payload = q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if kind_ev in ("out", "err"):
+                        recent.append((time.monotonic(), kind_ev, payload))
+                    if kind_ev == "err":
+                        stderr_lines.append(payload)
+                    elif kind_ev == "out":
+                        stdout_lines.append(payload)
+                        try:
+                            obj = json.loads(payload.strip()) if stream and payload.strip().startswith("{") else None
+                        except json.JSONDecodeError:
+                            obj = None
+                        if isinstance(obj, dict):
+                            env_obj = adapter.parse_stream_event(obj, stream_acc)[1]
+                            if env_obj is not None:
+                                results.append(env_obj)
+                seen = stream_acc.get("conversation_id", "")
+                if results:
+                    # Interim results (a turn ended, then a new one ran into the limit) carry what was spent so far.
+                    stats.update(envelope_stats(results))
+                    self._turn_stats(adapter, seen or conversation_id, bool(conversation_id) and
+                                     seen in ("", conversation_id), stats, cost=envelope_cost(results))
+                since = [(kind, text) for t, kind, text in recent if t >= last_turn - RECENT_MARGIN]
+                usage = _usage_line(error_text("".join(x for k, x in since if k == "out").splitlines(),
+                                               "".join(x for k, x in since if k == "err")))
+                if usage:
+                    # Held up by a usage limit since its latest activity, not stuck: the caller's usage handling.
+                    finish_log("usage limit")
+                    return ("usage", usage, "", seen or conversation_id or "")
+                if timed_out == "deadline":
+                    finish_log(f"timed out after {total}s")
+                    return ("stopped", f"{exe} timed out after {total}s", "", seen or conversation_id or "")
+                # The conversation the stream showed: resumable only when it is the one asked for.
+                if conversation_id and seen and seen != conversation_id:
+                    finish_log("resume failed (new conversation started, then no activity)")
+                    return ("resume_failed", f"conversation {conversation_id} was not resumed (started {seen})", "",
+                            "")
+                left = None if deadline is None else deadline - time.monotonic()
+                if stream_acc.get("waiting"):
+                    why = f"waiting {wait_limit:g}s on background commands that did not finish"
+                else:
+                    why = f"no activity for {idle:g}s"
+                detail = f"{exe} was stopped: {why}"
+                if may_pause and seen and (left is None or left >= MIN_RESUME_SECONDS):
+                    finish_log(f"paused: {why}; resuming its conversation")
+                    return _Paused(("stopped", detail, "", seen), why, last_seen)
+                finish_log(f"timed out: {why}")
+                return ("stopped", detail, "", seen or conversation_id or "")
 
             if not stopped_after_result and proc.poll() is None:
                 seen_kids.extend(k for k in _descendants(proc.pid) if k not in seen_kids)
@@ -1234,10 +1439,17 @@ class AgyRunner:
                 errors = error_text("".join(stdout_lines).splitlines(), raw_err)
                 if stream and _stream_override is None and STREAM_UNSUPPORTED_RE.search(combined):
                     finish_log("stream-json unsupported; retrying with --output-format json")
-                    return self.exec_prompt(
+                    # No silence limit without stream-json: the run limit takes its tighter default (unless set).
+                    total_ns = self._timeout(access, stream=False)
+                    if total_ns is not None and (deadline is None or time.monotonic() + total_ns < deadline):
+                        total, deadline = total_ns, time.monotonic() + total_ns
+                    return self._exec_once(
                         prompt_text,
                         args,
                         worktree,
+                        total=total,
+                        deadline=deadline,
+                        may_pause=may_pause,
                         conversation_id=conversation_id,
                         spec_path=spec_path,
                         harness=harness,
@@ -1311,15 +1523,16 @@ class AgyRunner:
                                      f"[worker +{time.monotonic() - start:.0f}s] {tag}: interrupted")
 
     def run(self, spec, pair=None, args=None, worktree=None, harness=None, label=None, access="full", write_extra=(),
-            mcp=False):
+            mcp=False, resume_on_silence=True):
         """access: "full" for workers that edit and commit (crew, flight director), "read" for the rest, which
-        may write only under RUN_DIR and write_extra. mcp: keep the user's MCP servers (the flight director only)."""
+        may write only under RUN_DIR and write_extra. mcp: keep the user's MCP servers (the flight director only).
+        resume_on_silence: see exec_prompt (off for test launches, where a resume is no use)."""
         prompt_text, spec_path = _read_spec_or_text(spec)
         target_harness = harness or (_as_pair(pair).harness if pair else "antigravity")
         launch = list(args) if args is not None else self.launch(pair)
         return self.exec_prompt(prompt_text, launch, worktree, spec_path=spec_path, harness=target_harness, label=label,
                                 access=access, write_extra=write_extra, pair_text=str(_as_pair(pair)) if pair else "",
-                                mcp=mcp)
+                                mcp=mcp, resume_on_silence=resume_on_silence)
 
     def try_resume(self, spec_or_text, pair, worktree, conversation_id, label=None, access="full", write_extra=(),
                    mcp=False):
@@ -1331,7 +1544,9 @@ class AgyRunner:
                                spec_path=spec_path, harness=target_harness,
                                label=label or (None if spec_path else f"{target_harness}-resume"), access=access,
                                write_extra=write_extra, pair_text=str(_as_pair(pair)), mcp=mcp)
-        if res[0] == "resume_failed":
+        if res[0] == "resume_failed" or isinstance(res, ConversationLost):
+            # Not resumed (or resumed, went silent, and then could not be resumed again): the caller falls back to a
+            # fresh worker, as for any conversation it cannot resume.
             return None
         return res
 

@@ -18,8 +18,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-LINE = re.compile(r"\[worker \+\d+s\] (?P<tag>\S+): (?P<what>done|stopped|timed out|launch failed|usage limit|resume failed)"
-                  r"(?P<rest>.*)$")
+LINE = re.compile(r"\[worker \+\d+s\] (?P<tag>\S+): "
+                  r"(?P<what>done|stopped|timed out|paused|launch failed|usage limit|resume failed)(?P<rest>.*)$")
 # First match wins: the fixed prefixes before the task patterns, which accept any task id (01, F1, 01a).
 ROLES = [
     (r"^director-", "Flight Director"),

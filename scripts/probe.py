@@ -80,7 +80,8 @@ class Prober:
         for idx, style in enumerate(styles):
             spec = build("probe.txt", self.r.run_dir / "specs" / f"probe-{key}-{idx}.txt")
             args = launch_args(self.catalog, pair, style)
-            result = self.runner.run(spec, pair=pair, args=args, worktree=self.wt, access="read")
+            result = self.runner.run(spec, pair=pair, args=args, worktree=self.wt, access="read",
+                                     resume_on_silence=False)
             self.finish_attempt(pair)
             if result[0] == "usage":
                 self.r.log(f"probe {pair}: launch style {style} hit a usage limit")

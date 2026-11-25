@@ -13,6 +13,7 @@ from pathlib import Path
 from helpers import Base, SKILL, sh
 
 sys.path.insert(0, str(SKILL / "scripts"))
+import common  # noqa: E402
 from common import AgyRunner, Run  # noqa: E402
 
 FAKE_CLAUDE = SKILL / "tests" / "fake_claude.py"
@@ -320,7 +321,7 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
               {"event": {"type": "assistant", "message": {"content": [{"type": "text", "text": "FINAL"}]}}}]
 
     def _timed_run(self, **patches):
-        with unittest.mock.patch.multiple("common", **patches):
+        with unittest.mock.patch.multiple("common", **(patches or {"ENVELOPE_GRACE": 0.3})):
             start = time.monotonic()
             res = self._runner().run("p", pair="claude:opus@high", worktree=self.impl, label="bg")
         return res, time.monotonic() - start
@@ -381,6 +382,274 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
         self.assertEqual(res[0], "stopped")
         self.assertIn("timed out after 3s", res[1])
         self.assertLess(took, 15)
+        self.assertEqual(len(self.claude_calls()), 1)  # the run limit is never followed by a resume
+
+    # -- the silence limit (WORKER_IDLE_TIMEOUT) and the resume after it
+
+    INIT = {"event": {"type": "system", "subtype": "init", "session_id": "s_t"}}
+    TICK = {"type": "assistant", "message": {"content": [{"type": "text", "text": "working"}]}}
+    TASK_TICK = {"type": "system", "subtype": "task_updated", "task_id": "b1"}
+
+    def _hang(self, sid="s_t", init=True):
+        return {"do": "script", "session_id": sid,
+                "steps": ([{"event": {"type": "system", "subtype": "init", "session_id": sid}}] if init else [])
+                + [{"sleep": 60}]}
+
+    def test_a_worker_that_keeps_working_is_not_stopped_by_the_silence_limit(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"every": 0.4, "times": 8, "event": self.TICK}, {"result": "DONE\n"}]})
+        res, took = self._timed_run()
+        self.assertEqual(res, ("done", "succeeded", "DONE\n", "s_t"))
+        self.assertGreater(took, 3)
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_background_task_events_are_not_activity(self):
+        # A turn that only gets background task events is stuck: the silence limit still stops it.
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"every": 0.3, "times": 100, "event": self.TASK_TICK}]},
+            {"do": "response", "text": "finished\n"})
+        res, took = self._timed_run()
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_t"))
+        self.assertLess(took, 12)
+        self.assertEqual(len(self.claude_calls()), 2)
+
+    def test_tool_heartbeats_alone_are_not_activity(self):
+        # A tool that never returns keeps printing heartbeats (claude_stream.ndjson); that is not the worker at work.
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        beat = {"type": "tool_progress", "tool_use_id": "t-heartbeat-0", "tool_name": "Bash", "heartbeat": True,
+                "elapsed_time_seconds": 30}
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"every": 0.3, "times": 100, "event": beat}]}, {"do": "response", "text": "finished\n"})
+        res, took = self._timed_run()
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_t"))
+        self.assertLess(took, 12)
+        self.assertEqual(len(self.claude_calls()), 2)
+
+    def test_a_silent_worker_is_resumed_with_the_message_it_was_working_on(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave({"do": "script", "session_id": "s_t",
+                            "steps": [self.INIT, {"event": self.TICK}, {"sleep": 60}]},
+                           {"do": "response", "text": "finished\n"})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
+            res = self._runner().run("Review the design in d.md", pair="claude:opus@high", worktree=self.impl,
+                                     label="bg")
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_t"))
+        first, second = self.claude_calls()
+        self.assertEqual((first["resume"], second["resume"]), ("", "s_t"))
+        self.assertIn("The run stopped you (no activity for 1s) and stopped every command", second["prompt"])
+        self.assertIn("The last thing the run saw from you: says: working.", second["prompt"])
+        self.assertIn("Give a command that may run long a time limit.", second["prompt"])
+        self.assertTrue(second["prompt"].endswith("--- The message you were working on ---\nReview the design in d.md"))
+        log = (self.run_dir / "logs" / "bg-1.log").read_text(encoding="utf-8")
+        self.assertIn("bg: paused: no activity for 1s; resuming its conversation", log)
+
+    def test_the_resume_gets_what_is_left_of_the_run_limit(self):
+        self._set_state(WORKER_TIMEOUT=3, WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(), {"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"every": 0.3, "times": 100, "event": self.TICK}]})
+        res, took = self._timed_run(ENVELOPE_GRACE=0.3, MIN_RESUME_SECONDS=0.5)
+        self.assertEqual(res[0], "stopped")
+        self.assertIn("timed out after 3s (after one resume: it was first stopped for no activity for 1s)", res[1])
+        self.assertLess(took, 8)  # 3 s budget for both calls, plus the gentle stops
+        self.assertEqual(len(self.claude_calls()), 2)
+
+    def test_no_resume_when_too_little_of_the_run_limit_is_left(self):
+        self._set_state(WORKER_TIMEOUT=5, WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(), {"do": "response", "text": "never\n"})
+        res, _ = self._timed_run()
+        self.assertEqual(res, ("stopped", res[1], "", "s_t"))
+        self.assertIn("was stopped: no activity for 1s", res[1])
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_a_worker_is_resumed_only_once(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(), self._hang(), {"do": "response", "text": "never\n"})
+        res, _ = self._timed_run()
+        self.assertEqual(res, ("stopped", res[1], "", "s_t"))
+        self.assertIn("(after one resume: it was first stopped for no activity for 1s)", res[1])
+        self.assertEqual(len(self.claude_calls()), 2)
+
+    def test_a_conversation_that_cannot_be_resumed_is_reported_lost(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(),
+                           {"do": "response", "raw_stderr": "No conversation found with session ID: s_t", "rc": 1})
+        res, _ = self._timed_run()
+        self.assertIsInstance(res, common.ConversationLost)
+        self.assertEqual(res, ("stopped", res[1], "", ""))
+        self.assertIn("was stopped: no activity for 1s; its conversation could not be resumed: No "
+                      "conversation found", res[1])
+
+    def test_a_resume_that_crashes_keeps_the_conversation_id(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(), {"do": "response", "raw_stdout": "boom", "rc": 1})
+        res, _ = self._timed_run()
+        self.assertEqual(res, ("stopped", res[1], "", "s_t"))
+        self.assertIn("(after one resume: it was first stopped for no activity for 1s)", res[1])
+
+    def test_unknown_stream_events_count_as_activity(self):
+        # A CLI update that adds an event type must not make a busy worker look stuck.
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        new = {"type": "system", "subtype": "a_new_subtype"}
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"every": 0.4, "times": 7, "event": new}, {"result": "DONE\n"}]})
+        res, _ = self._timed_run()
+        self.assertEqual(res, ("done", "succeeded", "DONE\n", "s_t"))
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_a_silent_worker_held_up_by_a_usage_limit_gets_usage(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"stderr": "API error: rate limit reached, retrying in 600s"}, {"sleep": 60}]})
+        res, _ = self._timed_run()
+        self.assertEqual(res[0], "usage")
+        self.assertIn("rate limit reached", res[1])
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_a_usage_limit_the_worker_got_past_is_not_why_it_is_stopped(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=2)
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"stderr": "API error: rate limit reached, retrying in 1s"}, {"sleep": 1.5},
+            {"event": self.TICK}, {"sleep": 60}]}, {"do": "response", "text": "finished\n"})
+        res, _ = self._timed_run()
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_t"))  # paused and resumed, not 'usage'
+        self.assertEqual(len(self.claude_calls()), 2)
+
+    def test_a_busy_worker_at_the_run_limit_is_a_timeout_whatever_it_printed_before(self):
+        self._set_state(WORKER_TIMEOUT=3, WORKER_IDLE_TIMEOUT=0)
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"stderr": "warn: got 429 from the API, retrying"},
+            {"every": 0.3, "times": 100, "event": self.TICK}]})
+        res, _ = self._timed_run()
+        self.assertEqual(res[0], "stopped")
+        self.assertIn("timed out after 3s", res[1])
+
+    def test_a_worker_given_a_spec_file_is_pointed_back_to_it(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        spec = self.tmp / "review-1.txt"
+        spec.write_text("Review the design.\n")
+        self.claude_behave(self._hang(), {"do": "response", "text": "finished\n"})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
+            res = self._runner().run(spec, pair="claude:opus@high", worktree=self.impl)
+        self.assertEqual(res[:2], ("done", "succeeded"))
+        second = self.claude_calls()[1]["prompt"]
+        self.assertIn(f"Your instructions are in {spec.resolve()}: read them again.", second)
+        self.assertNotIn("The last thing the run saw", second)  # only an init line was seen: nothing worth naming
+
+    def test_try_resume_falls_back_when_the_conversation_is_lost_on_its_resume(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(sid="s_old"),
+                           {"do": "response", "raw_stderr": "No conversation found with session ID: s_old", "rc": 1})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
+            res = self._runner().try_resume("Flight Director answer: yes", "claude:opus@high", self.impl, "s_old")
+        self.assertIsNone(res)  # answer_worker then gives the answer to a fresh worker
+
+    def test_the_stream_json_fallback_takes_the_tighter_run_limit(self):
+        self.claude_behave(
+            {"do": "response", "raw_stderr": "error: unsupported value 'stream-json' for --output-format", "rc": 2},
+            {"do": "response", "text": "late\n", "sleep": 10})
+        with unittest.mock.patch.dict(os.environ, {"WORKER_TIMEOUT": "", "AGY_TIMEOUT": ""}):
+            res, took = self._timed_run(ENVELOPE_GRACE=0.3, DEFAULT_TIMEOUT_FULL_NO_STREAM=2)
+        self.assertEqual(res[0], "stopped")
+        self.assertIn("timed out after 2s", res[1])
+        self.assertLess(took, 9)
+
+    def test_the_cost_of_a_stopped_call_is_kept(self):
+        # A turn ended (its result carries the cost so far), a new turn started, then the worker went silent.
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave({"do": "script", "session_id": "s_t", "steps": [
+            self.INIT, {"result": "WAITING\n", "extra": {"total_cost_usd": 0.5, "num_turns": 2}},
+            self.INIT, {"event": self.TICK}, {"sleep": 60}]},
+            {"do": "response", "text": "finished\n"})
+        res, _ = self._timed_run()
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_t"))
+        log = (self.run_dir / "logs" / "bg-1.log").read_text(encoding="utf-8")
+        self.assertRegex(log, r"bg: paused: no activity for 1s; resuming its conversation .*cost=\$0\.50")
+
+    def test_a_resume_that_starts_a_new_conversation_and_goes_silent_is_a_failed_resume(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(sid="s_new"), {"do": "response", "text": "never\n"})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
+            res = self._runner().try_resume("Flight Director answer: yes", "claude:opus@high", self.impl, "s_old")
+        self.assertIsNone(res)
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_a_silent_resumed_conversation_is_resumed_with_the_answer_repeated(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(sid="s_old"), {"do": "response", "text": "finished\n"})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
+            res = self._runner().try_resume("Flight Director answer: yes", "claude:opus@high", self.impl, "s_old")
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "s_old"))
+        second = self.claude_calls()[1]
+        self.assertEqual(second["resume"], "s_old")
+        self.assertIn("Flight Director answer: yes", second["prompt"])
+
+    def test_a_worker_whose_stream_showed_no_conversation_is_not_resumed(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(init=False), {"do": "ok"})
+        res, _ = self._timed_run()
+        self.assertEqual(res[0], "stopped")
+        self.assertIn("was stopped: no activity for 1s", res[1])
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_test_launches_are_not_resumed(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        self.claude_behave(self._hang(), {"do": "ok"})
+        with unittest.mock.patch("common.ENVELOPE_GRACE", 0.3):
+            res = self._runner().run("p", pair="claude:opus@high", worktree=self.impl, resume_on_silence=False)
+        self.assertEqual(res[0], "stopped")
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def test_the_silence_limit_does_not_apply_without_stream_json(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1, WORKER_STREAM=0)
+        self.claude_behave({"do": "response", "text": "slow\n", "sleep": 2.5})
+        res, _ = self._timed_run()
+        self.assertEqual(res[:3], ("done", "succeeded", "slow\n"))
+
+    def test_a_silent_antigravity_worker_is_resumed_in_its_own_conversation(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        init = {"event": {"event": "init", "conversation_id": "conv_t", "init": {"cwd": "/x"}}}  # captured shape
+        self.behave({"do": "script", "conv_id": "conv_t", "steps": [init, {"sleep": 60}]},
+                    {"do": "response", "text": "finished\n"})
+        res = self._runner().run("p", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, access="read")
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "conv_t"))
+        self.assertEqual([c["conversation"] for c in self.calls()], ["", "conv_t"])
+
+    def test_an_antigravity_worker_waiting_on_a_background_command_is_not_stopped_for_silence(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        init = {"event": {"event": "init", "conversation_id": "conv_t", "init": {}}}
+        wake = {"event": {"event": "step_update", "step_update": {"step_type": "system_message", "state": "DONE"}}}
+        self.behave({"do": "script", "conv_id": "conv_t", "steps": [
+            init, {"stderr": "root agent idle; waiting for 1 background task(s) to finish"}, {"sleep": 2.5}, wake,
+            {"result": "DONE\n"}]})
+        res = self._runner().run("p", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, access="read")
+        self.assertEqual(res, ("done", "succeeded", "DONE\n", "conv_t"))
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_an_antigravity_wait_that_never_ends_is_bounded_and_resumed(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1, WORKER_BACKGROUND_WAIT=2)
+        init = {"event": {"event": "init", "conversation_id": "conv_t", "init": {}}}
+        self.behave({"do": "script", "conv_id": "conv_t", "steps": [
+            init, {"stderr": "root agent idle; waiting for 1 background task(s) to finish"}, {"sleep": 60}]},
+            {"do": "response", "text": "finished\n"})
+        start = time.monotonic()
+        res = self._runner().run("p", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, access="read",
+                                 label="w")
+        self.assertEqual(res, ("done", "succeeded", "finished\n", "conv_t"))
+        self.assertGreater(time.monotonic() - start, 2)
+        self.assertIn("The run stopped you (waiting 2s on background commands that did not finish)",
+                      self.calls()[1]["prompt"])
+
+    def test_antigravity_steps_are_activity(self):
+        self._set_state(WORKER_IDLE_TIMEOUT=1)
+        step = {"event": "step_update", "step_update": {"step_type": "tool", "tool_name": "read_file",
+                                                        "state": "ACTIVE", "tool_info": {}}}
+        self.behave({"do": "script", "conv_id": "conv_t", "steps": [
+            {"every": 0.4, "times": 7, "event": step}, {"result": "DONE\n"}]})
+        res = self._runner().run("p", pair="antigravity:gemini-4-hydrogen@high", worktree=self.impl, access="read")
+        self.assertEqual(res, ("done", "succeeded", "DONE\n", "conv_t"))
+        self.assertEqual(len(self.calls()), 1)
 
     def test_task_events_do_not_hold_a_worker_past_the_background_wait(self):
         # A background command that keeps reporting progress is still bounded by WORKER_BACKGROUND_WAIT.
@@ -628,12 +897,29 @@ class ClaudeRunnerUnitTests(MultiHarnessBase):
     def test_timeout_defaults_by_access(self):
         runner = self._runner()
         with unittest.mock.patch.dict(os.environ, {"WORKER_TIMEOUT": "", "AGY_TIMEOUT": ""}):
-            self.assertEqual((runner._timeout("full"), runner._timeout("read")), (3600, 1800))
+            self.assertEqual((runner._timeout("full"), runner._timeout("read")), (14400, 7200))
             s = self.st()
             s["WORKER_TIMEOUT"] = "900"
             self.state.write_text(json.dumps(s))
             runner = self._runner()
             self.assertEqual((runner._timeout("full"), runner._timeout("read")), (900, 900))
+            s["WORKER_TIMEOUT"] = "0"
+            self.state.write_text(json.dumps(s))
+            self.assertEqual(self._runner()._timeout("read"), None)
+
+    def test_without_stream_json_the_run_limit_keeps_its_old_defaults(self):
+        with unittest.mock.patch.dict(os.environ, {"WORKER_TIMEOUT": "", "AGY_TIMEOUT": ""}):
+            runner = self._runner()
+            self.assertEqual((runner._timeout("full", stream=False), runner._timeout("read", stream=False)),
+                             (3600, 1800))
+
+    def test_idle_timeout_default_and_off(self):
+        with unittest.mock.patch.dict(os.environ, {"WORKER_IDLE_TIMEOUT": ""}):
+            self.assertEqual(self._runner()._idle_timeout(), 1800)
+            self._set_state(WORKER_IDLE_TIMEOUT=0)
+            self.assertIsNone(self._runner()._idle_timeout())
+            self._set_state(WORKER_IDLE_TIMEOUT=120)
+            self.assertEqual(self._runner()._idle_timeout(), 120)
 
 
 class ClaudeDirectorAndTaskFallbackTests(MultiHarnessBase):
@@ -791,6 +1077,34 @@ class MixedCrossHarnessTests(MultiHarnessBase):
         self.assertEqual(len(self.claude_calls()), 1)
         self.assertIn("/claude-skills/", self.claude_calls()[0]["prompt"])
         self.assertEqual(self.claude_calls()[0]["model"], "sonnet")
+
+
+
+class StopGently(unittest.TestCase):
+    def _spawn(self, code):
+        return subprocess.Popen([sys.executable, "-c", code], start_new_session=True)
+
+    def test_sigterm_comes_first(self):
+        d = Path(self.enterContext(__import__("tempfile").TemporaryDirectory()))
+        mark = d / "term"
+        on_term = f"lambda *a: (open({str(mark)!r}, 'w').write('x'), sys.exit(0))"
+        proc = self._spawn(f"import signal, sys, time\nsignal.signal(signal.SIGTERM, {on_term})\ntime.sleep(60)")
+        time.sleep(0.5)
+        start = time.monotonic()
+        common._stop_gently(proc)
+        self.assertTrue(mark.exists())
+        self.assertLess(time.monotonic() - start, 3)
+        self.assertIsNotNone(proc.poll())
+
+    def test_a_worker_that_ignores_sigterm_is_killed(self):
+        proc = self._spawn("import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(60)")
+        time.sleep(0.5)
+        start = time.monotonic()
+        common._stop_gently(proc)
+        took = time.monotonic() - start
+        self.assertIsNotNone(proc.poll())
+        self.assertGreater(took, 4.5)
+        self.assertLess(took, 10)
 
 
 if __name__ == "__main__":

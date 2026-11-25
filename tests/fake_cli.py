@@ -192,6 +192,8 @@ def run_fake_cli(
                     print(json.dumps(step["event"]), flush=True)
             elif "sleep" in step:
                 time.sleep(float(step["sleep"]))
+            elif "stderr" in step:
+                print(step["stderr"], file=sys.stderr, flush=True)
             elif "result" in step:
                 print(json.dumps(ok_payload(cid, step["result"]) | step.get("extra", {})), flush=True)
             elif "detached_child" in step:

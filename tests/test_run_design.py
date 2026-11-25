@@ -200,6 +200,18 @@ class Failures(Design):
         self.assertIn("could not make the test pass", saved.read_text())
         self.assertEqual(len(self.calls()), 2)
 
+    def test_a_silent_worker_is_resumed_not_restarted(self):
+        self.state.write_text(json.dumps({**self.st(), "WORKER_IDLE_TIMEOUT": "1"}))
+        out = self.run_dir / "preflight-check-1.md"
+        # The captured shape: the conversation id at the top level of the init event.
+        init = {"event": {"event": "init", "conversation_id": "conv_t", "init": {"cwd": "/x"}}}
+        self.behave({"do": "script", "conv_id": "conv_t", "steps": [init, {"sleep": 60}]},
+                    {"do": "response", "text": "done\n", "edit": str(out), "edit_text": "Important: x.md:1 unclear.\n"})
+        last, _ = self.builder()
+        self.assertEqual(last, f"DIRECTOR_JOB preflight-check-done {out}")
+        self.assertEqual([c["conversation"] for c in self.calls()], ["", "conv_t"])
+        self.assertEqual(self.st("RETRY_preflight-check"), "0")
+
     def test_empty_output_counts_as_failed_then_retry_succeeds(self):
         self.behave("write-empty", "write-output")
         last, _ = self.builder()
