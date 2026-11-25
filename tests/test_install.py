@@ -43,6 +43,10 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((self.target / "resources" / "document_standards" / "feature-spec-standard.md").is_file())
         self.assertTrue((self.target / "scripts" / "run_task.py").is_file())
         self.assertTrue((self.target / "references" / "capsule-communicator.md").is_file())
+        # The observation deck ships next to scripts/ from the first commit that has it.
+        if sh("git", "-C", str(REPO), "cat-file", "-e", f"{self.head}:animation/play.py").returncode == 0:
+            self.assertTrue((self.target / "animation" / "play.py").is_file())
+            self.assertTrue((self.target / "animation" / "deck.py").is_file())
         self.assertFalse((self.target / "tests").exists())
         self.assertFalse((self.target / "install.sh").exists())
         self.assertFalse((self.target / ".git").exists())
