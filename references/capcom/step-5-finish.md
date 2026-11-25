@@ -2,7 +2,7 @@
 
 Part of mission-control. Everything in `<SKILL_DIR>/references/capsule-communicator.md` ("How you work", "Messages", "State keys") and the Rules in `<SKILL_DIR>/skills/mission/SKILL.md` hold here.
 
-**Items 1–3: final review and verification.** Run `FINISH` and branch on its last line. At each of items 4–7, first `STATE set STEP="5 <item number>"`.
+**Items 1–3: final review and verification.** Run `FINISH` and branch on its last line. `FINISH` sets `PHASE=finish` and its own `STEP` in the state file: set neither yourself for items 1–3. At each of items 4–7, first `STATE set STEP="5 <item number>"`.
 
 | Last line (exit) | Do |
 | --- | --- |
@@ -14,7 +14,7 @@ Part of mission-control. Everything in `<SKILL_DIR>/references/capsule-communica
 | `PAUSED <file>` (41) | Handled as in Step 4. |
 | `STOP <reason>` (40) | Dispatch nothing more and go to item 7. |
 
-4. **Open the PR (or finish locally):**
+4. **Open the PR (or finish locally):** wherever this item invokes `touchdown`, you say only what that skill gives you to say: its announcement line ("I'm using the touchdown skill to complete this work.") and its options menu, both exactly as it words them (Rule 14). It also says to cite the verification log: don't. The branch is already verified, and the closing report gives the evidence.
    - **First, check the target moved** (once per run; skip when `BASE_DRIFT_OK` is `yes`): run `bash <SKILL_DIR>/scripts/base-drift.sh <MAIN_CHECKOUT> <PR_TARGET> <FEATURE_BRANCH>` (multi-repo: for each touched repo, with `<REPO_PATH_<k>> <PR_TARGET_<k>> <FEATURE_BRANCH_<k>>`).
      - **Exit 0 (`BASE_CURRENT`) everywhere:** `STATE set BASE_DRIFT_OK=yes` and go on.
      - **Exit 1 (`BASE_AHEAD ...`) anywhere:** show its output exactly, then say exactly "`<PR_TARGET>` moved while this run worked. Reply \"continue\" to land the branch as it is (a PR will show any conflicts), or \"keep\" to keep the branch without landing it." This is a fixed prompt. "continue": `STATE set BASE_DRIFT_OK=yes` and go on. "keep": skip to item 6.

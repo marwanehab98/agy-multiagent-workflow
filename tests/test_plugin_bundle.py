@@ -47,6 +47,27 @@ FORBIDDEN_REFS = re.compile(
 )
 
 
+def frontmatter_value(front, key):
+    """The value of a top-level key in a SKILL.md front matter, as one line: a plain or quoted scalar, or a folded
+    or literal block (`>`, `|`, with any chomping mark) whose indented lines are joined with spaces."""
+    lines = front.splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith(f"{key}:"):
+            continue
+        value = line[len(key) + 1:].strip()
+        if value[:1] in (">", "|"):
+            block = []
+            for more in lines[i + 1:]:
+                if more.strip() and not more.startswith((" ", "\t")):
+                    break
+                block.append(more.strip())
+            value = " ".join(part for part in block if part)
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        return value
+    return ""
+
+
 class PluginBundleTests(unittest.TestCase):
     def test_manifest_and_notices_exist(self):
         manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
@@ -92,6 +113,22 @@ class PluginBundleTests(unittest.TestCase):
             self.assertIn(f"name: {name}", fm)
             self.assertIn("description:", fm)
             self.assertLessEqual(len(text.encode("utf-8")), 24000, f"{name}/SKILL.md exceeds agy 24KB cap")
+
+    def test_skills_stay_within_the_published_size_guidance(self):
+        """Anthropic's Agent Skills guidance, on top of agy's 24KB cap above: a name of at most 64 lowercase
+        letters, digits and hyphens; a description of 1 to 1024 characters with no XML tags; a SKILL.md body
+        under 500 lines, with longer material in files the skill points to."""
+        for name in sorted(EXPECTED_SKILLS):
+            text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            front, body = text[len("---\n"):].split("\n---\n", 1)
+            self.assertRegex(name, r"^[a-z0-9]+(-[a-z0-9]+)*$", name)
+            self.assertLessEqual(len(name), 64, name)
+            description = frontmatter_value(front, "description")
+            self.assertTrue(description, f"{name}: empty description")
+            self.assertLessEqual(len(description), 1024, f"{name}: description is {len(description)} characters")
+            self.assertIsNone(re.search(r"<[A-Za-z/][^>]*>", description), f"{name}: XML tag in description")
+            lines = len(body.splitlines())
+            self.assertLess(lines, 500, f"{name}/SKILL.md body is {lines} lines")
 
     def test_vendored_agents_and_standards_exist(self):
         agents = {p.name for p in (ROOT / "agents").iterdir() if p.is_file()}
