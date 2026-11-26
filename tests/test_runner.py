@@ -1022,7 +1022,7 @@ class ClaudeDirectorAndTaskFallbackTests(MultiHarnessBase):
         )
         self.claude_behave("usage")
         last, _ = self.expect(30, "PROMPT")
-        self.assertIn("retry pause stop", last)
+        self.assertIn("retry switch pause stop", last)
 
 
 class MixedCrossHarnessTests(MultiHarnessBase):

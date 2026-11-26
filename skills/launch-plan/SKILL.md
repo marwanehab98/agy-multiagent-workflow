@@ -34,7 +34,7 @@ The invoking session acts as the **Capsule Communicator** and delegates every st
 
 ### Step 2: Setup (Role Picks)
 
-Run the same Setup flow as Setup items 1–5 in `<SKILL_DIR>/skills/mission/SKILL.md` (or `<SKILL_DIR>/SKILL.md` in a flat install), with one change:
+Run Setup items 1–5 of `<SKILL_DIR>/references/capcom/setup.md` (read it in full first), with one change:
 - In Setup item 4 (`roles.py check`), pass `--mode launch-plan`:
   `python3 -I <SKILL_DIR>/scripts/roles.py check --mode launch-plan --catalog <CATALOG> --jira no --director <pair> --safety <pair> --crew <pair>`
 

@@ -1,23 +1,33 @@
 """Setup picks: menus, requirement checks and the saved picks file.
 
 Usage:
-  python3 -I roles.py menu --catalog C [--harness H [--model M]]
+  python3 -I roles.py menu --catalog C [--session-harness H] [--harness H [--model M]]
   python3 -I roles.py check --catalog C --jira yes|no --director P --safety P --crew P [--mode full|launch-plan]
       [--session-harness H]
-  python3 -I roles.py remembered --roles F --catalog C
+  python3 -I roles.py remembered --roles F --catalog C [--session-harness H]
   python3 -I roles.py save --roles F --director P --safety P --crew P
   python3 -I roles.py to-state --roles F --state S --catalog C
 
 `menu` prints `N<TAB>value<TAB>label` lines (harnesses, then that harness's models, then a
-model's efforts); broken harnesses follow as `BROKEN <name>: <reason>`.
+model's efforts); a harness line ends with `<TAB>subtitle` (its version); broken harnesses follow as
+`BROKEN <name>: <reason>`. While any harness is signed in with OAuth (catalog `auth`), every role runs on the
+harness of the session that runs the mission (harnesses.py session_evidence, or --session-harness): the harness
+menu then lists only that one, followed by a `LOCKED <harness>: <reason>` line when it left another one out. A
+session whose harness cannot be told is `UNKNOWN session`: run the command again with --session-harness.
 `check` verifies the capsule communicator session's required skills on the session harness plus each of the 3
 worker roles (`director`, `safety`, `crew`), printing one `OK`, `UNKNOWN`, or `MISSING` line per finding.
 A crew pick equal to the flight director pick is UNKNOWN: the flight director never implements first.
+So is any pick on another harness than the session's while any harness is signed in with OAuth.
 A NOTE follows when director and crew share harness and model, and another when the director is then
 a lower effort than the crew (the ladder's last rung would be weaker). Exit 1 on UNKNOWN/MISSING.
-`remembered` prints `role=pair` lines then `AVAILABLE yes`, or one `AVAILABLE no <role> <pair>` line per
-remembered pick that isn't in the catalog any more; exit 1 with `NONE` when the file is missing.
-`save` writes the picks file; `to-state` copies the picks, CREW_TOP and CATALOG into a state file.
+The picks file keeps the last 3 selections (a selection is the three picks of one run), most recently used first.
+`remembered` prints the ones this session can still use as menu lines, in that order,
+`N<TAB>director=<pair> safety=<pair> crew=<pair><TAB>Selection N<TAB><the picks in words>`, then a last line
+`N<TAB>new<TAB>New<TAB>...`. A selection with a pick the catalog no longer has, or that the OAuth rule above does
+not allow in this session, is left out (and stays in the file). Exit 1 with `NONE` when none is left.
+`save` puts a selection first in the picks file: one already there only moves up, nothing else changes; a new one
+is added, and beyond 3 the least recently used is dropped. `to-state` copies the first selection, CREW_TOP and
+CATALOG into a state file.
 Exit 0 ok. Exit 1 findings or bad input. Exit 64 bad usage.
 """
 import argparse
@@ -68,6 +78,15 @@ def unknown_why(catalog, pair):
     return f"model {pair.model} not detected in {pair.harness}; use one of {' '.join(m['model'] for m in h['models'])}"
 
 
+def oauth_harnesses(catalog):
+    """The usable harnesses signed in with OAuth; any one of them keeps every role on the session's harness."""
+    return [n for n, h in catalog["harnesses"].items() if not h.get("broken") and h.get("auth") == "oauth"]
+
+
+def oauth_reason(names):
+    return f"{' and '.join(names)} {'is' if len(names) == 1 else 'are'} signed in with OAuth"
+
+
 def has_atlassian(h):
     return any("atlassian" in name.lower() and ok for name, ok in h.get("mcp", {}).items())
 
@@ -82,19 +101,37 @@ def where(h, item):
     return f": put it in {' or '.join(h['skill_dirs'])}{plugin}"
 
 
-def session_harness_name(catalog, override=None):
-    if override:
-        return override
-    return detect_session_harness(catalog)
+NO_SESSION = ("cannot tell which harness this session runs in; run this again with --session-harness <the harness "
+              "you are running in>")
+
+
+def session_harness_name(override=None):
+    """The session's harness: the override, else what harnesses.py detects, else None (never a guess)."""
+    return override or detect_session_harness()
+
+
+def lock_why(catalog, pair, sess_name):
+    """Why the OAuth rule refuses pair for a role, or None: with a usable harness signed in with OAuth, every role
+    runs on the session's harness."""
+    oauth = oauth_harnesses(catalog)
+    if not oauth or pair.harness == sess_name:
+        return None
+    if sess_name is None:
+        return f"cannot be checked: {oauth_reason(oauth)}, so every role runs on the session's harness, and I {NO_SESSION}"
+    return (f"is not on this session's harness ({sess_name}), and {oauth_reason(oauth)}, so every role runs on the "
+            f"session's harness; pick it on {sess_name}")
 
 
 def check(catalog, jira, picks, mode="full", session_harness=None):
     session_req = EXECUTE_SESSION_REQUIRES if mode == "launch-plan" else SESSION_REQUIRES
     role_reqs = EXECUTE_REQUIRES if mode == "launch-plan" else REQUIRES
     lines, bad = [], False
-    sess_name = session_harness_name(catalog, override=session_harness)
+    sess_name = session_harness_name(session_harness)
     sess_h = catalog["harnesses"].get(sess_name)
-    if sess_h is None:
+    if sess_name is None:
+        lines.append(f"UNKNOWN session ? {NO_SESSION}")
+        bad = True
+    elif sess_h is None:
         lines.append(f"UNKNOWN session {sess_name} harness {sess_name} not detected")
         bad = True
     elif sess_h.get("broken"):
@@ -120,6 +157,7 @@ def check(catalog, jira, picks, mode="full", session_harness=None):
         why = unknown_why(catalog, pair)
         if not why and role == "crew" and pair == d:
             why = "is the flight director pick, which never implements first; pick another effort or model"
+        why = why or lock_why(catalog, pair, sess_name)
         if why:
             lines.append(f"UNKNOWN {role} {text} {why}")
             bad = True
@@ -152,13 +190,29 @@ class MenuError(Exception):
     """A --harness or --model the catalog doesn't list; the message is the line to print."""
 
 
-def menu(catalog, harness, model):
+def harness_row(name, h):
+    """(value, label, subtitle): the name in title case, and the version under it."""
+    version = str(h.get("version") or "").strip()
+    return name, name.replace("-", " ").replace("_", " ").title(), f"v{version}" if version[:1].isdigit() else version
+
+
+def menu(catalog, harness, model, session_harness=None):
     rows = []
     if harness is None:
-        for name, h in catalog["harnesses"].items():
-            if not h.get("broken"):
-                rows.append((name, f"{name} {h['version']}".strip()))
+        usable = {n: h for n, h in catalog["harnesses"].items() if not h.get("broken")}
         broken = [f"BROKEN {n}: {h['broken']}" for n, h in catalog["harnesses"].items() if h.get("broken")]
+        oauth = oauth_harnesses(catalog)
+        if oauth:
+            sess = session_harness_name(session_harness)
+            if sess is None:
+                raise MenuError(f"UNKNOWN session ? {NO_SESSION}")
+            if sess not in usable:
+                raise MenuError(f"UNKNOWN session harness {sess} (usable: {', '.join(usable)}); {oauth_reason(oauth)}, "
+                                "so every role runs on the session's harness")
+            if len(usable) > 1:
+                broken.append(f"LOCKED {sess}: {oauth_reason(oauth)}, so every role runs on this session's harness")
+            usable = {sess: usable[sess]}
+        rows = [harness_row(n, h) for n, h in usable.items()]
     else:
         h = catalog["harnesses"].get(harness)
         if h is None:
@@ -171,11 +225,59 @@ def menu(catalog, harness, model):
             if m is None:
                 raise MenuError(f"UNKNOWN model {model} for {harness} (known: {', '.join(x['model'] for x in h['models'])})")
             rows = [(e, e) for e in m["efforts"]]
-    return [f"{i}\t{v}\t{label}" for i, (v, label) in enumerate(rows, 1)] + broken
+    return ["\t".join([str(i), *(col for col in row if col)]) for i, row in enumerate(rows, 1)] + broken
+
+
+MAX_SELECTIONS = 3
+ROLE_TITLES = {"director": "Flight Director", "safety": "Range Safety", "crew": "Crew"}
+
+
+def read_selections(path):
+    """The picks file's selections, most recently used first. A file from before it kept more than one holds the
+    three picks at its top level: that is one selection."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    raw = data.get("selections") if isinstance(data, dict) and isinstance(data.get("selections"), list) else [data]
+    return [s for s in raw if isinstance(s, dict) and all(isinstance(s.get(r), str) for r in ROLES)]
 
 
 def read_roles(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    """The latest selection: the picks of the run being set up (`save` put them first)."""
+    found = read_selections(path)
+    if not found:
+        raise KeyError(f"no selection in {path}")
+    return found[0]
+
+
+def save_selection(path, picks):
+    """Put picks first in the picks file. A selection already there keeps its entry and only moves up; a new one
+    is added, and the least recently used beyond MAX_SELECTIONS is dropped. The first selection is also written at
+    the file's top level, where a version from before selections were kept reads its one set of picks."""
+    path = Path(path)
+    try:
+        old = read_selections(path) if path.is_file() else []
+    except (OSError, ValueError):
+        old = []  # an unreadable file is replaced
+
+    def same(s):
+        return all(s[r] == picks[r] for r in ROLES)
+    entry = next((s for s in old if same(s)), None) or {
+        **{r: picks[r] for r in ROLES},
+        "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    kept = [entry] + [s for s in old if not same(s)]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({**entry, "selections": kept[:MAX_SELECTIONS]}, indent=1) + "\n", encoding="utf-8")
+
+
+def usable_selections(path, catalog, sess_name):
+    """The saved selections whose three picks the catalog has and the OAuth rule allows in this session."""
+    def ok(text):
+        p = parse_pair_or_none(text)
+        return p is not None and not unknown_why(catalog, p) and not lock_why(catalog, p, sess_name)
+    try:
+        found = read_selections(path) if Path(path).is_file() else []
+    except (OSError, ValueError):
+        found = []
+    return [s for s in found if all(ok(s[r]) for r in ROLES)]
 
 
 def add_picks(p):
@@ -190,6 +292,7 @@ def main(argv=None):
     m.add_argument("--catalog", required=True)
     m.add_argument("--harness")
     m.add_argument("--model")
+    m.add_argument("--session-harness")
     c = sub.add_parser("check")
     c.add_argument("--catalog", required=True)
     c.add_argument("--jira", required=True, choices=["yes", "no"])
@@ -199,6 +302,7 @@ def main(argv=None):
     r = sub.add_parser("remembered")
     r.add_argument("--roles", required=True)
     r.add_argument("--catalog", required=True)
+    r.add_argument("--session-harness")
     s = sub.add_parser("save")
     s.add_argument("--roles", required=True)
     add_picks(s)
@@ -216,7 +320,7 @@ def main(argv=None):
     try:
         if a.cmd == "menu":
             try:
-                print("\n".join(menu(load_catalog(a.catalog), a.harness, a.model)))
+                print("\n".join(menu(load_catalog(a.catalog), a.harness, a.model, a.session_harness)))
             except MenuError as e:
                 print(e)
                 return 1
@@ -226,27 +330,18 @@ def main(argv=None):
             print("\n".join(lines))
             return 1 if bad else 0
         elif a.cmd == "remembered":
-            if not Path(a.roles).is_file():
+            found = usable_selections(a.roles, load_catalog(a.catalog), session_harness_name(a.session_harness))
+            if not found:
                 print("NONE")
                 return 1
-            picks, catalog = read_roles(a.roles), load_catalog(a.catalog)
-            for role in ROLES:
-                if role not in picks:
-                    print("NONE")
-                    return 1
-            for role in ROLES:
-                print(f"{role}={picks[role]}")
-            gone = [(role, picks[role]) for role in ROLES
-                    if (p := parse_pair_or_none(picks[role])) is None or unknown_why(catalog, p)]
-            print("\n".join(f"AVAILABLE no {role} {pair}" for role, pair in gone) or "AVAILABLE yes")
+            rows = [(" ".join(f"{r}={s[r]}" for r in ROLES), f"Selection {i}",
+                     ", ".join(f"{ROLE_TITLES[r]} {s[r]}" for r in ROLES)) for i, s in enumerate(found, 1)]
+            rows.append(("new", "New", "Pick each role from the menus"))
+            print("\n".join("\t".join([str(i), *row]) for i, row in enumerate(rows, 1)))
         elif a.cmd == "save":
             for x in ROLES:
                 parse_pair(getattr(a, x))
-            path = Path(a.roles)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            data = {x: getattr(a, x) for x in ROLES}
-            data["saved_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-            path.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+            save_selection(a.roles, {x: getattr(a, x) for x in ROLES})
         else:
             picks, catalog = read_roles(a.roles), load_catalog(a.catalog)
             crew = parse_pair(picks["crew"])

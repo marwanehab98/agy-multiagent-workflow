@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
-from common import (HERE, WorkerRunner, ConversationLost, Run, build, drive, first_words,  # noqa: E402
+from common import (HERE, WorkerRunner, ConversationLost, Run, build, drive, first_words, lead_with_result,  # noqa: E402
                     next_free, rest_path, save_body)
 
 TEMPLATES = HERE.parent / "references" / "templates"
@@ -68,7 +68,11 @@ def _handle_response(r, result, keep_open):
             r.set(DIRECTOR_CONVERSATION_ID=None)
         return RC_FAILED, f"FAILED {saved}"
 
+    # A reply whose one RESULT line came last is saved with that line first: every reader takes line 1.
+    body, moved = lead_with_result(body if isinstance(body, str) else str(body))
     save_body(body, saved)
+    if moved:
+        r.log(f"flight director wrote its RESULT line last; saved with it first ({saved.name})")
     words = first_words(saved)
     if len(words) >= 3 and words[:2] in (["RESULT:", "RELAY"], ["RESULT:", "NOTIFY"]):
         words = words[:2] + [rest_path(words, 2)]  # a path with spaces, unquoted

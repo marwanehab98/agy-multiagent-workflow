@@ -29,10 +29,21 @@ class ResultWords(unittest.TestCase):
             ("**RESULT: NOTED** - and then some", ["RESULT:", "NOTED"]),
             ("RESULT: COMMITTED; done", ["RESULT:", "COMMITTED"]),
             ("RESULT: FINAL_CLEAN.", ["RESULT:", "FINAL_CLEAN"]),
+            ("- RESULT: COMMITTED", ["RESULT:", "COMMITTED"]),
+            ("> **RESULT: NOTED**", ["RESULT:", "NOTED"]),
+            ("\n\n  RESULT: META_FIXED\nSecond line.", ["RESULT:", "META_FIXED"]),
         ]
         for text, want in cases:
             with self.subTest(text=text):
                 self.assertEqual(result_words(text), want)
+
+    def test_a_sentence_that_mentions_a_result_line_is_not_one(self):
+        for text in ("The job says to end with `RESULT: COMMITTED` but I am not done.",
+                     "I will send RESULT: PLAN_APPROVED /x once the user agrees.",
+                     "Final answer: RESULT: COMMITTED",
+                     "Just prose.", ""):
+            with self.subTest(text=text):
+                self.assertNotEqual(result_words(text)[:1], ["RESULT:"])
 
     def test_rest_path_joins_unquoted_path_with_spaces(self):
         with tempfile.TemporaryDirectory(prefix="mc words ") as d:
@@ -364,6 +375,48 @@ class AtomicWrites(unittest.TestCase):
         self.assertEqual([x.name for x in d.iterdir()], ["pos.json"])
 
 
+
+class LeadWithResult(unittest.TestCase):
+    """common.lead_with_result: a flight director's RESULT line written last moves to line 1."""
+
+    REAL = [  # the two replies run_director.py rejected in live runs on 2026-11-26, paths shortened
+        "I've written and committed the short design. The sign-off request is ready, and I'm sending it to you "
+        "now.\n\nRESULT: RELAY /run/relay/001-to-user.md\n",
+        "I've written the short design for the two counting functions, and I'm now sending it to you for "
+        "sign-off.\n\nRESULT: RELAY /run/relay/001-to-user.md\n",
+    ]
+
+    def test_the_two_rejected_live_replies_are_read(self):
+        for text in self.REAL:
+            fixed, moved = common.lead_with_result(text)
+            self.assertTrue(moved)
+            self.assertEqual(common.result_words(fixed), ["RESULT:", "RELAY", "/run/relay/001-to-user.md"])
+            self.assertEqual(fixed.splitlines()[2], text.splitlines()[0])  # the sentence is kept, under the line
+
+    def test_a_reply_that_starts_with_the_line_is_left_alone(self):
+        for text in ("RESULT: COMMITTED\nDone.\n", "\n  RESULT: RELAY /r/1.md\n\nAsked the user.\n",
+                     "**RESULT: META_FIXED**\n", "Just prose.\n", ""):
+            self.assertEqual(common.lead_with_result(text), (text, False))
+
+    def test_markup_around_a_last_line_is_allowed(self):
+        fixed, moved = common.lead_with_result("All fixed.\n\n`RESULT: META_FIXED`\n\n")
+        self.assertTrue(moved)
+        self.assertEqual(common.result_words(fixed), ["RESULT:", "META_FIXED"])
+
+    def test_a_first_line_that_only_mentions_the_line_does_not_block_a_real_last_one(self):
+        text = "The job says to give `RESULT: COMMITTED` when done, and it is.\n\nRESULT: COMMITTED\n"
+        fixed, moved = common.lead_with_result(text)
+        self.assertTrue(moved)
+        self.assertEqual(common.result_words(fixed), ["RESULT:", "COMMITTED"])
+
+    def test_only_one_line_and_only_when_it_is_last(self):
+        for text in ("Did it.\nRESULT: COMMITTED\nMore words.\n",                # in the middle
+                     "Hm.\nRESULT: COMMITTED\nRESULT: PLAN_APPROVED /x\n",        # two lines
+                     "Hm.\nRESULT: COMMITTED\n\nRESULT: COMMITTED\n",            # the same line twice
+                     "I should end with `RESULT: COMMITTED` later.\n"):            # only quoted in a sentence
+            self.assertEqual(common.lead_with_result(text), (text, False), text)
+
+
 class Costs(unittest.TestCase):
     def test_summary_by_role_and_pair(self):
         import costs
@@ -381,7 +434,9 @@ class Costs(unittest.TestCase):
         self.assertIn("| Flight Director | $0.30 | 0 | 1 | 6 |", text)
         self.assertIn("| Crew | $0.10 | 0 | 1 | 3 |", text)
         self.assertIn("| claude:haiku@default | $0.15 | 0 | 2 | 5 |", text)
-        self.assertIn("| antigravity:g@high | $0.00 | 18,004 | 1 | 1 |", text)
+        # A harness that reports only tokens is n/a, not free (a run can move to one mid-run).
+        self.assertIn("| antigravity:g@high | n/a | 18,004 | 1 | 1 |", text)
+        self.assertIn("| Test launches | n/a | 18,004 | 1 | 1 |", text)
 
     def test_a_paused_call_counts_as_a_run(self):
         import costs

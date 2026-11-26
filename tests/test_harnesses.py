@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -86,6 +87,95 @@ class DetectTests(unittest.TestCase):
         h = detect(runner, FAKE_HOME, env={})["harnesses"]["antigravity"]
         self.assertEqual(h["models"], [])
         self.assertIn("Unauthorized", h["broken"])
+
+    def test_agy_api_key_alone_does_not_change_the_sign_in(self):
+        # Live 2026-11-26: with only the key exported, agy still listed the saved sign-in's models.
+        def auth(env):
+            return detect(fixture_runner(), FAKE_HOME, env=env)["harnesses"]["antigravity"]["auth"]
+        self.assertEqual(auth({}), "oauth")
+        self.assertEqual(auth({"GEMINI_API_KEY": "k"}), "oauth")
+        self.assertEqual(auth({"AGY_ADC_AUTH": "1"}), "cloud")
+        self.assertEqual(auth({"AGY_ADC_AUTH": "false"}), "oauth")
+
+    def agy_auth(self, env=None, files=(), keyring=None):
+        """auth_evidence() for a home holding files ({relative path: text}) and a keyring command that succeeds
+        ("gdbus" or "security") or none."""
+        home = Path(removed_after(self, tempfile.mkdtemp(prefix="agy-home-")))
+        for rel, text in dict(files).items():
+            (home / rel).parent.mkdir(parents=True, exist_ok=True)
+            (home / rel).write_text(text)
+        asked = []
+
+        def runner(cmd):
+            asked.append(cmd)
+            if cmd[0] == keyring == "gdbus":
+                return 0, "([objectpath '/org/freedesktop/secrets/collection/login/7'], @ao [])"
+            if cmd[0] == keyring == "security":
+                return 0, 'keychain: "login.keychain-db"\nattributes:\n    "svce"<blob>="gemini"'
+            if cmd[0] == "gdbus":
+                return 0, "(@ao [], @ao [])"  # the keyring answers, and has no such entry
+            return 127, f"{cmd[0]}: command not found"
+        how = harnesses.AntigravityAdapter(runner, home, env=env or {}).auth_evidence()
+        return how, asked
+
+    def test_agy_saved_sign_in_is_found_where_agy_keeps_it(self):
+        token = {".gemini/antigravity-cli/antigravity-oauth-token": "x"}
+        how, asked = self.agy_auth(files=token)
+        self.assertEqual(how, ("oauth", "saved Google sign-in: token file ~/.gemini/antigravity-cli/"
+                                        "antigravity-oauth-token"))
+        self.assertEqual(asked, [])  # the file settles it: no keyring is asked
+        how, asked = self.agy_auth(keyring="gdbus")
+        self.assertEqual(how, ("oauth", "saved Google sign-in: keyring entry antigravity on gemini"))
+        # The keyring is asked which entries exist for that service and account, never for a secret.
+        self.assertEqual(asked[0][-2:], ["org.freedesktop.Secret.Service.SearchItems",
+                                         "{'service': 'gemini', 'username': 'antigravity'}"])
+        how, asked = self.agy_auth(keyring="security")
+        self.assertEqual(how, ("oauth", "saved Google sign-in: Keychain entry antigravity on gemini"))
+        self.assertEqual(asked[-1], ["security", "find-generic-password", "-s", "gemini", "-a", "antigravity"])
+        self.assertFalse({"-g", "-w"} & set(asked[-1]))
+
+    def test_agy_sign_in_nothing_confirms_is_assumed_oauth_and_says_so(self):
+        how, _ = self.agy_auth()
+        self.assertEqual(how[0], "oauth")
+        self.assertTrue(how[1].startswith("assumed: "), how)
+
+    def test_agy_adc_and_the_gemini_api_come_before_a_saved_sign_in(self):
+        token = {".gemini/antigravity-cli/antigravity-oauth-token": "x"}
+        adc = {".gemini/config/config.json": json.dumps({"userSettings": {"enableAdc": True}})}
+        self.assertEqual(self.agy_auth(files={**token, **adc})[0][0], "cloud")
+        self.assertIn("enableAdc", self.agy_auth(files=adc)[0][1])
+        off = {".gemini/config/config.json": json.dumps({"userSettings": {"enableAdc": False}})}
+        self.assertEqual(self.agy_auth(files={**token, **off})[0][0], "oauth")
+        self.assertEqual(self.agy_auth(files={".gemini/config/config.json": "{not json"})[0][0], "oauth")
+        self.assertEqual(self.agy_auth(env={"AGY_ADC_AUTH": "true"}, files=token)[0][0], "cloud")
+        # The variable that only says which credentials ADC would use is not a way to connect.
+        self.assertEqual(self.agy_auth(env={"GOOGLE_APPLICATION_CREDENTIALS": "/sa.json"}, files=token)[0][0], "oauth")
+
+    def test_agy_is_on_the_gemini_api_only_with_the_provider_setting(self):
+        token = {".gemini/antigravity-cli/antigravity-oauth-token": "x"}
+        gemini = {".gemini/antigravity-cli/settings.json": json.dumps({"model": "m", "modelProvider": "gemini"})}
+        how, asked = self.agy_auth(env={"GEMINI_API_KEY": "k"}, files={**token, **gemini}, keyring="gdbus")
+        self.assertEqual(how[0], "api-key")
+        self.assertIn('modelProvider is "gemini"', how[1])
+        self.assertEqual(asked, [])
+        # The setting decides, not the key: without the key agy refuses to run instead of using the sign-in.
+        self.assertEqual(self.agy_auth(files={**token, **gemini})[0][0], "api-key")
+        # The key without the setting is ignored by agy, and the reason says so.
+        how, _ = self.agy_auth(env={"GEMINI_API_KEY": "k"}, files=token)
+        self.assertEqual(how[0], "oauth")
+        self.assertIn("GEMINI_API_KEY is set, but agy uses it only with modelProvider", how[1])
+        self.assertNotIn("GEMINI_API_KEY", self.agy_auth(files=token)[0][1])
+        # A provider this code does not know is treated as the restricted kind.
+        other = {".gemini/antigravity-cli/settings.json": json.dumps({"modelProvider": "something-new"})}
+        how, _ = self.agy_auth(files={**token, **other})
+        self.assertEqual(how[0], "oauth")
+        self.assertTrue(how[1].startswith("assumed: "), how)
+        self.assertEqual(self.agy_auth(files={".gemini/antigravity-cli/settings.json": "{bad"})[0][0], "oauth")
+
+    def test_the_catalog_records_what_showed_the_sign_in(self):
+        h = detect_fixture()["harnesses"]
+        self.assertEqual(h["claude"]["auth_why"], "claude auth status: authMethod claude.ai, apiProvider firstParty")
+        self.assertTrue(h["antigravity"]["auth_why"].startswith("assumed: "))
 
     def test_detect_runs_its_commands_at_once_with_the_same_result(self):
         # Some CLI commands take seconds each: detect starts them together, and the catalog is what it was.
@@ -212,6 +302,36 @@ class ClaudeAdapterTests(unittest.TestCase):
         })
         self.assertEqual(c["skill_dirs"], [str(FAKE_HOME / ".claude" / "skills")])
         self.assertEqual((c["plugin_cmd"], c["mcp_cmd"]), ("claude plugin list", "claude mcp list"))
+        self.assertEqual(c["auth"], "oauth")  # the fixture is a subscription sign-in
+
+    def claude_auth(self, status, env=None):
+        """auth() with `claude auth status` printing status (a dict as JSON, a string as is, None: no command)."""
+        def runner(cmd):
+            if status is None:
+                return 127, "claude: command not found"
+            return 0, status if isinstance(status, str) else json.dumps(status)
+        return harnesses.ClaudeAdapter(runner, FAKE_HOME, env=env or {}).auth()
+
+    def test_claude_auth_from_auth_status(self):
+        signed_in = {"loggedIn": True, "apiProvider": "firstParty"}
+        self.assertEqual(self.claude_auth({**signed_in, "authMethod": "claude.ai"}), "oauth")
+        self.assertEqual(self.claude_auth({**signed_in, "authMethod": "api_key"}), "api-key")
+        self.assertEqual(self.claude_auth({**signed_in, "authMethod": "api_key_helper"}), "api-key")
+        self.assertEqual(self.claude_auth({"loggedIn": True, "authMethod": "third_party", "apiProvider": "bedrock"}),
+                         "cloud")
+        # A method this code does not know is treated as the restricted one.
+        self.assertEqual(self.claude_auth({**signed_in, "authMethod": "something_new"}), "oauth")
+        # The key in the environment does not override what the CLI itself reports.
+        self.assertEqual(self.claude_auth({**signed_in, "authMethod": "claude.ai"}, env={"ANTHROPIC_API_KEY": "k"}),
+                         "oauth")
+
+    def test_claude_auth_falls_back_to_the_environment(self):
+        for status in (None, "not json", {"loggedIn": False, "authMethod": "none"}):
+            self.assertEqual(self.claude_auth(status), "oauth")
+            self.assertEqual(self.claude_auth(status, env={"ANTHROPIC_API_KEY": "k"}), "api-key")
+            self.assertEqual(self.claude_auth(status, env={"ANTHROPIC_API_KEY": " "}), "oauth")
+            self.assertEqual(self.claude_auth(status, env={"CLAUDE_CODE_USE_BEDROCK": "1"}), "cloud")
+            self.assertEqual(self.claude_auth(status, env={"CLAUDE_CODE_USE_VERTEX": "0"}), "oauth")
 
     def test_nonzero_help_marks_claude_broken(self):
         base = fixture_runner()
@@ -294,14 +414,41 @@ class ClaudeAdapterTests(unittest.TestCase):
         self.assertEqual(top_effort(cat, "claude", "opus"), "max")
         self.assertEqual(top_effort(cat, "claude", "haiku"), "default")
 
-    def test_detect_session_harness(self):
-        cat = detect_fixture()
-        self.assertEqual(harnesses.detect_session_harness(cat, env={"CLAUDECODE": "1"}), "claude")
-        self.assertEqual(harnesses.detect_session_harness(cat, env={"CLAUDE_CODE_ENTRYPOINT": "cli"}), "claude")
-        self.assertEqual(harnesses.detect_session_harness(cat, env={"ANTIGRAVITY_CLI_ALIAS": "agy"}), "antigravity")
-        self.assertEqual(harnesses.detect_session_harness(cat, env={}), "antigravity")
-        claude_only = {"harnesses": {"claude": cat["harnesses"]["claude"]}}
-        self.assertEqual(harnesses.detect_session_harness(claude_only, env={}), "claude")
+    def test_session_harness_is_the_nearest_harness_cli_among_the_ancestors(self):
+        found = harnesses.session_evidence
+        self.assertEqual(found(env={}, ancestors=["bash", "claude", "gnome-shell"]),
+                         ("claude", "ancestor process claude"))
+        self.assertEqual(found(env={}, ancestors=["zsh", "agy", "tmux"])[0], "antigravity")
+        # A CLI started from inside the other harness's shell: the nearest one runs the session, whatever the
+        # variables it inherited say.
+        self.assertEqual(found(env={"CLAUDECODE": "1"}, ancestors=["bash", "agy", "bash", "claude"])[0], "antigravity")
+        self.assertEqual(found(env={}, ancestors=["bash", "claude", "bash", "agy"])[0], "claude")
+
+    def test_session_harness_from_the_variables_a_cli_sets_when_no_ancestor_is_one(self):
+        found = harnesses.session_evidence
+        self.assertEqual(found(env={"CLAUDECODE": "1"}, ancestors=["bash", "node"]),
+                         ("claude", "environment CLAUDECODE"))
+        self.assertEqual(found(env={"CLAUDE_CODE_ENTRYPOINT": "cli"}, ancestors=[])[0], "claude")
+        # Settings a user exports for agy are in every shell, so they mark nothing.
+        self.assertIsNone(found(env={"AGY_ADC_AUTH": "1", "ANTIGRAVITY_PROJECT_ID": "p"}, ancestors=["bash"])[0])
+
+    def test_session_harness_is_never_guessed(self):
+        name, why = harnesses.session_evidence(env={}, ancestors=["bash", "sshd", "systemd"])
+        self.assertIsNone(name)
+        self.assertIn("no harness CLI among the ancestor processes", why)
+        self.assertIsNone(harnesses.detect_session_harness(env={}, ancestors=[]))
+
+    def test_session_harness_override_names_it_outright(self):
+        env = {harnesses.SESSION_OVERRIDE: "antigravity", "CLAUDECODE": "1"}
+        self.assertEqual(harnesses.detect_session_harness(env=env, ancestors=["bash", "claude"]), "antigravity")
+        # A name that is no harness is ignored, not trusted.
+        self.assertEqual(harnesses.detect_session_harness(env={harnesses.SESSION_OVERRIDE: "nope"},
+                                                          ancestors=["claude"]), "claude")
+
+    def test_ancestor_names_start_at_this_process_parent(self):
+        names = harnesses._ancestor_names()
+        me = subprocess.run(["ps", "-o", "comm=", "-p", str(os.getppid())], capture_output=True, text=True).stdout
+        self.assertEqual(names[0], os.path.basename(me.strip()))
 
     def test_claude_mcp_status_parsing_and_nonzero_rc(self):
         base = fixture_runner()

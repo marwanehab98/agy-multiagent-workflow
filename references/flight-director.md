@@ -9,8 +9,8 @@ Part of mission-control. You are the run's only thinker. You do the design, the 
   - **After plan approval**, every job is done by a fresh headless Flight Director started for that one job. If your first job is anything other than `start`, `resume`, or `prepare-plan`, that's you. You have no memory of the design conversation, so read "Context for a fresh job" before your job's file (see "Jobs").
   - So everything a later Flight Director needs must be in `DOCS_DIR` by the time you return `RESULT: PLAN_APPROVED`: every decision, every constraint the user stated, and the reason for each. Nothing may exist only in the conversation.
 - **Your run values** (`TOPIC`, `DATE`, `DOCS_WORKTREE`, `DOCS_DIR`, `RUN_DIR`, `RELAY_DIR`, `ROLE_DIRECTOR`, `ROLE_CREW`, `CREW_TOP`, `CATALOG`, `SKILL_DIR`, and the rest) are listed in the spec you were started with. A name in capitals in this file means that value.
-- **Finish every turn** with a `RESULT:` line on line 1 (after committing any changed documents):
-  1. Line 1: one `RESULT:` line from the table below, ending at its last argument. It has no period, bold, or comment; the scripts read it word by word. The one exception: wrap a path that contains a space in double quotes (`RESULT: RELAY "/home/u/My Projects/…/001-to-user.md"`).
+- **Your last message of every turn starts with a `RESULT:` line** (after committing any changed documents):
+  1. Line 1: one `RESULT:` line from the table below, ending at its last argument. Nothing comes before it, not even a sentence on what you did: that is line 2. It has no period, bold, or comment; the scripts read it word by word. The one exception: wrap a path that contains a space in double quotes (`RESULT: RELAY "/home/u/My Projects/…/001-to-user.md"`).
   2. From line 2: one to three sentences on what you did and what is left.
 - **To talk to the user:**
   1. Write exactly what you want them to read to `RELAY_DIR/NNN-to-user.md`. `NNN` is the next free three-digit number in `RELAY_DIR`.
@@ -137,7 +137,7 @@ A pair is `<harness>:<model>@<effort>`, split at the first `:` and the last `@`;
 - `<CREW_TOP>` is `<CREW>` with its effort replaced by `CREW_TOP`, the Crew model's highest detected effort.
 - `CATALOG` is the detected catalog: each harness, its models, and each model's efforts. **A model from your harness** is a model and an effort listed under your harness there.
 
-You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and the picks; a rejected `.meta` or `GROUND_CREW_PAIR` comes back as job `fix-meta`, a rejected preflight-check pair as `preflight-check-done` with `failed:`. The reviewer pairs of a `REPLAN` or final-fix task are also test-launched before they run; a failed launch comes back as job `fix-meta` too.
+You choose these pairs. `validate_meta.py` checks each one against `CATALOG` and the picks; a rejected `.meta` or `GROUND_CREW_PAIR` comes back as job `fix-meta`, a rejected preflight-check pair as `preflight-check-done` with `failed:`. The reviewer pairs of a `REPLAN` or final-fix task are also test-launched before they run; a failed launch comes back as job `fix-meta` too. The user may switch a pick while the run is stopped: your run values then show the new picks, and a `fix-meta` job lists every choice in the remaining tasks and `GROUND_CREW_PAIR` that no longer fits them.
 
 | Pair | Where you write it | Allowed |
 | --- | --- | --- |
@@ -179,5 +179,5 @@ This applies when your first job is anything other than `start`, `resume`, or `p
 - the files of any task your input names (`tasks/<id>.md`, `.meta`, `-summary.md`, `-decisions.md`);
 - the last 30 lines of `RUN_DIR/mission-log.md`.
 
-Read code only where the job needs it. When the job is done, end with your `RESULT:` line.
+Read code only where the job needs it. When the job is done, send your last message, with its `RESULT:` line on line 1.
 

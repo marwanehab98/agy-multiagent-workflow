@@ -759,7 +759,7 @@ class Prompts(Base):
     def test_usage_limit_on_commit_worker_preserves_uncommitted_work(self):
         self.behave("dirty", "usage", "commit-all", "pass", "pass")
         last, _ = self.expect(30, "PROMPT")
-        self.assertTrue(last.endswith(" retry pause stop"), last)
+        self.assertTrue(last.endswith(" retry switch pause stop"), last)
         self.expect(41, "PAUSED", "--reply", "pause")
         self.assertEqual(self.expect(30, "PROMPT")[0], last)
         dirty_files = list(self.impl.glob("dirty_*.txt"))
@@ -983,7 +983,7 @@ class Replan(Base):
         self.replan_to("01a")
         self.behave("usage")
         last, _ = self.expect(30, "PROMPT", "--director-result", self.result_file(f"RESULT: REPLAN {self.base} 01a"))
-        self.assertTrue(last.endswith("retry pause stop"), last)
+        self.assertTrue(last.endswith("retry switch pause stop"), last)
         self.assertIn("test launch of antigravity:small@low", Path(last.split()[1]).read_text())
         self.assertEqual(self.st("META_FAILS"), None)
         self.behave("ok", "commit", "pass", "pass", "commit", "pass", "pass")

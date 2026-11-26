@@ -99,7 +99,7 @@ class Review(Finish):
         self.behave("usage-edit", "pass")
         last, _ = self.expect(30, "PROMPT")
         self.assertIn("5-hour limit", self.prompt_text(last))
-        self.assertTrue(last.endswith(" retry pause stop"), last)
+        self.assertTrue(last.endswith(" retry switch pause stop"), last)
         # "pause" changes nothing: the next call shows the same prompt.
         paused, _ = self.expect(41, "PAUSED", "--reply", "pause")
         again, _ = self.expect(30, "PROMPT")
@@ -302,7 +302,7 @@ class Fixes(Finish):
         self.unproved_fix()
         self.behave("usage")
         last, _ = self.result("RESULT: FINAL_FIX F1", 30, "PROMPT")
-        self.assertTrue(last.endswith(" retry pause stop"), last)
+        self.assertTrue(last.endswith(" retry switch pause stop"), last)
         text = self.prompt_text(last)
         self.assertIn("The test launch of antigravity:small@low hit its model's usage limit", text)
         self.assertIn("5-hour limit", text)
