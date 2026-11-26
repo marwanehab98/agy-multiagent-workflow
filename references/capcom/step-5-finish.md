@@ -12,6 +12,7 @@ Part of mission-control. Everything in `<SKILL_DIR>/references/capsule-communica
 | `CONSULT <ask_file>` (22) | Send job `consult` with `INPUT=<ask_file>`. When the Flight Director returns `RESULT: ANSWER <answer_file>`, run `FINISH --answer <answer_file>` and branch again. |
 | `PROMPT <file> <reply>...` (30) | A fixed prompt, handled as in Step 4, with `FINISH --reply <word>`. |
 | `PAUSED <file>` (41) | Handled as in Step 4. |
+| `SWITCH <file>` (42) | Handled as in Step 4. |
 | `STOP <reason>` (40) | Dispatch nothing more and go to item 7. |
 
 4. **Open the PR (or finish locally):** wherever this item invokes `touchdown`, you say only what that skill gives you to say: its announcement line ("I'm using the touchdown skill to complete this work.") and its options menu, both exactly as it words them (Rule 14). It also says to cite the verification log: don't. The branch is already verified, and the closing report gives the evidence.

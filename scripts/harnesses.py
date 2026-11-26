@@ -6,12 +6,15 @@ Usage:
   python3 -I harnesses.py skill-dir --catalog <file> --harness H --skill NAME
   python3 -I harnesses.py top-effort --catalog <file> --harness H --model M
   python3 -I harnesses.py install-dirs [--fixtures DIR --home DIR]   # name<TAB>skills folder<TAB>found|missing
+  python3 -I harnesses.py session     # SESSION <harness> (<why>), or exit 1: SESSION unknown (<why>)
 
 `detect` runs harness CLI commands and writes a catalog:
   {"detected_at": iso, "harnesses": {name: {binary, version, styles, models,
    skills: {name: folder}, plugins: [enabled], mcp: {name: ok}, broken: null|str, read_sandbox: bool,
-   skill_dirs: [folder], plugin_cmd: str, mcp_cmd: str}}}
+   auth: "oauth"|"api-key"|"cloud", auth_why: str, skill_dirs: [folder], plugin_cmd: str, mcp_cmd: str}}}
 skill_dirs, plugin_cmd and mcp_cmd say where a missing requirement belongs (roles.py check prints them).
+auth is how the harness is signed in, and auth_why what showed it; while any harness is "oauth", roles.py keeps
+every role on the harness of the session that runs the mission.
 A harness whose binary is missing is left out; one whose model list parses empty is
 recorded with `broken` set to the start of the raw output.
 `args --state` reads CATALOG and the LAUNCH_STYLE_ keys from a run's state file; `args --catalog` (before
@@ -53,6 +56,7 @@ FIXTURE_FILES = {
     ("claude", "--help"): "claude_help.txt",
     ("claude", "plugin", "list"): "claude_plugin_list.txt",
     ("claude", "mcp", "list"): "claude_mcp_list.txt",
+    ("claude", "auth", "status"): "claude_auth_status.json",
 }
 
 
@@ -77,6 +81,11 @@ def fixture_runner(fixtures, overrides=None):
         return 0, path.read_text(encoding="utf-8")
     run.fixtures = True
     return run
+
+
+def _on(val):
+    """Whether an environment switch is set to something other than empty, 0 or false."""
+    return str(val or "").strip().lower() not in ("", "0", "false")
 
 
 def _summarize_tool_args(info, limit=80):
@@ -176,6 +185,12 @@ class Adapter:
     extra_env = {}
     styles = []
     version_cmd = ["--version"]
+    auth_cmd = None  # the command that reports how the CLI is signed in, for a CLI that has one
+    # What marks a session of this harness, for session_evidence: the executable names of its CLI as an ancestor
+    # process, and the variables the CLI itself sets for the commands it runs (never ones a user sets to configure
+    # it, which are there in any shell).
+    session_procs = ()
+    session_env = ()
     exe_state_key = ""
     resume_flag = ""
     json_output_args = ["--output-format", "json"]
@@ -199,6 +214,16 @@ class Adapter:
             return None
         m = re.search(r"\d+(?:\.\d+)+", out)
         return {"binary": self.binary, "version": m.group(0) if m else out.strip()}
+
+    def auth_evidence(self):
+        """(how, why): how this harness is signed in, from what its workers will get, and what showed it. how is
+        "oauth" (an account sign-in, such as a subscription), "api-key", or "cloud" (a cloud provider's
+        credentials); the catalog records both (auth, auth_why). When nothing settles it, the answer is "oauth",
+        the one roles.py restricts, and why says that it was assumed."""
+        raise NotImplementedError
+
+    def auth(self):
+        return self.auth_evidence()[0]
 
     def models(self):
         raise NotImplementedError
@@ -277,6 +302,10 @@ class Adapter:
 
 class AntigravityAdapter(Adapter):
     name, binary = "antigravity", "agy"
+    # A command run in an agy session is a descendant of the agy process (live 2026-11-26, 1.5.18, an interactive
+    # session; a -p worker's too: common.py stops them through it). No variable is known to be set by agy for its
+    # commands: ANTIGRAVITY_* and AGY_* are settings a user exports.
+    session_procs = ("agy",)
     cumulative_usage = True  # live run 2026-11-23: a resumed turn reported turns=2 and the first turn's tokens too
     styles = ["slug", "flag"]
     models_cmd = ("models",)
@@ -286,6 +315,66 @@ class AntigravityAdapter(Adapter):
     def read_sandbox(self):
         rc, out = self.run("--help")
         return rc == 0 and all(f in out for f in ("--sandbox", "--settings"))
+
+    # Where agy keeps the saved Google sign-in (cli-facts.md): the OS keyring under this service and account, or,
+    # where it cannot use one, this file under ~/.gemini/antigravity-cli. Only their presence is looked at.
+    KEYRING = ("gemini", "antigravity")
+    TOKEN_FILE = "antigravity-oauth-token"
+
+    def user_settings(self):
+        """userSettings of ~/.gemini/config/config.json ({} when the file is missing or unreadable)."""
+        try:
+            data = json.loads((self.home / ".gemini" / "config" / "config.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        settings = data.get("userSettings") if isinstance(data, dict) else None
+        return settings if isinstance(settings, dict) else {}
+
+    def model_provider(self):
+        """modelProvider in ~/.gemini/antigravity-cli/settings.json ("" when unset or the file is unreadable)."""
+        try:
+            data = json.loads((self.home / ".gemini" / "antigravity-cli" / "settings.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return ""
+        return _as_text(data.get("modelProvider")).strip() if isinstance(data, dict) else ""
+
+    def saved_sign_in(self):
+        """Where a saved Google sign-in is found, or "": its token file, or its keyring entry. The keyring is
+        asked only whether the entry exists (Secret Service SearchItems returns item paths; macOS `security`
+        without -g or -w prints attributes): the token is never read. A command the system lacks finds nothing."""
+        if (self.home / ".gemini" / "antigravity-cli" / self.TOKEN_FILE).is_file():
+            return f"token file ~/.gemini/antigravity-cli/{self.TOKEN_FILE}"
+        service, account = self.KEYRING
+        rc, out = self.runner(["gdbus", "call", "--session", "--dest", "org.freedesktop.secrets", "--object-path",
+                               "/org/freedesktop/secrets", "--method", "org.freedesktop.Secret.Service.SearchItems",
+                               f"{{'service': '{service}', 'username': '{account}'}}"])
+        if rc == 0 and "/org/freedesktop/secrets/" in out:
+            return f"keyring entry {account} on {service}"
+        rc, _ = self.runner(["security", "find-generic-password", "-s", service, "-a", account])
+        return f"Keychain entry {account} on {service}" if rc == 0 else ""
+
+    def auth_evidence(self):
+        """agy has no command that reports its sign-in (1.5.18), so each way to connect is looked for where agy
+        itself reads it (cli-facts.md): Application Default Credentials (AGY_ADC_AUTH, or enableAdc in its user
+        settings); the Gemini API, which agy uses only with modelProvider "gemini" in its settings.json, and then
+        requires GEMINI_API_KEY (without the key it refuses to run: it never falls back to the sign-in); else the
+        saved Google sign-in. GEMINI_API_KEY without that setting changes nothing: agy stays on the sign-in
+        (live 2026-11-26). GOOGLE_APPLICATION_CREDENTIALS alone is not a way to connect either."""
+        if _on(self.env.get("AGY_ADC_AUTH")):
+            return "cloud", "AGY_ADC_AUTH is set (Application Default Credentials)"
+        if self.user_settings().get("enableAdc") is True:
+            return "cloud", "enableAdc is on in ~/.gemini/config/config.json (Application Default Credentials)"
+        provider = self.model_provider()
+        if provider == "gemini":
+            return "api-key", 'modelProvider is "gemini" in ~/.gemini/antigravity-cli/settings.json (Gemini API key)'
+        ignored = ("; GEMINI_API_KEY is set, but agy uses it only with modelProvider \"gemini\" in its settings.json"
+                   if str(self.env.get("GEMINI_API_KEY") or "").strip() else "")
+        if provider:
+            return "oauth", f"assumed: modelProvider {provider!r} in agy's settings.json is not one this code knows"
+        found = self.saved_sign_in()
+        if found:
+            return "oauth", f"saved Google sign-in: {found}{ignored}"
+        return "oauth", f"assumed: no Gemini API or ADC setting, and no saved sign-in was found to confirm it{ignored}"
 
     @classmethod
     def permission_args(cls, access, write_dirs=(), git_dirs=(), workdir=None, mcp=False):
@@ -503,8 +592,13 @@ _AGY_WAITING_RE = re.compile(r"waiting for \d+ background task")
 
 class ClaudeAdapter(Adapter):
     name, binary = "claude", "claude"
+    # Live 2026-11-26 (2.1.330, desktop app): the Bash tool's shell is a child of the `claude` process and has both
+    # variables. The variables also cover an install whose process is named after its runtime (node).
+    session_procs = ("claude",)
+    session_env = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
     styles = ["flag"]
     models_cmd = ("--help",)
+    auth_cmd = ("auth", "status")
     exe_state_key = "CLAUDE"
     resume_flag = "--resume"
     stream_output_args = ["--output-format", "stream-json", "--verbose"]
@@ -557,6 +651,33 @@ class ClaudeAdapter(Adapter):
     def read_sandbox(self):
         rc, out = self.run("--help")
         return rc == 0 and all(f in out for f in ("--permission-mode", "--allowedTools", "--strict-mcp-config"))
+
+    # authMethod values of `claude auth status` that are a key, not an account sign-in.
+    KEY_AUTH_METHODS = ("api_key", "api_key_helper")
+
+    def auth_evidence(self):
+        """`claude auth status` prints JSON (live 2026-11-26, 2.1.332, a subscription sign-in: loggedIn true,
+        authMethod "claude.ai", apiProvider "firstParty"). An apiProvider other than firstParty is a cloud provider;
+        a key authMethod is an API key; any other signed-in method counts as OAuth. A CLI without the command, or
+        signed out, is judged by the environment variables that select a provider or carry a key."""
+        raw = self.run(*self.auth_cmd)[1]
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and data.get("loggedIn"):
+            method, provider = _as_text(data.get("authMethod")), _as_text(data.get("apiProvider"))
+            said = f"claude auth status: authMethod {method or '?'}, apiProvider {provider or '?'}"
+            if provider not in ("", "firstParty") or method == "third_party":
+                return "cloud", said
+            return ("api-key" if method in self.KEY_AUTH_METHODS else "oauth"), said
+        for k in ("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"):
+            if _on(self.env.get(k)):
+                return "cloud", f"{k} is set"
+        for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+            if str(self.env.get(k) or "").strip():
+                return "api-key", f"{k} is set"
+        return "oauth", "assumed: claude auth status reported no sign-in, and no key or provider variable is set"
 
     @classmethod
     def permission_args(cls, access, write_dirs=(), git_dirs=(), workdir=None, mcp=False):
@@ -786,18 +907,59 @@ def get_adapter(harness):
     return ADAPTERS[harness]
 
 
-def detect_session_harness(catalog, env=None):
+SESSION_OVERRIDE = "MISSION_CONTROL_SESSION_HARNESS"  # names the session's harness outright (tests, odd setups)
+
+
+def _ancestor_names():
+    """The executable names of this process's ancestors, nearest first (`ps` comm, without its folder). Empty where
+    `ps` is missing or fails."""
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,comm="], capture_output=True, text=True,
+                             errors="replace", timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    table = {}
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = (int(parts[1]), os.path.basename(parts[2].strip()))
+    names, pid, seen = [], os.getpid(), set()
+    while pid in table and pid not in seen:
+        seen.add(pid)
+        pid = table[pid][0]
+        if pid in table:
+            names.append(table[pid][1])
+    return names
+
+
+def session_evidence(env=None, ancestors=None):
+    """(harness or None, why): the harness whose CLI runs the session this process was started from. Each adapter
+    names what marks its sessions; nothing is guessed. In order:
+    - SESSION_OVERRIDE in the environment, when it names a known harness;
+    - the nearest ancestor process that is a harness CLI (Adapter.session_procs), so a CLI started from inside
+      another harness's shell is still the one detected;
+    - the variables a CLI sets for the commands it runs (Adapter.session_env), when exactly one harness's are set.
+    None when none of these settles it: the caller asks for --session-harness."""
     env = os.environ if env is None else env
-    harnesses = catalog.get("harnesses", {})
-    if (env.get("CLAUDECODE") or env.get("CLAUDE_CODE_ENTRYPOINT")) and "claude" in harnesses:
-        return "claude"
-    if (env.get("ANTIGRAVITY_CLI_ALIAS") or any(k.startswith(("ANTIGRAVITY_", "AGY_")) and env.get(k) for k in env)) and "antigravity" in harnesses:
-        return "antigravity"
-    if "antigravity" in harnesses:
-        return "antigravity"
-    if len(harnesses) == 1:
-        return next(iter(harnesses))
-    return "antigravity"
+    named = str(env.get(SESSION_OVERRIDE) or "").strip()
+    if named in ADAPTERS:
+        return named, f"{SESSION_OVERRIDE}={named}"
+    for proc in (_ancestor_names() if ancestors is None else ancestors):
+        for name, cls in ADAPTERS.items():
+            if proc in cls.session_procs:
+                return name, f"ancestor process {proc}"
+    marked = {name: [k for k in cls.session_env if env.get(k)] for name, cls in ADAPTERS.items()}
+    marked = {name: keys for name, keys in marked.items() if keys}
+    if len(marked) == 1:
+        name, keys = next(iter(marked.items()))
+        return name, f"environment {' '.join(keys)}"
+    if marked:
+        return None, "the environment marks more than one harness: " + ", ".join(sorted(marked))
+    return None, "no harness CLI among the ancestor processes, and no harness's variables in the environment"
+
+
+def detect_session_harness(env=None, ancestors=None):
+    return session_evidence(env, ancestors)[0]
 
 
 def _prefetch(adapters, runner):
@@ -807,7 +969,7 @@ def _prefetch(adapters, runner):
     fixtures = getattr(runner, "fixtures", False)
     jobs = [(a, args) for a in adapters if fixtures or shutil.which(a.binary)
             for args in dict.fromkeys((tuple(a.version_cmd), tuple(a.models_cmd), ("--help",), ("plugin", "list"),
-                                       ("mcp", "list")))]
+                                       ("mcp", "list"), *([tuple(a.auth_cmd)] if a.auth_cmd else [])))]
     if not jobs:
         return
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
@@ -825,11 +987,12 @@ def detect(runner, home, env=None):
         if not found:
             continue
         models = a.models()
+        auth, auth_why = a.auth_evidence()
         cat["harnesses"][name] = {
             "binary": found["binary"], "version": found["version"],
             "styles": list(a.styles), "models": models, "skills": a.skills(), "plugins": a.plugins(),
             "mcp": a.mcp(), "broken": None if models else (a.raw_models()[:400] or "no output"),
-            "read_sandbox": a.read_sandbox(),
+            "read_sandbox": a.read_sandbox(), "auth": auth, "auth_why": auth_why,
             "skill_dirs": [str(d) for d in a.user_skill_dirs()],
             "plugin_cmd": f"{a.binary} plugin list", "mcp_cmd": f"{a.binary} mcp list",
         }
@@ -887,6 +1050,7 @@ def main(argv=None):
     s.add_argument("--catalog", required=True)
     s.add_argument("--harness", required=True)
     s.add_argument("--skill", required=True)
+    sub.add_parser("session")
     i = sub.add_parser("install-dirs")
     i.add_argument("--fixtures")
     i.add_argument("--home")
@@ -916,6 +1080,10 @@ def main(argv=None):
             for name, cls in ADAPTERS.items():
                 a = cls(runner, home, env)
                 print(f"{name}\t{a.user_skill_dirs()[0]}\t{'found' if a.find() else 'missing'}")
+        elif ns.cmd == "session":
+            name, why = session_evidence()
+            print(f"SESSION {name or 'unknown'} ({why})")
+            return 0 if name else 1
         elif ns.cmd == "skill-dir":
             cat = json.loads(Path(ns.catalog).read_text(encoding="utf-8"))
             folder = cat["harnesses"][ns.harness]["skills"].get(ns.skill)

@@ -22,6 +22,8 @@ Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass
 Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 5 item 7
 Exit 41  PAUSED <prompt file>              the user paused at a usage-limit prompt; nothing changed, and the next
                                            call shows the same prompt
+Exit 42  SWITCH <prompt file>              the user asked at a usage-limit prompt to change the picks; nothing changed.
+                                           After switch.py apply, the next call retries on the new picks
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
@@ -47,8 +49,14 @@ Rules the loop enforces:
   its first line names the task's repo.
 - A reviewer that changes the worktree, or stops/fails without settling, is void and replaced; the third
   void in a row prompts retry or stop. A missing VERDICT line gets one new reviewer; a second counts as FIX.
-- A usage limit (a worker's or a test launch's) pauses the task with a retry/pause/stop prompt instead of counting
-  as a failure.
+- A usage limit (a worker's or a test launch's) pauses the task with a retry/switch/pause/stop prompt instead of
+  counting as a failure.
+- After a switch of picks (switch.py apply sets SWITCH_TASKS), the next call first makes what is left of the plan fit
+  the new picks, before any worker starts (after_switch): an open usage-limit prompt is answered as "retry"; the queued
+  tasks' .meta files and GROUND_CREW_PAIR are checked (FIX_META, with SWITCH_FIXMETA holding the file, until they
+  pass; three failures in a row are an error) and their pairs test-launched; then the task in progress moves to its
+  new Crew pair (its .meta CREW, or the same rung of the new ladder in an escalation attempt) with a fresh
+  conversation, and continues from its last commit.
 - The escalation pair must be the ladder's next rung (validate_meta.py pair) and its reset sha must name a commit
   between the task's base and the worktree's HEAD (a short sha is stored in full); two rejected answers prompt the
   user.
@@ -62,12 +70,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (QUEUE_EMPTY, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, ERROR, USAGE_REPLIES,  # noqa: E402
-                    WorkerRunner, Done, Run, paused,
+                    WorkerRunner, Done, Run, paused, prompt_replies, switch_requested,
                     answer_worker, build, drive, first_words, git, next_free, pick_verdict, read_answer, read_meta,
                     repo_key, rest_path, run, save_ask, save_body, tool, usage_prompt, verdict_line, void_prompt,
                     write_atomic, write_prompt)
 from pairs import ladder, parse_pair  # noqa: E402
-from probe import USAGE_LIMIT, Prober, docs_moved, launch_problems, review_pairs  # noqa: E402
+from probe import (USAGE_LIMIT, Prober, docs_moved, launch_problems, review_pairs,  # noqa: E402
+                   step3_problems)
 
 
 # ---------------------------------------------------------------- shared with run_finish.py
@@ -541,10 +550,6 @@ class Loop:
         wt = self.task_impl(t)
         r.set(**{f"IMPL_CONVERSATION_ID_{t}": None})
         a = r.incr(f"ATTEMPT_{t}")
-        meta = self.meta(t)
-        rungs = self.rungs(t)
-        nxt = f"next rung {rungs[a - 1]}" if a <= len(rungs) else "ladder used up"
-        replan = "not allowed" if meta.get("REPLANNED_FROM") else "allowed"
         hist = r.run_dir / "verdicts" / f"{t}-history.md"
         repo = self.task_repo(t)
         parts = [f"task={t}" + (f" repo={repo}" if repo else "")
@@ -556,10 +561,21 @@ class Loop:
         for f in sorted((r.run_dir / "gates").glob(f"{t}-*.log")):
             parts.append(gate_summary(f))
         hist.write_text("".join(parts), encoding="utf-8")
-        line = f"task {t}, tier {meta['TIER']}, attempt {a}, {nxt}, replan {replan}, history {hist}"
+        line, nxt = self.esc_input(t)
         self.set_phase(t, "escalating", **{f"ESC_INPUT_{t}": line, "WAITING_ON": "director"})
         r.log(f"{t} escalation attempt {a}: {nxt}")
         raise Done(ESCALATE, f"ESCALATE {line}")
+
+    def esc_input(self, t):
+        """The escalate job's input for task t's current attempt, and its ladder part (the next rung, from the
+        picks as they are now)."""
+        a = int(self.r.need(f"ATTEMPT_{t}"))
+        meta = self.meta(t)
+        rungs = self.rungs(t)
+        nxt = f"next rung {rungs[a - 1]}" if a <= len(rungs) else "ladder used up"
+        replan = "not allowed" if meta.get("REPLANNED_FROM") else "allowed"
+        hist = self.r.run_dir / "verdicts" / f"{t}-history.md"
+        return f"task {t}, tier {meta['TIER']}, attempt {a}, {nxt}, replan {replan}, history {hist}", nxt
 
     def rungs(self, t):
         """The escalation ladder for task t, computed from the role picks and the task's first crew pick."""
@@ -766,7 +782,7 @@ class Loop:
         phase = self.phase(t)
         if not phase.startswith("prompt:"):
             raise Done(ERROR, f"ERROR NO_PROMPT_OPEN phase={phase}")
-        accepted = r.need(f"PROMPT_ACCEPT_{t}").split()
+        accepted = prompt_replies(phase, r.need(f"PROMPT_ACCEPT_{t}"))
         if word not in accepted:
             raise Done(PROMPT, f"PROMPT {r.need(f'PROMPT_FILE_{t}')} {' '.join(accepted)}")
         name, back = phase.split(":", 1)[1], r.need(f"PROMPT_BACK_{t}")
@@ -775,6 +791,8 @@ class Loop:
             raise Done(STOP, f"STOP user stopped the run at task {t}")
         if word == "pause":
             paused(r, r.need(f"PROMPT_FILE_{t}"))
+        if word == "switch":
+            switch_requested(r, r.need(f"PROMPT_FILE_{t}"))
         if name == "not-ff" and word == "rebuild":
             repo = self.task_repo(t)
             new = git(r.repo_checkout(repo), "rev-parse", f"refs/heads/{r.repo_feature_branch(repo)}")
@@ -807,6 +825,127 @@ class Loop:
             return self.start_impl(t, r.need(f"LAST_IMPL_SPEC_{t}"), kind, self.meta(t)["TITLE"], reuse=False)
         return self.set_phase(t, back)
 
+    # -- after a switch of picks (switch.py apply)
+    def after_switch(self, director_result):
+        """SWITCH_TASKS is set: make what is left of the plan fit the new picks before anything else runs (module
+        docstring). Returns what it used up of the call's arguments: "result" (director_result was the fix-meta
+        answer) and "reply" (the usage-limit prompt a reply would answer is answered)."""
+        r = self.r
+        used = set()
+        if not r.get("SWITCH_TASKS"):
+            return used
+        if r.get("SWITCH_FIXMETA"):
+            if not director_result:
+                raise Done(FIX_META, f"FIX_META {r.need('SWITCH_FIXMETA')}")
+            words = first_words(director_result)
+            if words[:2] == ["RESULT:", "STOP"]:
+                r.log("flight director chose STOP after a switch of picks")
+                raise Done(STOP, "STOP flight director stopped the run after a switch of picks")
+            if words[:2] != ["RESULT:", "META_FIXED"]:
+                raise Done(ERROR, f"ERROR UNEXPECTED_DIRECTOR_RESULT phase=switch: {' '.join(words)[:300]}")
+            r.set(SWITCH_FIXMETA=None, WAITING_ON=None)
+            self.reread_ground_crew()
+            used.add("result")
+        ids = self.queue()
+        if not ids:
+            # Nothing left to build: ground-crew jobs stay on ROLE_DIRECTOR (STEP3_PROBED is unset by the switch).
+            r.set(SWITCH_TASKS=None)
+            return used
+        t = ids[0]
+        if self.phase(t) == "prompt:usage-limit":
+            kind = r.need(f"PROMPT_KIND_{t}")
+            if kind == "probe":
+                back = r.need(f"PROMPT_BACK_{t}")
+            elif kind.startswith("review"):
+                back = f"reviewing:{kind[-1]}"
+            else:
+                back = {"commit": "committing", "fix": "fixing"}.get(kind, "impl")
+            self.set_phase(t, back, WAITING_ON=None)
+            r.log(f"{t} usage-limit prompt answered by the switch of picks: retrying")
+            used.add("reply")
+        state = ("--state", str(r.path))
+        out_file = next_free(r.run_dir, "validate-{n}.txt")
+        rc, out = tool("validate_meta.py", "tasks", *state, "--tasks-dir", str(r.docs / "tasks"),
+                       "--ids", " ".join(ids))
+        ground = r.get("GROUND_CREW_PAIR")
+        if ground:
+            rc2, out2 = tool("validate_meta.py", "harness-pair", *state, "--pair", ground)
+            rc, out = rc or rc2, f"{out}\n{out2}"
+        out_file.write_text(out + "\n", encoding="utf-8")
+        if rc != 0:
+            self.switch_fix_meta(out_file)
+        try:
+            Prober(r, self.runner).advance(review_pairs(r, ids) + ([ground] if ground else []))
+        except Done as d:
+            if d.code == STOP and d.line.startswith("PROBE_FAILED"):
+                self.switch_fix_meta(step3_problems(r, d.line))
+            self.probe_usage(t, d)
+            raise
+        self.move_to_new_pairs(t)
+        r.set(SWITCH_TASKS=None, META_FAILS=0, STEP3_PROBED="yes")
+        r.log(f"tasks {' '.join(ids)} fit the new picks")
+        return used
+
+    def switch_fix_meta(self, out_file):
+        r = self.r
+        if r.incr("META_FAILS") >= 3:
+            raise Done(ERROR, f"ERROR META_INVALID_3_TIMES {out_file}")
+        r.set(SWITCH_FIXMETA=out_file, WAITING_ON="director")
+        r.log(f"the plan does not fit the new picks: {out_file}")
+        raise Done(FIX_META, f"FIX_META {out_file}")
+
+    def reread_ground_crew(self):
+        """GROUND_CREW_PAIR as the flight manifest has it now (a fix-meta job may have changed it there)."""
+        r = self.r
+        manifest = r.get("FLIGHT_MANIFEST")
+        if not manifest or not Path(manifest).is_file():
+            return
+        pair = read_meta(Path(manifest)).get("GROUND_CREW_PAIR")
+        if pair and pair != r.get("GROUND_CREW_PAIR"):
+            r.set(GROUND_CREW_PAIR=pair)
+            r.log(f"GROUND_CREW_PAIR is now {pair}")
+
+    def escalation_pending(self, t):
+        """Whether task t waits on an escalation answer (or its replan): PAIR_<t> is then the last attempt's pair,
+        which nothing uses again."""
+        phase = self.phase(t)
+        if phase.startswith("prompt:"):
+            phase = self.r.get(f"PROMPT_BACK_{t}", "")
+        return phase in ("escalating", "fixmeta", "replan-probe") or phase.startswith("probe:")
+
+    def move_to_new_pairs(self, t):
+        """Task t is in progress and its .meta fits the new picks: move its attempt to the pair it would have
+        started on, and give a worker waiting on a consult answer its new pair. A changed pair gets a fresh
+        conversation; the work it continues is what is committed in the worktree."""
+        r = self.r
+        if self.phase(t) == "start" or not r.get(f"PAIR_{t}"):
+            return
+        meta = self.meta(t)
+        if self.escalation_pending(t):
+            if r.get(f"ESC_INPUT_{t}"):
+                r.set(**{f"ESC_INPUT_{t}": self.esc_input(t)[0]})
+            return
+        old, a = r.need(f"PAIR_{t}"), int(r.get(f"ATTEMPT_{t}", "0"))
+        rungs = self.rungs(t)
+        if a == 0:
+            new = meta["CREW"]
+        elif a <= len(rungs):
+            new = str(rungs[a - 1])
+        else:
+            # Past the ladder, on a pair the user approved: kept while the catalog still has it.
+            rc, _ = tool("validate_meta.py", "pair", "--state", str(r.path), "--task-meta",
+                         str(r.task_file(t, ".meta")), "--pair", old, "--attempt", str(a), "--past-ladder", "yes")
+            new = old if rc == 0 else r.need("ROLE_DIRECTOR")
+        if new != old:
+            r.set(**{f"PAIR_{t}": new, f"IMPL_CONVERSATION_ID_{t}": None})
+            r.log(f"{t} crew pair {old} -> {new}")
+        if self.phase(t) == "consult":
+            kind = r.need(f"TASK_ASK_KIND_{t}")
+            stage = r.get(f"TASK_ASK_STAGE_{t}") or kind[-1]
+            want = meta[f"REVIEW_{stage}"] if kind.startswith("review") else new
+            if want != r.get(f"TASK_ASK_PAIR_{t}"):
+                r.set(**{f"TASK_ASK_PAIR_{t}": want, f"TASK_ASK_CONV_{t}": None})
+
     # -- driver
     def current(self):
         t = self.r.get("CURRENT_TASK")
@@ -828,6 +967,13 @@ class Loop:
         if moved:
             docs_moved(self.r)
         t = self.current()
+        if t and reply_word in ("stop", "pause", "switch"):
+            self.reply(t, reply_word)  # these change no pair and start nothing, so they come before a pending switch
+        used = self.after_switch(director_result)
+        if "result" in used:
+            director_result = None
+        if "reply" in used:
+            reply_word = None
         if director_result:
             if not t:
                 raise Done(ERROR, "ERROR NO_CURRENT_TASK")
@@ -881,7 +1027,7 @@ class Loop:
             elif phase == "fixmeta":
                 raise Done(FIX_META, f"FIX_META {self.r.need(f'FIXMETA_FILE_{t}')}")
             elif phase.startswith("prompt:"):
-                acc = self.r.need(f"PROMPT_ACCEPT_{t}")
+                acc = " ".join(prompt_replies(phase, self.r.need(f"PROMPT_ACCEPT_{t}")))
                 raise Done(PROMPT, f"PROMPT {self.r.need(f'PROMPT_FILE_{t}')} {acc}")
             else:
                 raise Done(ERROR, f"ERROR UNKNOWN_PHASE {t} {phase}")

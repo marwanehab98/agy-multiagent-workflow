@@ -21,6 +21,7 @@ from harnesses import _as_text, _one_line, get_adapter, launch_args, pick_style 
 from pairs import Pair, parse_pair  # noqa: E402
 
 QUEUE_EMPTY, WAIT, ESCALATE, FIX_META, CONSULT, PROMPT, STOP, PAUSED, ERROR = 0, 10, 20, 21, 22, 30, 40, 41, 2
+SWITCH = 42  # the user asked, at a usage-limit prompt, to change the picks (switch.py apply) before going on
 
 VERDICTS = ("VERDICT: PASS", "VERDICT: FIX")
 
@@ -92,14 +93,15 @@ def result_words(text):
 
     Flight directors sometimes wrap the line in backticks or bold, end it with a period, or carry on with
     prose on the same line ("RESULT: FLIGHT_MANIFEST_FIXED. The baseline failed because ..."; live test
-    2026-11-15). Take the first non-empty line from "RESULT:", stop at the first sentence break
+    2026-11-15). The first non-empty line must start with "RESULT:" (markup in front of it is allowed, words are
+    not: a sentence that only mentions a RESULT line is not one). Take that line from "RESULT:", stop at the first
+    sentence break
     (a word ending in "." or ";" with more after it, a dash, an unpaired backtick), and drop trailing
     punctuation from each argument. A whole argument in backticks or double quotes is one word, so a
     path with spaces survives (`RESULT: RELAY "/home/u/My Projects/q.md"`).
     """
     line = next((l for l in text.splitlines() if l.strip()), "")
-    m = re.search(r"RESULT:.*", line)
-    line = (m.group(0) if m else line.strip()).replace("*", "")
+    line = (line[line.index("RESULT:"):] if _is_result_line(line) else line.strip()).replace("*", "")
     words = []
     for tok in _RESULT_TOKEN.finditer(line):
         quoted = tok.group(1) if tok.group(1) is not None else tok.group(2)
@@ -121,6 +123,33 @@ def result_words(text):
         if stop:
             break
     return words
+
+
+def _is_result_line(line):
+    """Whether a line starts with RESULT:, allowing the markup a model may put in front of it (bold, backticks, a
+    quote mark, a list dash, a heading mark), but no words."""
+    return line.strip().lstrip("*`>#_- \t").startswith("RESULT:")
+
+
+def lead_with_result(text):
+    """(text, moved): text with its RESULT line first, when a flight director wrote it last.
+
+    The line belongs on line 1, where every reader looks (result_words, the capsule communicator), but a flight
+    director sometimes writes its sentence first and the line after it ("I've written the short design ...",
+    blank line, "RESULT: RELAY <path>"; live 2026-11-26, twice on a start job). That reply is complete, so it is
+    read: the line moves to the top and the rest stays under it, unchanged. Only when nothing is in doubt: the
+    first non-empty line is not a RESULT line, exactly one line starts with RESULT:, and it is the last non-empty
+    line.
+    A RESULT line in the middle of the text, or two of them, is left as it is, for the caller to reject."""
+    lines = text.splitlines()
+    filled = [i for i, l in enumerate(lines) if l.strip()]
+    if not filled or _is_result_line(lines[filled[0]]):
+        return text, False
+    found = [i for i in filled if _is_result_line(lines[i])]
+    if len(found) != 1 or found[0] != filled[-1]:
+        return text, False
+    rest = "\n".join(lines[:found[0]]).rstrip()
+    return f"{lines[found[0]].strip()}\n\n{rest}\n", True
 
 
 def rest_path(words, start):
@@ -1562,9 +1591,10 @@ class WorkerRunner:
 
 # ---------------------------------------------------------------- shared by run_task, run_design and run_finish
 
-USAGE_REPLIES = ["retry", "pause", "stop"]
-RETRY_PAUSE_STOP = ('Reply "retry" once the limit has reset, "pause" to leave the run exactly here and come back '
-                    'later, or "stop" to end the run now (tasks not merged yet are not built).')
+USAGE_REPLIES = ["retry", "switch", "pause", "stop"]
+RETRY_PAUSE_STOP = ('Reply "retry" once the limit has reset, "switch" to change the picks (a model or the harness) '
+                    'and carry on, "pause" to leave the run exactly here and come back later, or "stop" to end the '
+                    'run now (tasks not merged yet are not built).')
 
 
 def usage_prompt(who, detail):
@@ -1576,6 +1606,22 @@ def paused(r, prompt_file):
     """The user paused at a usage-limit prompt: change nothing, so the next call shows the same prompt again."""
     r.log("paused at a usage-limit prompt; the next call shows it again")
     raise Done(PAUSED, f"PAUSED {prompt_file}")
+
+
+def prompt_replies(phase, stored):
+    """The replies an open prompt accepts: the ones stored when it was opened, plus "switch" for a usage-limit
+    prompt opened before that reply existed (a run paused on an older version)."""
+    replies = stored.split()
+    if phase.endswith("usage-limit") and "switch" not in replies:
+        replies.insert(1, "switch")
+    return replies
+
+
+def switch_requested(r, prompt_file):
+    """The user replied "switch" at a usage-limit prompt: change nothing here. The capsule communicator changes the
+    picks (switch.py apply), and the next call retries what the prompt was about on the new picks."""
+    r.log("switch requested at a usage-limit prompt")
+    raise Done(SWITCH, f"SWITCH {prompt_file}")
 
 
 def void_prompt(what, why):

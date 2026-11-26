@@ -41,7 +41,8 @@ def role(tag):
 
 
 def summarize(progress_log):
-    by_role, by_pair = defaultdict(lambda: [0.0, 0, 0, 0]), defaultdict(lambda: [0.0, 0, 0, 0])
+    # Per row: cost, runs, turns, tokens, and how many of its runs reported a cost.
+    by_role, by_pair = defaultdict(lambda: [0.0, 0, 0, 0, 0]), defaultdict(lambda: [0.0, 0, 0, 0, 0])
     total, workers, unknown, total_tokens = 0.0, 0, 0, 0
     for line in Path(progress_log).read_text(encoding="utf-8").splitlines():
         m = LINE.search(line)
@@ -63,6 +64,7 @@ def summarize(progress_log):
             table[key][1] += 1
             table[key][2] += int(turns.group(1)) if turns else 0
             table[key][3] += tk
+            table[key][4] += 1 if cost else 0
     if unknown == workers and total_tokens:
         out = [f"Total: {total_tokens:,} tokens across {workers} worker runs (the harness reports tokens, not cost).", ""]
     else:
@@ -73,7 +75,10 @@ def summarize(progress_log):
     for name, table in (("Role", by_role), ("Pair", by_pair)):
         out += [f"| {name} |" + (" Cost |" if show_cost else "") + " Tokens | Runs | Turns |",
                 "| --- |" + (" ---: |" if show_cost else "") + " ---: | ---: | ---: |"]
-        out += [f"| {k} |" + (f" ${v[0]:.2f} |" if show_cost else "") + f" {v[3]:,} | {v[1]} | {v[2]} |"
+        # A row none of whose runs reported a cost shows n/a, not $0.00: a run that moved to a harness that
+        # reports only tokens was not free.
+        out += [f"| {k} |" + ((f" ${v[0]:.2f} |" if v[4] else " n/a |") if show_cost else "")
+                + f" {v[3]:,} | {v[1]} | {v[2]} |"
                 for k, v in sorted(table.items(), key=lambda kv: (-kv[1][0], -kv[1][3]))]
         out.append("")
     out = out[:-1]

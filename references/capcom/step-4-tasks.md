@@ -14,6 +14,7 @@ Part of mission-control. Everything in `<SKILL_DIR>/references/capsule-communica
    | `CONSULT <ask_file>` (22) | Send job `consult` with `INPUT=<ask_file>`. When the Flight Director returns `RESULT: ANSWER <answer_file>`, run `TASKLOOP --answer <answer_file>` and branch again. |
    | `PROMPT <file> <reply>...` (30) | A fixed prompt. Show the user `<file>`'s contents exactly, and end your turn (`STATE set WAITING_ON=user`). A reply that is one of the listed words: run `TASKLOOP --reply <word>` and branch again. Any other reply that doesn't start with `capcom:`: show the file again, followed by "Reply with exactly one of: <the words>." |
    | `PAUSED <file>` (41) | The user paused at a usage-limit prompt; the script changed nothing. `STATE set WAITING_ON=user`, say exactly "Paused. The run keeps its place: when the limit has reset, say \"continue my mission run for <TOPIC>\" and reply \"retry\".", and end your turn. |
+   | `SWITCH <file>` (42) | The user replied "switch" at a usage-limit prompt; the script changed nothing. Run "Switch picks" (`<SKILL_DIR>/references/capcom/switch.md`). |
    | `STOP <reason>` (40) | Dispatch nothing more and go to Step 5 item 7. |
 
 You don't read verdicts, count rounds, pick pairs, reset worktrees, or merge in this step; the script does all of it.

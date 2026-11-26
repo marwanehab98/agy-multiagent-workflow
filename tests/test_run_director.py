@@ -123,6 +123,35 @@ class RunDirectorTests(Base):
         self.assertTrue(last.startswith("FAILED "), last)
         self.assertIsNone(self.st("DIRECTOR_CONVERSATION_ID"))
 
+    def test_a_result_line_written_last_is_read_and_saved_first(self):
+        # Both replies a sonnet@low Flight Director gave to its start job on 2026-11-26 had this shape.
+        relay = self.run_dir / "relay" / "001-to-user.md"
+        relay.parent.mkdir(parents=True, exist_ok=True)
+        relay.write_text("Do you sign off?\n")
+        text = ("I've written the short design for the two counting functions, and I'm now sending it to you for "
+                f"sign-off.\n\nRESULT: RELAY {relay}\n")
+        self.behave({"do": "response", "text": text, "conv_id": "dir_last"})
+        rc, last = self.director("start", "--state", str(self.state), "--spec", str(self.spec),
+                                 "--pair", "antigravity:big@high", "--keep-open")
+        self.assertEqual(rc, 11, last)
+        self.assertTrue(last.startswith(f"RELAY {relay} "), last)
+        saved = Path(last.split()[-1]).read_text()
+        self.assertEqual(saved.splitlines()[0], f"RESULT: RELAY {relay}")
+        self.assertIn("I've written the short design for the two counting functions", saved)
+        self.assertEqual((self.st("DIRECTOR_CONVERSATION_ID"), self.st("OPEN_RELAY")), ("dir_last", str(relay)))
+        self.assertIn("flight director wrote its RESULT line last", (self.run_dir / "mission-log.md").read_text())
+
+    def test_a_result_line_that_is_neither_first_nor_last_is_still_a_failure(self):
+        for text in ("I did it.\n\nRESULT: COMMITTED\n\nAnd then some more.\n",
+                     "Thinking.\n\nRESULT: COMMITTED\n\nRESULT: PLAN_APPROVED /x\n",
+                     "Not done yet.\n\nThe job says to give `RESULT: COMMITTED` when it is.\n",
+                     "The job says to end with `RESULT: COMMITTED` but I am not done.\n"):
+            self.behave({"do": "response", "text": text})
+            rc, last = self.director("start", "--state", str(self.state), "--spec", str(self.spec),
+                                     "--pair", "antigravity:big@high")
+            self.assertEqual(rc, 1, text)
+            self.assertTrue(last.startswith("FAILED "), last)
+
     def test_missing_relay_target_file_returns_failed_1(self):
         missing = self.run_dir / "does-not-exist.md"
         self.behave({"do": "response", "text": f"RESULT: RELAY {missing}\n", "conv_id": "dir_missing"})

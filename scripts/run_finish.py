@@ -22,6 +22,8 @@ Exit 30  PROMPT <file> <reply> [<reply>]   show <file> to the user exactly; pass
 Exit 40  STOP <reason>                     dispatch nothing more; capsule communicator Step 5 item 7
 Exit 41  PAUSED <prompt file>              the user paused at a usage-limit prompt; nothing changed, and the next
                                            call shows the same prompt
+Exit 42  SWITCH <prompt file>              the user asked at a usage-limit prompt to change the picks; nothing changed.
+                                           After switch.py apply, the next call retries on the new picks
 Exit 2   ERROR <what>                      show the user and stop
 Exit 64  bad usage
 
@@ -29,6 +31,10 @@ A final review that follows a final-fix task is a re-review: its spec adds re-re
 verdict and the fix range, from the heads the previous final review covered (FIN_PREV_VERDICT, FIN_PREV_HEADS, set when
 the final-fix task is queued from FIN_LAST_VERDICT and FIN_REVIEWED_HEADS) to the current ones; multi-repo, one range
 per repo the fix moved. The starting-state check clears them.
+
+After a switch of picks (switch.py apply sets SWITCH_FINISH), the next call answers an open usage-limit prompt as
+"retry", and checks a final-fix task that waits for its test launch against the new picks again. The final reviewer
+and the drift check read their pairs (ROLE_DIRECTOR, ROLE_SAFETY) each time they start.
 """
 import argparse
 import re
@@ -37,7 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # -I drops the script dir from sys.path
 from common import (CONSULT, ESCALATE, PROMPT, STOP, ERROR, USAGE_REPLIES, WorkerRunner, Done, Run,  # noqa: E402
-                    paused, answer_worker, build,
+                    paused, prompt_replies, switch_requested, answer_worker, build,
                     bundled_skills_dir, check_repo_trees, discard_repo_trees, drive, first_words, next_free,
                     pick_verdict, read_answer, repo_key, save_ask, save_body, tool, usage_prompt, verdict_line,
                     void_prompt, write_atomic, write_prompt)
@@ -421,7 +427,7 @@ class Finish:
         phase = self.phase()
         if not phase.startswith("prompt:"):
             raise Done(ERROR, f"ERROR NO_PROMPT_OPEN phase={phase}")
-        accepted = r.need("FIN_PROMPT_ACCEPT").split()
+        accepted = prompt_replies(phase, r.need("FIN_PROMPT_ACCEPT"))
         if word not in accepted:
             raise Done(PROMPT, f"PROMPT {r.need('FIN_PROMPT_FILE')} {' '.join(accepted)}")
         name = phase.split(":", 1)[1]
@@ -431,6 +437,8 @@ class Finish:
             raise Done(STOP, "STOP user stopped the run during the final review")
         if word == "pause":
             paused(r, r.need("FIN_PROMPT_FILE"))
+        if word == "switch":
+            switch_requested(r, r.need("FIN_PROMPT_FILE"))
         if name == "void":
             r.set(VOIDS_FINAL=0)
         if name == "rounds":
@@ -445,10 +453,30 @@ class Finish:
             return self.set_phase("probe")
         self.set_phase("review")
 
+    # -- after a switch of picks (switch.py apply)
+    USAGE_RETRY = {"prompt:usage-limit": "review", "prompt:drift-usage-limit": "drift",
+                   "prompt:probe-usage-limit": "probe"}
+
+    def after_switch(self):
+        """SWITCH_FINISH is set (module docstring). Returns True when it answered the open usage-limit prompt."""
+        r = self.r
+        r.set(SWITCH_FINISH=None)
+        retry = self.USAGE_RETRY.get(self.phase())
+        if retry:
+            r.log("final usage-limit prompt answered by the switch of picks: retrying")
+            self.set_phase(retry, WAITING_ON=None)
+        if self.phase() == "probe" and r.get("FIN_FIX"):
+            self.validate_fix(r.need("FIN_FIX"))
+        return bool(retry)
+
     # -- driver
     def advance(self, director_result=None, reply_word=None, answer_path=None, moved=False):
         if moved:
             docs_moved(self.r)
+        if reply_word in ("stop", "pause", "switch"):
+            self.reply(reply_word)  # these start nothing, so they come before a pending switch
+        if self.r.get("SWITCH_FINISH") and self.after_switch():
+            reply_word = None
         if director_result:
             self.take_result(director_result)
         elif reply_word:
@@ -464,7 +492,8 @@ class Finish:
             if phase == "consult":
                 raise Done(CONSULT, f"CONSULT {self.r.need('FIN_ASK_FILE')}")
             if phase.startswith("prompt:"):
-                raise Done(PROMPT, f"PROMPT {self.r.need('FIN_PROMPT_FILE')} {self.r.need('FIN_PROMPT_ACCEPT')}")
+                acc = " ".join(prompt_replies(phase, self.r.need("FIN_PROMPT_ACCEPT")))
+                raise Done(PROMPT, f"PROMPT {self.r.need('FIN_PROMPT_FILE')} {acc}")
             if phase == "reviewing":
                 self._discard_or_error()
                 self.do_review()

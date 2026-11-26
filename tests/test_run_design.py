@@ -123,6 +123,33 @@ class Happy(Design):
         self.assertIn("preflight-check-done", last)
         self.assertEqual(self.calls()[1]["conversation"], "conv_1")
 
+    def test_consult_answer_after_a_switch_of_the_safety_pick_goes_to_a_fresh_worker_on_it(self):
+        # switch.py apply changed ROLE_SAFETY while a lens worker waited on its answer.
+        self.behave("ask", "write-output")
+        self.need(f"NEED lens {self.tmp / 'concepts.md'}", (22, "CONSULT"))
+        self.state.write_text(json.dumps({**self.st(), "ROLE_SAFETY": "antigravity:small@high"}))
+        ans = self.tmp / "ans.md"
+        ans.write_text("Use strict validation.\n")
+        self.expect(20, "DIRECTOR_JOB", "--answer", str(ans))
+        asked, answered = self.calls()
+        self.assertEqual((asked["model"], answered["model"]), ("g", "small"))
+        self.assertFalse(answered["conversation"])
+        self.assertIn("Use strict validation.", answered["prompt"])
+
+    def test_consult_answer_for_a_preflight_pair_the_new_director_cannot_use_fails_the_check(self):
+        self.behave("ask")
+        self.builder(expect=(22, "CONSULT"))
+        cat = json.loads(Path(self.st("CATALOG")).read_text())
+        cat["harnesses"]["other"] = {**cat["harnesses"]["antigravity"]}
+        (self.tmp / "catalog.json").write_text(json.dumps(cat))
+        self.state.write_text(json.dumps({**self.st(), "CATALOG": str(self.tmp / "catalog.json"),
+                                          "ROLE_DIRECTOR": "other:big@high"}))
+        ans = self.tmp / "ans.md"
+        ans.write_text("Use strict validation.\n")
+        last, _ = self.expect(20, "DIRECTOR_JOB", "--answer", str(ans))
+        self.assertIn("preflight-check-done failed: ", last)
+        self.assertEqual(len(self.calls()), 1)
+
     def test_consult_expired_conversation_falls_back_cleanly(self):
         self.behave("ask", "write-output")
         self.builder(expect=(22, "CONSULT"))

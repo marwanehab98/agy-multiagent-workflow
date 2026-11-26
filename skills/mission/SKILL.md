@@ -24,40 +24,18 @@ The session that loads this skill **is the Capsule Communicator**:
 
 - **The user asks to continue or resume an earlier run:** go to "Continue a run" below.
 - **User only wants one stage** (e.g. only brainstorming, writing a plan, running a review, or executing an existing plan): use the dedicated bundled skill (`mission-brief`, `flight-plan`, `launch-plan`, `wind-tunnel`, `flight-readiness`, `cross-check`, `spec-drift`, `red-green`, `gatecheck`, `touchdown`) directly.
-- **Otherwise:** run Setup below, then go straight to Step 1 (`references/capcom/step-1-intake.md`) in this same session.
+- **Otherwise:** run Setup below, which goes straight on to Step 1 (`references/capcom/step-1-intake.md`) in this same session.
 
 `SKILL_DIR` is the plugin/bundle root containing `scripts/` and `references/` (two directories above this `SKILL.md` in a plugin or repo checkout, or this skill's folder in a flat `install.sh --harness` install). `CFG` is `$HOME/.config/mission-control`, and `CATALOG` is `<CFG>/catalog.json`.
 
 ### Setup
 
-1. **Detect:** run `mkdir -p <CFG>`, then `python3 -I <SKILL_DIR>/scripts/harnesses.py detect --out <CATALOG>`.
-2. **Remembered picks:** if the user's request names a pick for all three roles, skip this item and go to item 3: the picks they named come before the ones remembered. Otherwise run `python3 -I <SKILL_DIR>/scripts/roles.py remembered --roles <CFG>/roles.json --catalog <CATALOG>`.
-   - **`AVAILABLE yes`:** show the three `role=pair` lines in one block, then ask "Use these picks again?" as in "Asking" below, with the options `same` and `new`. This is a fixed prompt. "same" goes to item 4 with those picks; "new" goes to item 3.
-   - **`AVAILABLE no <role> <pair>`** (one line per vanished pick): for each line, say exactly "Your last <role> pick, <pair>, isn't available any more, so pick the <role> again." and ask that role as in item 3. Keep the remembered picks that are still available, and go to item 4. Never choose a replacement yourself, however close a model looks or whatever the user delegates to you: only a row the user picks from the menu counts.
-   - **`NONE`:** go to item 3.
-3. **Ask the three roles,** in this order: Flight Director (`director`), Range Safety (`safety`), Crew (`crew`). For each, ask three questions in turn, as in "Asking" below. `MENU` means `python3 -I <SKILL_DIR>/scripts/roles.py menu --catalog <CATALOG>`:
-   1. harness: `MENU`;
-   2. model: `MENU --harness <harness>`;
-   3. effort: `MENU --harness <harness> --model <model>`.
-
-   Each menu line is `N<TAB>value<TAB>label`; show any `BROKEN` lines exactly before the question. The question is "<role>: which <harness|model|effort>?", and the rows are its options, labelled with each row's label, in menu order. A menu with exactly one row isn't asked: take that row and say "<role> <harness|model|effort>: <label>, the only option." The pick is `<harness>:<model>@<effort>`, using each chosen row's value. When asking for `crew`, note that its `<model>@<effort>` must differ from the `director` pick so escalation has a higher rung. If the user's opening prompt already named explicit model/effort picks that unambiguously match detected menu rows for all three roles, don't ask the 9 separate questions: show those matched `role=pair` lines in one block, then ask "Use these picks?" as in "Asking" below, with the options `same` and `new`. This is a fixed prompt. "same" goes to item 4 with those picks; "new" asks the three roles as above. Never invent or substitute a row the user didn't name.
-
-   **Asking.** With a multiple-choice question tool (such as `ask_question` / `AskUserQuestion`), ask with it: no option marked recommended, and the options set by the number of rows (not counting the free-text choice the tool adds):
-   - **2–4 rows:** one question, one option per row. Never a `More` option.
-   - **5 or more rows:** pages. The first page is rows 1–3 plus an option `More`, which asks again with the remaining rows the same way, until 4 or fewer remain; those form the last page.
-
-   Without such a tool, write the question, then one line per row, `N. label`. The answer is the row the user selected, or a typed reply that is exactly a row's number, value or label; anything else, including free text that names no row, gets the same question again.
-4. **Check the picks:** run `python3 -I <SKILL_DIR>/scripts/roles.py check --catalog <CATALOG> --jira <yes if the request has a JIRA key, else no> --director <pair> --safety <pair> --crew <pair>`.
-   - **Exit 0:** show any `NOTE` line exactly, and go on.
-   - **Exit 1 with any `MISSING` line:** show every `MISSING` and `UNKNOWN` line exactly, then say exactly "The run can't start until these are fixed. Install what's missing, or choose different picks, then ask me again." Then stop: don't save, and don't start Step 1 (Rule 21).
-   - **Exit 1 with only `UNKNOWN` lines:** show them exactly with a one-line plain-English explanation (e.g. `crew` cannot match the `director` pick), ask each named role again as in item 3, and repeat this item.
-5. **Save:** run `python3 -I <SKILL_DIR>/scripts/roles.py save --roles <CFG>/roles.json --director <pair> --safety <pair> --crew <pair>`.
-6. **Begin coordination in this session:** read `<SKILL_DIR>/references/capsule-communicator.md` in full, then `<SKILL_DIR>/references/capcom/step-1-intake.md`, and execute from Step 1, reading each later step's file as you reach it, using `ROLES_FILE=<CFG>/roles.json`, `SETUP_CATALOG=<CATALOG>`, and the user's original request verbatim.
+Read `<SKILL_DIR>/references/capcom/setup.md` in full and follow it from item 1 (`SKILL_DIR` is the folder that holds `references/capcom/`, as defined above, not this skill's own folder in a plugin): it detects the harnesses, has the user choose the three picks (a saved selection or the menus), checks and saves them, and its last item starts Step 1. "Setup item N" anywhere in this skill means item N of that file.
 
 ### Continue a run
 
 1. Find the run's state file: run `python3 -I <SKILL_DIR>/scripts/workspace.py list-runs --main-checkout "$(git rev-parse --show-toplevel)"` in a single git repo, or `--workspace "$(pwd)"` in a multi-repo parent directory; each line is `<topic> <state file>`. If there is none, say exactly "I can't find a run to continue. Tell me its topic or JIRA key, or ask me to start a new one." and wait. If the user named no topic and several runs have a state file, list their topics as a numbered list and ask which one.
-2. **Picks are fixed for a run.** If the user also asked to change a pick (any role's model or effort), say exactly "Picks are fixed for a run. Reply \"resume\" to continue <TOPIC> with its current picks, or \"new\" to start a new run with new picks." This is a fixed prompt. Change nothing until they reply: no state key, no `roles.json`, no resume. "resume" goes on below; "new" runs Setup.
+2. **A run keeps its picks unless the user asks to switch them.** If the user also asked for other picks (any role's harness, model or effort), go on below: "Resume a run" item 2 then runs "Switch picks" (`<SKILL_DIR>/references/capcom/switch.md`). Never set a pick yourself.
 3. Read `<SKILL_DIR>/references/capsule-communicator.md` and `<SKILL_DIR>/references/capcom/resume.md` in full, and run "Resume a run" with that state file in this same session.
 
 All required skills (`mission-brief`, `flight-plan`, `red-green`, `gatecheck`, `touchdown`, `wind-tunnel`, `flight-readiness`, `cross-check`, `spec-drift`, `launch-plan`) are bundled in this plugin — no external Superpowers or EGM plugin is needed.
@@ -84,7 +62,7 @@ These hold in every step. Where a step seems to conflict with one, the rule wins
 1. **Every subagent is a headless CLI worker started by the bundled scripts.** Whenever a skill or step calls for a subagent or worker, the bundled Python scripts (`run_director.py`, `probe.py`, `run_design.py`, `run_task.py`, `run_finish.py`) invoke the target harness CLI in print mode (`-p`, streaming JSON). Crew and the Flight Director may edit and run commands in their worktree; every other worker gets the harness's read-only profile where it has one (`scripts/harnesses.py`). Nobody skips the dispatch or does the job themselves, and the interactive session's `invoke_subagent` / `define_subagent` / `Agent` / `Task` tools are never used.
 2. **All headless worker calls go through the bundled scripts.** The Capsule Communicator never invokes worker CLIs directly by hand; it only runs the scripts.
 3. **Every worker runs on a pair, and nobody but the user and the Flight Director chooses one.**
-   - **The user's three picks** (Flight Director, Range Safety, Crew) are fixed for a run. Nobody changes a `ROLE_*` or `LAUNCH_STYLE_*` key, or `roles.json`, during a run; a different pick means a new run.
+   - **The user's three picks** (Flight Director, Range Safety, Crew) change during a run only when the user asks ("switch" at a usage-limit prompt, `capcom: switch`, or other picks named when continuing a run), while nothing is running, through "Switch picks" (`references/capcom/switch.md`). `scripts/switch.py` makes the change: nobody sets a `ROLE_*` or `LAUNCH_STYLE_*` key, or edits `roles.json`, by hand.
    - **The Flight Director chooses** each task's reviewers, the preflight check and `GROUND_CREW_PAIR`, from its own harness's detected models, and may start a hard complex task at the Crew model's highest effort (Flight Director "Model choices").
    - **`scripts/validate_meta.py` checks every choice** against the catalog and the picks before it is used. `run_task.py` computes the escalation ladder from the picks.
    - **The Capsule Communicator never picks, changes, or writes a pair.** Model and effort reach the worker CLI only through `harnesses.py args` or the scripts, never typed by hand.
@@ -146,7 +124,7 @@ See `<SKILL_DIR>/references/capsule-communicator.md` ("Rationalizations that bre
 **Red flags.** Stop and re-read the rule if you are about to:
 
 - write a sentence to the user that isn't a relay, a fixed line from a step, a note line from `WATCH`, or a status line from "What you print";
-- choose, substitute, or change a pair, or edit a `ROLE_*` or `LAUNCH_STYLE_*` key, `roles.json`, or a `.meta` file;
+- choose, substitute, or change a pair, or edit a `ROLE_*` or `LAUNCH_STYLE_*` key, `roles.json`, or a `.meta` file (a pick the user switches goes through "Switch picks");
 - type `--model` or `--effort` yourself, or call worker CLIs directly outside the bundled scripts;
 - save picks or start any worker after `roles.py check` exited 1 or a probe printed `PROBE_FAILED`;
 - write spec text by hand;

@@ -270,9 +270,17 @@ class Design:
             raise Done(ERROR, f"ERROR NO_CONSULT_OPEN phase={self.phase()}")
         ans = read_answer(answer_path)
         kind, args = self.need()
-        pair = r.need("DESIGN_PAIR")
-        conv = r.get("DESIGN_ASK_CONV", "")
-        r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None)
+        # The pair as the picks are now: a switch of picks (switch.py apply) may have come since the worker asked.
+        pair = args[1] if kind == "preflight-check" else r.need("ROLE_SAFETY")
+        if kind == "preflight-check":
+            rc, out = tool("validate_meta.py", "harness-pair", "--state", str(r.path), "--pair", pair)
+            if rc != 0:
+                bad = next_free(r.run_dir / "results", "preflight-pair-{n}.txt")
+                bad.write_text(out + "\n", encoding="utf-8")
+                r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None)
+                self.job(DONE_JOB[kind], f"failed: {bad}")
+        conv = r.get("DESIGN_ASK_CONV", "") if pair == r.get("DESIGN_PAIR") else ""
+        r.set(DESIGN_ASK_CONV=None, DESIGN_ASK_FILE=None, DESIGN_PAIR=pair)
         self.set_phase("dispatching", WAITING_ON=None)
         result = answer_worker(self.runner, ans, pair, self.docs_wt, conv, r.need("DESIGN_SPEC"),
                                lambda: self._restore_tree(kind, allow_safety_out=False),
